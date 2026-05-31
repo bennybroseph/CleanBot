@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: CleanBot
+## Notes: A clean interface to manage Playerbots. No more complex trees of buttons!
+## Author: BennyBroseph
+## Version: 0.1
+
+CleanBot.xml
+CleanBot.lua
