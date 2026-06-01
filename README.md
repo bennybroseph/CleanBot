@@ -1,6 +1,6 @@
 # CleanBot
 
-A clean interface to manage Playerbots. No more complex trees of buttons!
+A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex trees of buttons!
 
 Currently Requires: https://github.com/Wishmaster117/mod-multibot-bridge 
 
