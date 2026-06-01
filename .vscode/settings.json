@@ -24,6 +24,7 @@
         "InspectUnit",
         "StaticPopupDialogs",
         "StaticPopup_Show",
-        "UIDropDownMenu_DisableDropDown"
+        "UIDropDownMenu_DisableDropDown",
+        "InspectFrame"
     ]
 }

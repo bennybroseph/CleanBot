@@ -146,15 +146,18 @@ CleanBot_KnownBots = {}  -- global so Commands.lua and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH  = 680
-NS.FRAME_HEIGHT = 560
-NS.TAB_HEIGHT   = 24
-NS.TAB_WIDTH    = 88
-NS.TITLE_H      = 28
-NS.FOOTER_H     = 36
-NS.TOP_BAR_H    = NS.TAB_HEIGHT + 8
-NS.BOT_BAR_H    = NS.TAB_HEIGHT + 8
-NS.PAD          = 6
+NS.FRAME_WIDTH       = 680
+NS.FRAME_HEIGHT      = 560
+NS.TAB_HEIGHT        = 24
+NS.TAB_WIDTH         = 88
+NS.TITLE_H           = 28
+NS.FOOTER_H          = 36
+NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
+NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
+NS.PAD               = 6
+-- Vertical space reserved below the model for the weapon-slot row.
+-- The model height = contentH - EQUIP_WEAPON_PAD, weapon slots sit in that gap.
+NS.EQUIP_WEAPON_PAD  = 60
 
 -- ============================================================
 -- ElvUI skinning helpers
@@ -217,11 +220,15 @@ NS.CleanBot_SelectTopTab = function(index)
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
 
     if index == 2 then
-        for mi, model in ipairs(NS.botModelFrames or {}) do
-            if mi == (NS.activeTabIndex or 0) then model:Show() else model:Hide() end
+        for i, info in ipairs(NS.tabList or {}) do
+            if info.model then
+                if i == NS.selectedTabIndex then info.model:Show() else info.model:Hide() end
+            end
         end
     else
-        for _, model in ipairs(NS.botModelFrames or {}) do model:Hide() end
+        for _, info in ipairs(NS.tabList or {}) do
+            if info.model then info.model:Hide() end
+        end
     end
 end
 
@@ -306,6 +313,7 @@ function CleanBot_BuildFrames()
     NS.CB_ApplyPanelSkin(CleanBotFrame)
 
     NS.CleanBot_SelectTopTab(1)
+
 end
 
 -- ============================================================
@@ -407,6 +415,8 @@ bridgeFrame:RegisterEvent("CHAT_MSG_WHISPER")
 bridgeFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 bridgeFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
 bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+bridgeFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
+bridgeFrame:RegisterEvent("INSPECT_READY")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
@@ -609,9 +619,27 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PLAYER_TARGET_CHANGED" then
-        -- Rebuild party tabs so the Target tab appears/disappears as needed
         if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_RefreshTabs then
             NS.CleanBot_RefreshTabs()
+        end
+
+    elseif event == "UNIT_INVENTORY_CHANGED" then
+        -- Covers equipment changes mid-session (swapping gear, etc.)
+        local unit = ...
+        if unit and NS.tabList and NS.CB_RefreshEquipSlots then
+            for _, info in ipairs(NS.tabList) do
+                if info.unit == unit then
+                    NS.CB_RefreshEquipSlots(info.key, unit)
+                    break
+                end
+            end
+        end
+
+    elseif event == "INSPECT_READY" then
+        -- Fired when NotifyInspect data arrives; GUID identifies which unit.
+        local guid = ...
+        if NS.CB_OnInspectReady then
+            NS.CB_OnInspectReady(guid)
         end
     end
 end)

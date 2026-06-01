@@ -9,6 +9,9 @@ CleanBot.xml
 CleanBot.lua
 Party\CleanBotPartyData.lua
 Party\CleanBotClassData.lua
+Party\CleanBotEquipData.lua
+Party\CleanBotEquip.lua
+Party\CleanBotModel.lua
 Party\CleanBotParty.lua
 CleanBotManageTab.lua
 CleanBotSettingsTab.lua
