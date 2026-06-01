@@ -8,7 +8,9 @@ local NS = CleanBotNS
 -- Per-bot frame registries  (reset on each RefreshTabs call)
 -- ============================================================
 NS.activeBotTabs    = {}
+NS.activeBotNames   = {}  -- [tabIndex] = { name, unit }
 NS.activeTabIndex   = 0
+NS.lastWavedAt      = nil -- bot name we most recently sent a wave to
 NS.botModelFrames   = {}
 NS.botControlFrames = {}
 NS.botRoleDDs        = {}
@@ -29,6 +31,9 @@ NS.botStarUpdaters   = {}
 -- Internal tab helpers
 -- ============================================================
 local function CleanBot_ClearTabs()
+    -- Preserve target-tab selection across rebuilds
+    local wasTargetTab = NS.activeTabIndex == -1
+
     for _, tab in ipairs(NS.activeBotTabs) do
         tab:Hide(); tab:SetParent(nil)
     end
@@ -52,12 +57,19 @@ local function CleanBot_ClearTabs()
     NS.botNcFrames       = {}
     NS.botClassFrames    = {}
     NS.botStarUpdaters   = {}
-    NS.activeTabIndex    = 0
+    NS.activeBotNames    = {}
+    NS.activeTabIndex    = wasTargetTab and -1 or 0
 end
 
-local function CleanBot_SelectTab(index)
+local CleanBot_SelectTab  -- forward-declared so UpdateTargetTab (in CleanBotTarget.lua) can reach it via NS
+CleanBot_SelectTab = function(index)
     if NS.activeTabIndex == index then return end
     NS.activeTabIndex = index
+
+    -- Deselect target tab visuals if it was active
+    if NS.targetTabBtn  then NS.targetTabBtn:SetNormalFontObject(GameFontNormalSmall); NS.targetTabBtn:SetButtonState("NORMAL") end
+    if NS.targetTabModel then NS.targetTabModel:Hide() end
+    if NS.targetTabCtrl  then NS.targetTabCtrl:Hide()  end
 
     for i, tab in ipairs(NS.activeBotTabs) do
         if i == index then
@@ -79,7 +91,14 @@ local function CleanBot_SelectTab(index)
     for i, ctrl in ipairs(NS.botControlFrames) do
         if i == index then ctrl:Show() else ctrl:Hide() end
     end
+
+    local botInfo = NS.activeBotNames and NS.activeBotNames[index]
+    if botInfo and botInfo.name ~= NS.lastWavedAt then
+        NS.lastWavedAt = botInfo.name
+        SendChatMessage("emote wave", "WHISPER", nil, botInfo.name)
+    end
 end
+NS.CB_SelectTab = CleanBot_SelectTab  -- exposed for CleanBotTarget.lua
 
 -- ============================================================
 -- Strategy section builder — shared by combat, non-combat, and class tabs.
@@ -581,6 +600,316 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
 end
 
 -- ============================================================
+-- CB_BuildBotContent
+-- Shared builder: wires up model rotation, star, inner tabs, and all
+-- combat/non-combat/class content for one bot.
+-- ctrl  — right-side control frame (parent for all UI content)
+-- model — DressUpModel frame (parent for star button)
+-- Returns a list of the top-level frames it created inside ctrl/model,
+-- so the Target tab can clear them on target change.
+-- ============================================================
+NS.CB_BuildBotContent = function(ctrl, model, key, botName, botClass, entry, counter)
+    local topFrames = {}
+
+    -- ── Model rotation via right-click drag ───────────────────
+    local modelRotation = 0
+    local dragLastX     = 0
+
+    local dragCapture = CreateFrame("Frame", "CleanBotDragCapture" .. counter, UIParent)
+    dragCapture:SetAllPoints(UIParent)
+    dragCapture:SetFrameStrata("FULLSCREEN_DIALOG")
+    dragCapture:EnableMouse(true)
+    dragCapture:Hide()
+    topFrames[#topFrames + 1] = dragCapture
+
+    local function stopDrag()
+        dragCapture:Hide()
+        SetCursor(nil)
+    end
+    dragCapture:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then stopDrag() end
+    end)
+    dragCapture:SetScript("OnUpdate", function()
+        local x     = select(1, GetCursorPosition())
+        local delta = x - dragLastX
+        dragLastX   = x
+        if delta ~= 0 then
+            modelRotation = modelRotation + delta * 0.013
+            model:SetRotation(modelRotation)
+        end
+    end)
+    model:EnableMouse(true)
+    model:SetScript("OnMouseDown", function(self, button)
+        if button == "RightButton" then
+            dragLastX = select(1, GetCursorPosition())
+            SetCursor("none")
+            dragCapture:Show()
+        end
+    end)
+    model:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then stopDrag() end
+    end)
+
+    -- ── Favorite star button ──────────────────────────────────
+    local starBtn = CreateFrame("Button", "CleanBotStar" .. counter, model)
+    starBtn:SetSize(24, 24)
+    starBtn:SetPoint("TOPLEFT", model, "TOPLEFT", 6, -6)
+    local starTex = starBtn:CreateTexture(nil, "OVERLAY")
+    starTex:SetAllPoints()
+    starTex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+    local function UpdateStar()
+        if CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots and CleanBot_SavedVars.favoriteBots[key] then
+            starTex:SetVertexColor(1, 0.82, 0)
+        else
+            starTex:SetVertexColor(0.4, 0.4, 0.4)
+        end
+    end
+    NS.botStarUpdaters[key] = UpdateStar
+    UpdateStar()
+    starBtn:SetScript("OnClick", function()
+        if not CleanBot_SavedVars then return end
+        if not CleanBot_SavedVars.favoriteBots then CleanBot_SavedVars.favoriteBots = {} end
+        if CleanBot_SavedVars.favoriteBots[key] then
+            CleanBot_SavedVars.favoriteBots[key] = nil
+        else
+            CleanBot_SavedVars.favoriteBots[key] = true
+        end
+        UpdateStar()
+    end)
+    starBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local isFav = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots and CleanBot_SavedVars.favoriteBots[key]
+        GameTooltip:AddLine(isFav and "Remove from Favorites" or "Add to Favorites", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    topFrames[#topFrames + 1] = starBtn
+
+    -- ── Inner tab bar (Combat / Non-Combat / Class) ───────────
+    local innerTabBar = CreateFrame("Frame", nil, ctrl)
+    innerTabBar:SetPoint("TOPLEFT",  ctrl, "TOPLEFT",  0, 0)
+    innerTabBar:SetPoint("TOPRIGHT", ctrl, "TOPRIGHT", 0, 0)
+    innerTabBar:SetHeight(NS.BOT_BAR_H)
+    topFrames[#topFrames + 1] = innerTabBar
+
+    local contentBg = CreateFrame("Frame", nil, ctrl)
+    contentBg:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    contentBg:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    NS.CB_ApplyInnerSkin(contentBg)
+    topFrames[#topFrames + 1] = contentBg
+
+    local combatContent = CreateFrame("Frame", nil, ctrl)
+    combatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    combatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    topFrames[#topFrames + 1] = combatContent
+
+    local nonCombatContent = CreateFrame("Frame", nil, ctrl)
+    nonCombatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    nonCombatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    nonCombatContent:Hide()
+    topFrames[#topFrames + 1] = nonCombatContent
+
+    local classContent = CreateFrame("Frame", nil, ctrl)
+    classContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    classContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    classContent:Hide()
+    topFrames[#topFrames + 1] = classContent
+
+    local innerTabBtns = {}
+    local function selectInnerTab(idx)
+        for j, t in ipairs(innerTabBtns) do
+            if j == idx then
+                t:SetNormalFontObject(GameFontHighlightSmall)
+                t:SetButtonState("PUSHED", true)
+            else
+                t:SetNormalFontObject(GameFontNormalSmall)
+                t:SetButtonState("NORMAL")
+            end
+        end
+        if idx == 1 then
+            combatContent:Show(); nonCombatContent:Hide(); classContent:Hide()
+        elseif idx == 2 then
+            combatContent:Hide(); nonCombatContent:Show(); classContent:Hide()
+        else
+            combatContent:Hide(); nonCombatContent:Hide(); classContent:Show()
+        end
+    end
+
+    local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[botClass]) or botClass
+    for j, lbl in ipairs({ "Combat", "Non-Combat", classDisplayName }) do
+        local itab = CreateFrame("Button", "CleanBotInnerTab" .. counter .. "_" .. j,
+                                 innerTabBar, "UIPanelButtonTemplate")
+        itab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
+        itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
+        itab:SetText(lbl)
+        itab:SetNormalFontObject(GameFontNormalSmall)
+        local jj = j
+        itab:SetScript("OnClick", function() selectInnerTab(jj) end)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleButton(itab) end
+        innerTabBtns[j] = itab
+    end
+    selectInnerTab(1)
+
+    NS.botInnerTabs[key] = {
+        combatPanel    = combatContent,
+        nonCombatPanel = nonCombatContent,
+        classPanel     = classContent,
+    }
+
+    -- ── Class tab content ─────────────────────────────────────
+    CB_BuildClassTabContent(classContent, botClass, key, botName, counter)
+
+    -- ── Non-Combat tab content ────────────────────────────────
+    local ncHeader = nonCombatContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ncHeader:SetPoint("TOPLEFT", nonCombatContent, "TOPLEFT", 12, -10)
+    ncHeader:SetText("General")
+
+    local ncSection, ncCheckboxes = CB_BuildStrategySection(
+        nonCombatContent, ncHeader, NS.NC_GENERAL_STRATEGIES, key, botName, counter,
+        function(s, checked)
+            local toggle = (checked and "+" or "-") .. s.cmd
+            SendChatMessage("nc " .. toggle, "WHISPER", nil, botName)
+            local e = CleanBot_KnownBots[strlower(botName)]
+            if e and e.nonCombat then e.nonCombat[s.field] = checked end
+        end)
+    if entry and entry.nonCombat then
+        for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
+            local cb = ncCheckboxes[s.field]
+            if cb then cb:SetChecked(entry.nonCombat[s.field] == true) end
+        end
+    end
+    ncSection:Show()
+    NS.botNcFrames[key] = { section = ncSection, checkboxes = ncCheckboxes }
+
+    -- ── Two-column combat layout ──────────────────────────────
+    local leftCol = CreateFrame("Frame", nil, combatContent)
+    leftCol:SetPoint("TOPLEFT",     combatContent, "TOPLEFT", 0,  0)
+    leftCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOM",  -4, 0)
+
+    local rightCol = CreateFrame("Frame", nil, combatContent)
+    rightCol:SetPoint("TOPLEFT",     combatContent, "TOP",         4, 0)
+    rightCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOMRIGHT", 0, 0)
+
+    -- ── LEFT COLUMN: Role + role-specific sections + Combat Control ──
+    local roleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    roleLabel:SetPoint("TOPLEFT", leftCol, "TOPLEFT", 8, -10)
+    roleLabel:SetText("Role")
+
+    local activeRole  = nil
+    local activeCount = 0
+    if entry and entry.combat then
+        for _, s in ipairs(NS.ROLE_STRATEGIES) do
+            if entry.combat[s.field] == true then
+                activeCount = activeCount + 1
+                if not activeRole then activeRole = s.field end
+            end
+        end
+    end
+    local multipleRoles = activeCount > 1
+
+    local multiRoleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontRed")
+    multiRoleLabel:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 4, -8)
+    multiRoleLabel:SetText("Multiple Roles Selected")
+    if multipleRoles then multiRoleLabel:Show() else multiRoleLabel:Hide() end
+
+    local dd = CreateFrame("Frame", "CleanBotRoleDD" .. counter, leftCol, "UIDropDownMenuTemplate")
+    dd:SetPoint("LEFT", roleLabel, "RIGHT", 2, -2)
+    UIDropDownMenu_SetWidth(dd, 90)
+    if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 90) end
+    UIDropDownMenu_Initialize(dd, function(self)
+        for _, s in ipairs(NS.ROLE_STRATEGIES) do
+            local info           = UIDropDownMenu_CreateInfo()
+            info.text            = s.name
+            info.value           = s.field
+            info.tooltipTitle    = s.name
+            info.tooltipText     = s.desc
+            info.tooltipOnButton = 1
+            info.func            = function()
+                UIDropDownMenu_SetText(self, s.name)
+                local parts = {}
+                for _, rs in ipairs(NS.ROLE_STRATEGIES) do
+                    parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
+                end
+                SendChatMessage("co " .. table.concat(parts, ","), "WHISPER", nil, botName)
+                local e = CleanBot_KnownBots[strlower(botName)]
+                if e and e.combat then
+                    for _, rs in ipairs(NS.ROLE_STRATEGIES) do
+                        e.combat[rs.field] = (rs.field == s.field)
+                    end
+                end
+                local bk = strlower(botName)
+                local function showIf(tbl, roleField)
+                    if tbl[bk] then
+                        if s.field == roleField then tbl[bk].section:Show()
+                        else                         tbl[bk].section:Hide() end
+                    end
+                end
+                showIf(NS.botTankFrames, "isTank")
+                showIf(NS.botDpsFrames,  "isDPS")
+                showIf(NS.botHealFrames, "isHealer")
+                multiRoleLabel:Hide()
+            end
+            info.checked = entry and entry.combat and (entry.combat[s.field] == true)
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    if entry and entry.combat then
+        for _, s in ipairs(NS.ROLE_STRATEGIES) do
+            if entry.combat[s.field] == true then
+                UIDropDownMenu_SetText(dd, s.name)
+                break
+            end
+        end
+    end
+    NS.botRoleDDs[key] = dd
+
+    local ROLE_AREA_H = math.max(#NS.TANK_STRATEGIES, #NS.DPS_STRATEGIES, #NS.HEAL_STRATEGIES) * 26
+
+    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, key, botName, counter)
+    if not multipleRoles and activeRole == "isTank" then tankSection:Show() else tankSection:Hide() end
+    NS.botTankFrames[key] = { section = tankSection, checkboxes = tankCBs }
+
+    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, key, botName, counter)
+    if not multipleRoles and activeRole == "isDPS" then dpsSection:Show() else dpsSection:Hide() end
+    NS.botDpsFrames[key] = { section = dpsSection, checkboxes = dpsCBs }
+
+    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, key, botName, counter)
+    if not multipleRoles and activeRole == "isHealer" then healSection:Show() else healSection:Hide() end
+    NS.botHealFrames[key] = { section = healSection, checkboxes = healCBs }
+
+    local roleAreaEnd = CreateFrame("Frame", nil, leftCol)
+    roleAreaEnd:SetSize(1, 1)
+    roleAreaEnd:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 0, -(12 + ROLE_AREA_H))
+
+    local combatHeader = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    combatHeader:SetPoint("TOPLEFT", roleAreaEnd, "TOPLEFT", 4, -10)
+    combatHeader:SetText("Combat Control")
+
+    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, key, botName, counter)
+    combatSection:Show()
+    NS.botCombatFrames[key] = { section = combatSection, checkboxes = combatCBs }
+
+    -- ── RIGHT COLUMN: Positioning + Timing & Marking ──────────
+    local posHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    posHeader:SetPoint("TOPLEFT", rightCol, "TOPLEFT", 4, -10)
+    posHeader:SetText("Positioning")
+
+    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, key, botName, counter)
+    posSection:Show()
+    NS.botPositionFrames[key] = { section = posSection, checkboxes = posCBs }
+
+    local timingHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    timingHeader:SetPoint("TOPLEFT", posSection, "BOTTOMLEFT", 4, -12)
+    timingHeader:SetText("Timing & Marking")
+
+    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, key, botName, counter)
+    timingSection:Show()
+    NS.botTimingFrames[key] = { section = timingSection, checkboxes = timingCBs }
+
+    return topFrames
+end
+
+-- ============================================================
 -- RefreshTabs  — rebuild all bot character tabs from scratch
 -- ============================================================
 NS.CleanBot_RefreshTabs = function()
@@ -630,6 +959,7 @@ NS.CleanBot_RefreshTabs = function()
         local idx = i
         tab:SetScript("OnClick", function() CleanBot_SelectTab(idx) end)
         table.insert(NS.activeBotTabs, tab)
+        NS.activeBotNames[i] = { name = bot.name, unit = bot.unit }
         if NS.ElvUI_S then NS.ElvUI_S:HandleButton(tab) end
 
         -- ── Model + control frames ─────────────────────────────────
@@ -640,48 +970,6 @@ NS.CleanBot_RefreshTabs = function()
         model:Hide()
         table.insert(NS.botModelFrames, model)
 
-        -- ── Model rotation via right-click drag ───────────────────
-        local modelRotation = 0
-        local dragLastX     = 0
-
-        -- Fullscreen capture frame: shown only during a drag so that mouse
-        -- movement and button release are tracked even outside the addon frame.
-        local dragCapture = CreateFrame("Frame", "CleanBotDragCapture" .. counter, UIParent)
-        dragCapture:SetAllPoints(UIParent)
-        dragCapture:SetFrameStrata("FULLSCREEN_DIALOG")
-        dragCapture:EnableMouse(true)
-        dragCapture:Hide()
-
-        local function stopDrag()
-            dragCapture:Hide()
-            SetCursor(nil)
-        end
-
-        dragCapture:SetScript("OnMouseUp", function(self, button)
-            if button == "RightButton" then stopDrag() end
-        end)
-        dragCapture:SetScript("OnUpdate", function()
-            local x     = select(1, GetCursorPosition())
-            local delta = x - dragLastX
-            dragLastX   = x
-            if delta ~= 0 then
-                modelRotation = modelRotation + delta * 0.013
-                model:SetRotation(modelRotation)
-            end
-        end)
-
-        model:EnableMouse(true)
-        model:SetScript("OnMouseDown", function(self, button)
-            if button == "RightButton" then
-                dragLastX = select(1, GetCursorPosition())
-                SetCursor("none")
-                dragCapture:Show()
-            end
-        end)
-        model:SetScript("OnMouseUp", function(self, button)
-            if button == "RightButton" then stopDrag() end
-        end)
-
         local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. counter, NS.partyContent)
         ctrl:SetPoint("TOPLEFT",     NS.partyContent, "TOPLEFT",     contentW / 3 + NS.PAD, -NS.PAD)
         ctrl:SetPoint("BOTTOMRIGHT", NS.partyContent, "BOTTOMRIGHT", -NS.PAD, NS.PAD)
@@ -691,270 +979,20 @@ NS.CleanBot_RefreshTabs = function()
         local botName = bot.name
         local key     = strlower(bot.name)
         local entry   = CleanBot_KnownBots[key]
-
-        -- ── Favorite star button ──────────────────────────────────
-        local starBtn = CreateFrame("Button", "CleanBotStar" .. counter, model)
-        starBtn:SetSize(24, 24)
-        starBtn:SetPoint("TOPLEFT", model, "TOPLEFT", 6, -6)
-
-        local starTex = starBtn:CreateTexture(nil, "OVERLAY")
-        starTex:SetAllPoints()
-        starTex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
-
-        local function UpdateStar()
-            if CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots and CleanBot_SavedVars.favoriteBots[key] then
-                starTex:SetVertexColor(1, 0.82, 0)
-            else
-                starTex:SetVertexColor(0.4, 0.4, 0.4)
-            end
-        end
-        NS.botStarUpdaters[key] = UpdateStar
-        UpdateStar()
-
-        starBtn:SetScript("OnClick", function()
-            if not CleanBot_SavedVars then return end
-            if not CleanBot_SavedVars.favoriteBots then CleanBot_SavedVars.favoriteBots = {} end
-            if CleanBot_SavedVars.favoriteBots[key] then
-                CleanBot_SavedVars.favoriteBots[key] = nil
-            else
-                CleanBot_SavedVars.favoriteBots[key] = true
-            end
-            UpdateStar()
-        end)
-        starBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            local isFav = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots and CleanBot_SavedVars.favoriteBots[key]
-            GameTooltip:AddLine(isFav and "Remove from Favorites" or "Add to Favorites", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- ── Inner tab bar (Combat / Non-Combat / Class) ───────────
-        local innerTabBar = CreateFrame("Frame", nil, ctrl)
-        innerTabBar:SetPoint("TOPLEFT",  ctrl, "TOPLEFT",  0, 0)
-        innerTabBar:SetPoint("TOPRIGHT", ctrl, "TOPRIGHT", 0, 0)
-        innerTabBar:SetHeight(NS.BOT_BAR_H)
-
-        local contentBg = CreateFrame("Frame", nil, ctrl)
-        contentBg:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-        contentBg:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
-        NS.CB_ApplyInnerSkin(contentBg)
-
-        local combatContent = CreateFrame("Frame", nil, ctrl)
-        combatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-        combatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
-
-        local nonCombatContent = CreateFrame("Frame", nil, ctrl)
-        nonCombatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-        nonCombatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
-        nonCombatContent:Hide()
-
-        local classContent = CreateFrame("Frame", nil, ctrl)
-        classContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-        classContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
-        classContent:Hide()
-
-        local innerTabBtns = {}
-        local function selectInnerTab(idx)
-            for j, t in ipairs(innerTabBtns) do
-                if j == idx then
-                    t:SetNormalFontObject(GameFontHighlightSmall)
-                    t:SetButtonState("PUSHED", true)
-                else
-                    t:SetNormalFontObject(GameFontNormalSmall)
-                    t:SetButtonState("NORMAL")
-                end
-            end
-            if idx == 1 then
-                combatContent:Show(); nonCombatContent:Hide(); classContent:Hide()
-            elseif idx == 2 then
-                combatContent:Hide(); nonCombatContent:Show(); classContent:Hide()
-            else
-                combatContent:Hide(); nonCombatContent:Hide(); classContent:Show()
-            end
-        end
-
-        local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[bot.class]) or bot.class
-        local innerLabels = { "Combat", "Non-Combat", classDisplayName }
-        for j, lbl in ipairs(innerLabels) do
-            local itab = CreateFrame("Button", "CleanBotInnerTab" .. counter .. "_" .. j,
-                                     innerTabBar, "UIPanelButtonTemplate")
-            itab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
-            itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
-            itab:SetText(lbl)
-            itab:SetNormalFontObject(GameFontNormalSmall)
-            local jj = j
-            itab:SetScript("OnClick", function() selectInnerTab(jj) end)
-            if NS.ElvUI_S then NS.ElvUI_S:HandleButton(itab) end
-            innerTabBtns[j] = itab
-        end
-        selectInnerTab(1)
-
-        NS.botInnerTabs[key] = {
-            combatPanel    = combatContent,
-            nonCombatPanel = nonCombatContent,
-            classPanel     = classContent,
-        }
-
-        -- ── Class tab content ─────────────────────────────────────
-        CB_BuildClassTabContent(classContent, bot.class, key, botName, counter)
-
-        -- ── Non-Combat tab content ────────────────────────────────
-        local ncHeader = nonCombatContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        ncHeader:SetPoint("TOPLEFT", nonCombatContent, "TOPLEFT", 12, -10)
-        ncHeader:SetText("General")
-
-        local ncSection, ncCheckboxes = CB_BuildStrategySection(
-            nonCombatContent, ncHeader, NS.NC_GENERAL_STRATEGIES, key, botName, counter,
-            function(s, checked)
-                local toggle = (checked and "+" or "-") .. s.cmd
-                SendChatMessage("nc " .. toggle, "WHISPER", nil, botName)
-                local e = CleanBot_KnownBots[strlower(botName)]
-                if e and e.nonCombat then e.nonCombat[s.field] = checked end
-            end)
-        local ncEntry = CleanBot_KnownBots[key]
-        if ncEntry and ncEntry.nonCombat then
-            for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
-                local cb = ncCheckboxes[s.field]
-                if cb then cb:SetChecked(ncEntry.nonCombat[s.field] == true) end
-            end
-        end
-        ncSection:Show()
-        NS.botNcFrames[key] = { section = ncSection, checkboxes = ncCheckboxes }
-
-        -- ── Two-column combat layout ──────────────────────────────
-        local leftCol = CreateFrame("Frame", nil, combatContent)
-        leftCol:SetPoint("TOPLEFT",     combatContent, "TOPLEFT", 0,  0)
-        leftCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOM",  -4, 0)
-
-        local rightCol = CreateFrame("Frame", nil, combatContent)
-        rightCol:SetPoint("TOPLEFT",     combatContent, "TOP",         4, 0)
-        rightCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOMRIGHT", 0, 0)
-
-        -- ── LEFT COLUMN: Role + role-specific section + Combat Control ──
-
-        local roleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        roleLabel:SetPoint("TOPLEFT", leftCol, "TOPLEFT", 8, -10)
-        roleLabel:SetText("Role")
-
-        -- Count active roles up front so multiRoleLabel is in scope for the dropdown closure
-        local activeRole  = nil
-        local activeCount = 0
-        if entry and entry.combat then
-            for _, s in ipairs(NS.ROLE_STRATEGIES) do
-                if entry.combat[s.field] == true then
-                    activeCount = activeCount + 1
-                    if not activeRole then activeRole = s.field end
-                end
-            end
-        end
-        local multipleRoles = activeCount > 1
-
-        local multiRoleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontRed")
-        multiRoleLabel:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 4, -8)
-        multiRoleLabel:SetText("Multiple Roles Selected")
-        if multipleRoles then multiRoleLabel:Show() else multiRoleLabel:Hide() end
-
-        local dd = CreateFrame("Frame", "CleanBotRoleDD" .. counter,
-                               leftCol, "UIDropDownMenuTemplate")
-        dd:SetPoint("LEFT", roleLabel, "RIGHT", 2, -2)
-        UIDropDownMenu_SetWidth(dd, 90)
-        if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 90) end
-
-        UIDropDownMenu_Initialize(dd, function(self)
-            for _, s in ipairs(NS.ROLE_STRATEGIES) do
-                local info           = UIDropDownMenu_CreateInfo()
-                info.text            = s.name
-                info.value           = s.field
-                info.tooltipTitle    = s.name
-                info.tooltipText     = s.desc
-                info.tooltipOnButton = 1
-                info.func            = function()
-                    UIDropDownMenu_SetText(self, s.name)
-                    local parts = {}
-                    for _, rs in ipairs(NS.ROLE_STRATEGIES) do
-                        parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
-                    end
-                    SendChatMessage("co " .. table.concat(parts, ","), "WHISPER", nil, botName)
-                    local e = CleanBot_KnownBots[strlower(botName)]
-                    if e and e.combat then
-                        for _, rs in ipairs(NS.ROLE_STRATEGIES) do
-                            e.combat[rs.field] = (rs.field == s.field)
-                        end
-                    end
-                    local bk = strlower(botName)
-                    local function showIf(tbl, roleField)
-                        if tbl[bk] then
-                            if s.field == roleField then tbl[bk].section:Show()
-                            else                         tbl[bk].section:Hide() end
-                        end
-                    end
-                    showIf(NS.botTankFrames, "isTank")
-                    showIf(NS.botDpsFrames,  "isDPS")
-                    showIf(NS.botHealFrames, "isHealer")
-                    multiRoleLabel:Hide()
-                end
-                info.checked = entry and entry.combat and (entry.combat[s.field] == true)
-                UIDropDownMenu_AddButton(info)
-            end
-        end)
-
-        if entry and entry.combat then
-            for _, s in ipairs(NS.ROLE_STRATEGIES) do
-                if entry.combat[s.field] == true then
-                    UIDropDownMenu_SetText(dd, s.name)
-                    break
-                end
-            end
-        end
-        NS.botRoleDDs[key] = dd
-
-        local ROLE_AREA_H = math.max(#NS.TANK_STRATEGIES, #NS.DPS_STRATEGIES, #NS.HEAL_STRATEGIES) * 26
-
-        local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, key, botName, counter)
-        if not multipleRoles and activeRole == "isTank" then tankSection:Show() else tankSection:Hide() end
-        NS.botTankFrames[key] = { section = tankSection, checkboxes = tankCBs }
-
-        local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, key, botName, counter)
-        if not multipleRoles and activeRole == "isDPS" then dpsSection:Show() else dpsSection:Hide() end
-        NS.botDpsFrames[key] = { section = dpsSection, checkboxes = dpsCBs }
-
-        local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, key, botName, counter)
-        if not multipleRoles and activeRole == "isHealer" then healSection:Show() else healSection:Hide() end
-        NS.botHealFrames[key] = { section = healSection, checkboxes = healCBs }
-
-        local roleAreaEnd = CreateFrame("Frame", nil, leftCol)
-        roleAreaEnd:SetSize(1, 1)
-        roleAreaEnd:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 0, -(12 + ROLE_AREA_H))
-
-        local combatHeader = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        combatHeader:SetPoint("TOPLEFT", roleAreaEnd, "TOPLEFT", 4, -10)
-        combatHeader:SetText("Combat Control")
-
-        local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, key, botName, counter)
-        combatSection:Show()
-        NS.botCombatFrames[key] = { section = combatSection, checkboxes = combatCBs }
-
-        -- ── RIGHT COLUMN: Positioning + Timing & Marking ──────────
-
-        local posHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        posHeader:SetPoint("TOPLEFT", rightCol, "TOPLEFT", 4, -10)
-        posHeader:SetText("Positioning")
-
-        local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, key, botName, counter)
-        posSection:Show()
-        NS.botPositionFrames[key] = { section = posSection, checkboxes = posCBs }
-
-        local timingHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        timingHeader:SetPoint("TOPLEFT", posSection, "BOTTOMLEFT", 4, -12)
-        timingHeader:SetText("Timing & Marking")
-
-        local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, key, botName, counter)
-        timingSection:Show()
-        NS.botTimingFrames[key] = { section = timingSection, checkboxes = timingCBs }
+        NS.CB_BuildBotContent(ctrl, model, key, botName, bot.class, entry, counter)
     end
 
-    if NS.activeTabIndex == 0 then
+    -- Position Target tab after all bot tabs and refresh its state
+    if NS.targetTabBtn then
+        NS.targetTabBtn:ClearAllPoints()
+        NS.targetTabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT",
+            NS.PAD + #bots * (NS.TAB_WIDTH + 2), 0)
+        NS.CleanBot_UpdateTargetTab()
+    end
+
+    if NS.activeTabIndex == 0 and #bots > 0 then
         CleanBot_SelectTab(1)
     end
 end
+
+-- Target tab logic lives in Party\CleanBotTarget.lua

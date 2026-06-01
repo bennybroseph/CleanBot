@@ -306,6 +306,9 @@ function CleanBot_BuildFrames()
     NS.CB_ApplyPanelSkin(CleanBotFrame)
 
     NS.CleanBot_SelectTopTab(1)
+
+    -- Target tab: persistent frames (defined in CleanBotParty.lua, ready by PLAYER_LOGIN)
+    NS.CleanBot_InitTargetTab()
 end
 
 -- ============================================================
@@ -406,6 +409,7 @@ bridgeFrame:RegisterEvent("CHAT_MSG_ADDON")
 bridgeFrame:RegisterEvent("CHAT_MSG_WHISPER")
 bridgeFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 bridgeFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
@@ -605,6 +609,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             CB_SendHello()
         else
             NS.CB_RequestSync()
+        end
+
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        -- Only act when the Party tab (which owns the Target tab) is visible
+        if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_UpdateTargetTab then
+            NS.CleanBot_UpdateTargetTab()
         end
     end
 end)

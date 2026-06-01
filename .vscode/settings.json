@@ -23,6 +23,7 @@
         "UIDropDownMenu_CreateInfo",
         "InspectUnit",
         "StaticPopupDialogs",
-        "StaticPopup_Show"
+        "StaticPopup_Show",
+        "UIDropDownMenu_DisableDropDown"
     ]
 }
