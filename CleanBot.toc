@@ -11,7 +11,7 @@ Party\CleanBotPartyData.lua
 Party\CleanBotClassData.lua
 Party\CleanBotParty.lua
 Party\CleanBotTarget.lua
-CleanBotTargetTab.lua
+CleanBotManageTab.lua
 CleanBotSettingsTab.lua
 CleanBotCommands.lua
 CleanBotMinimap.lua
