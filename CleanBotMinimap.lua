@@ -4,23 +4,24 @@
 local NS = CleanBotNS
 
 local RADIUS = 80  -- distance from minimap center to button center
-local angle  = 220 -- degrees; clockwise from the right
+local angle  = 220 -- degrees
 
 local btn = CreateFrame("Button", "CleanBotMinimapButton", Minimap)
-btn:SetSize(32, 32)
+btn:SetSize(31, 31)
 btn:SetFrameStrata("MEDIUM")
 btn:SetFrameLevel(8)
-btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoneButton-Highlight")
+
+btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+local icon = btn:CreateTexture(nil, "BACKGROUND")
+icon:SetTexture("Interface\\Icons\\INV_Misc_Wrench_01")
+icon:SetSize(20, 20)
+icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 7, -5)
 
 local border = btn:CreateTexture(nil, "OVERLAY")
 border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 border:SetSize(53, 53)
-border:SetPoint("CENTER", 0, 0)
-
-local icon = btn:CreateTexture(nil, "ARTWORK")
-icon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
-icon:SetSize(20, 20)
-icon:SetPoint("CENTER", 0, 0)
+border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
 
 local function UpdatePosition()
     local rad = math.rad(angle)
@@ -32,11 +33,7 @@ UpdatePosition()
 
 btn:SetScript("OnClick", function(self, button)
     if button == "LeftButton" then
-        if CleanBotFrame:IsShown() then
-            CleanBotFrame:Hide()
-        else
-            CleanBotFrame:Show()
-        end
+        CleanBotNS.CleanBot_Toggle()
     end
 end)
 

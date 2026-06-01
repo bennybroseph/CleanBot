@@ -20,6 +20,9 @@
         "UIDropDownMenu_Initialize",
         "UIDropDownMenu_AddButton",
         "UIDropDownMenu_SetText",
-        "UIDropDownMenu_CreateInfo"
+        "UIDropDownMenu_CreateInfo",
+        "InspectUnit",
+        "StaticPopupDialogs",
+        "StaticPopup_Show"
     ]
 }

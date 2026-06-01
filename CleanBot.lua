@@ -235,6 +235,10 @@ end
 NS.tabCounter = 0
 
 function CleanBot_BuildFrames()
+    -- Static frame size — never shrinks/grows based on party state
+    CleanBotFrame:SetWidth(NS.FRAME_WIDTH)
+    CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
+
     -- ── Top tab bar ────────────────────────────────────────────
     NS.topTabBar = CreateFrame("Frame", "CleanBotTopTabBar", CleanBotFrame)
     NS.topTabBar:SetPoint("TOPLEFT",  CleanBotFrame, "TOPLEFT",  0, -NS.TITLE_H)
@@ -270,8 +274,14 @@ function CleanBot_BuildFrames()
     NS.botTabBar:SetPoint("TOPRIGHT", NS.partyPanel, "TOPRIGHT", 0, 0)
     NS.botTabBar:SetHeight(NS.BOT_BAR_H)
 
-    CleanBotFrameText:ClearAllPoints()
-    CleanBotFrameText:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
+    -- Hide the XML-defined text (it's a child of CleanBotFrame and leaks across tabs).
+    -- We use a dedicated label parented to partyPanel instead.
+    CleanBotFrameText:SetText("")
+    CleanBotFrameText:Hide()
+
+    NS.partyEmptyLabel = NS.partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    NS.partyEmptyLabel:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
+    NS.partyEmptyLabel:SetText("")
 
     NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
     NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -374,9 +384,27 @@ print("CleanBot loaded! Type /cleanbot to open.")
 -- ============================================================
 -- Bridge: listen for MBOT messages and party changes
 -- ============================================================
+-- ============================================================
+-- Linked accounts  (populated by .playerbots account linkedAccounts)
+-- ============================================================
+NS.linkedAccounts            = {}
+NS.awaitingLinkedAccounts    = false  -- true = waiting for "Linked accounts:" header
+NS.collectingLinkedAccounts  = false  -- true = reading "- NAME" lines
+
+NS.CleanBot_FetchLinkedAccounts = function()
+    NS.linkedAccounts           = {}
+    NS.awaitingLinkedAccounts   = true
+    NS.collectingLinkedAccounts = false
+    SendChatMessage(".playerbots account linkedAccounts", "SAY")
+end
+
+-- ============================================================
+-- Bridge: listen for MBOT messages and party changes
+-- ============================================================
 local bridgeFrame = CreateFrame("Frame")
 bridgeFrame:RegisterEvent("CHAT_MSG_ADDON")
 bridgeFrame:RegisterEvent("CHAT_MSG_WHISPER")
+bridgeFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 bridgeFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
@@ -487,6 +515,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             if not NS.bridgeReady then
                 NS.bridgeReady = true
                 CB_BridgeRequest()
+                NS.CleanBot_FetchLinkedAccounts()
             end
 
         elseif msg and strsub(msg, 1, 7) == "ROSTER~" then
@@ -551,6 +580,23 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                         end
                     end
                 end
+            end
+        end
+
+    elseif event == "CHAT_MSG_SYSTEM" then
+        local msg = ...
+        if NS.awaitingLinkedAccounts and msg and strlower(msg):find("linked accounts") then
+            -- Header line received — start collecting account entries
+            NS.awaitingLinkedAccounts   = false
+            NS.collectingLinkedAccounts = true
+            NS.linkedAccounts           = {}
+        elseif NS.collectingLinkedAccounts then
+            local name = msg and msg:match("^%-%s*(%S+)")
+            if name then
+                NS.linkedAccounts[#NS.linkedAccounts + 1] = name
+            else
+                -- Non-matching line signals end of the list
+                NS.collectingLinkedAccounts = false
             end
         end
 

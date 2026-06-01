@@ -7,6 +7,17 @@
 -- ============================================================
 -- /cleanbot  |  /cb
 -- ============================================================
+local NS = CleanBotNS
+
+NS.CleanBot_Toggle = function()
+    if CleanBotFrame:IsShown() then
+        CleanBotFrame:Hide()
+    else
+        CleanBotFrame:Show()
+        CleanBot_RequestRosterThenRefresh()
+    end
+end
+
 local function CB_HandleSlash(msg)
     msg = msg:lower():match("^%s*(.-)%s*$")
 
@@ -14,12 +25,7 @@ local function CB_HandleSlash(msg)
         CleanBot_ShowDebugKnownBots()
 
     elseif msg == "" then
-        if CleanBotFrame:IsShown() then
-            CleanBotFrame:Hide()
-        else
-            CleanBotFrame:Show()
-            CleanBot_RequestRosterThenRefresh()
-        end
+        NS.CleanBot_Toggle()
 
     else
         print("|cffffcc00CleanBot|r: unknown command '" .. msg .. "'")

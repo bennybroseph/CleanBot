@@ -14,15 +14,15 @@ NS.CleanBot_BuildSettingsContent = function()
 
     local label = NS.settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     label:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    label:SetText("Assume all party members are bots")
+    label:SetText("Treat All Players as Bots")
 
     cb:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Assume All Party Are Bots", 1, 1, 1)
+        GameTooltip:AddLine("Treat All Players as Bots", 1, 1, 1)
         GameTooltip:AddLine(
             "Treat every party member as a bot regardless of whether the " ..
             "MultiBot bridge has confirmed them. Enable this when the bridge " ..
-            "module is not installed on the server.",
+            "module is not installed on the server or is otherwise malfunctioning.",
             0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)

@@ -77,14 +77,15 @@ NS.CLASS_STRATEGIES = {
             },
             {
                 header = "Blessings",
+                type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",    field = "bdps",    name = "Bless: DPS",
+                    { cmd = "bdps",    field = "bdps",    name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
-                    { cmd = "bmana",   field = "bmana",   name = "Bless: Mana",
+                    { cmd = "bmana",   field = "bmana",   name = "Blessing of Wisdom",
                       desc = "Apply Blessing of Wisdom to party members" },
-                    { cmd = "bstats",  field = "bstats",  name = "Bless: Stats",
+                    { cmd = "bstats",  field = "bstats",  name = "Blessing of Kings",
                       desc = "Apply Blessing of Kings to party members" },
-                    { cmd = "bhealth", field = "bhealth", name = "Bless: Health",
+                    { cmd = "bhealth", field = "bhealth", name = "Blessing of Sanctuary",
                       desc = "Apply Blessing of Sanctuary to party members" },
                 },
             },
@@ -92,6 +93,7 @@ NS.CLASS_STRATEGIES = {
         nonCombat = {
             {
                 header = "Auras",
+                type   = "dropdown",
                 strategies = {
                     { cmd = "barmor",  field = "barmor",  name = "Devotion Aura",
                       desc = "Emit Devotion Aura — increases armor of nearby party members" },
@@ -312,25 +314,25 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Rotation",
+                header = "Totems (Combat)",
+                type   = "dropdown",
                 strategies = {
-                    { cmd = "melee",  field = "melee",  name = "Enhancement",
-                      desc = "Use melee Enhancement rotation (Stormstrike, windfury procs)" },
-                    { cmd = "caster", field = "caster", name = "Elemental",
-                      desc = "Use caster Elemental rotation (Lightning Bolt, Chain Lightning)" },
-                    { cmd = "heal",   field = "heal",   name = "Restoration",
-                      desc = "Use Restoration healing rotation (Chain Heal, Earth Shield)" },
+                    { cmd = "bdps",  field = "coBdps",  name = "Strength Totem",
+                      desc = "Drop Strength of Earth / Windfury Totem during combat" },
+                    { cmd = "bmana", field = "coBmana", name = "Mana Totem",
+                      desc = "Drop Mana Spring Totem during combat" },
                 },
             },
         },
         nonCombat = {
             {
-                header = "Totems",
+                header = "Totems (Out of Combat)",
+                type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",  field = "bdps",  name = "Strength Totem",
-                      desc = "Drop Strength of Earth / Windfury Totem for melee DPS" },
-                    { cmd = "bmana", field = "bmana", name = "Mana Totem",
-                      desc = "Drop Mana Spring Totem for party mana regeneration" },
+                    { cmd = "bdps",  field = "ncBdps",  name = "Strength Totem",
+                      desc = "Drop Strength of Earth / Windfury Totem out of combat" },
+                    { cmd = "bmana", field = "ncBmana", name = "Mana Totem",
+                      desc = "Drop Mana Spring Totem out of combat" },
                 },
             },
         },
@@ -409,7 +411,7 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Rotation",
+                header = "Metamorphosis",
                 strategies = {
                     { cmd = "meta melee", field = "metaMelee", name = "Meta Melee",
                       desc = "Metamorphosis melee mode — DPS in Demon Form at close range" },
@@ -419,6 +421,7 @@ NS.CLASS_STRATEGIES = {
         nonCombat = {
             {
                 header = "Active Pet",
+                type   = "dropdown",
                 strategies = {
                     { cmd = "imp",        field = "imp",        name = "Imp",
                       desc = "Keep Imp summoned (Fire Bolt, Blood Pact)" },
@@ -434,19 +437,21 @@ NS.CLASS_STRATEGIES = {
             },
             {
                 header = "Soulstone",
+                type   = "dropdown",
                 strategies = {
-                    { cmd = "ss self",   field = "ssSelf",   name = "SS: Self",
+                    { cmd = "ss self",   field = "ssSelf",   name = "Use on Self",
                       desc = "Keep a Soulstone on self for self-resurrection" },
-                    { cmd = "ss master", field = "ssMaster", name = "SS: Master",
+                    { cmd = "ss master", field = "ssMaster", name = "Use on Master",
                       desc = "Keep a Soulstone on the party leader" },
-                    { cmd = "ss tank",   field = "ssTank",   name = "SS: Tank",
+                    { cmd = "ss tank",   field = "ssTank",   name = "Use on Tank",
                       desc = "Keep a Soulstone on the party tank" },
-                    { cmd = "ss healer", field = "ssHealer", name = "SS: Healer",
+                    { cmd = "ss healer", field = "ssHealer", name = "Use on Healer",
                       desc = "Keep a Soulstone on the party healer" },
                 },
             },
             {
                 header = "Weapon Stone",
+                type   = "dropdown",
                 strategies = {
                     { cmd = "spellstone", field = "spellstone", name = "Spellstone",
                       desc = "Equip a Spellstone for increased spell critical strike chance" },
@@ -482,25 +487,23 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Form / Rotation",
+                header   = "Strategy",
+                type     = "dropdown",
+                readonly = true,
                 strategies = {
-                    { cmd = "bear",   field = "bear",   name = "Bear Form",
-                      desc = "Use Bear Form tanking rotation (Swipe, Mangle, Lacerate)" },
-                    { cmd = "cat",    field = "cat",    name = "Cat Form",
-                      desc = "Use Cat Form DPS rotation (combo-point finishers)" },
-                    { cmd = "caster", field = "caster", name = "Caster",
-                      desc = "Use Balance caster rotation (Wrath, Starfire)" },
-                    { cmd = "heal",   field = "heal",   name = "Healer",
-                      desc = "Use Restoration healing rotation (Rejuvenation, Lifebloom)" },
+                    { cmd = "melee",  field = "isMelee",    name = "Melee",
+                      desc = "Active strategy set by the bot's talents — Feral melee" },
+                    { cmd = "caster", field = "isCaster",   name = "Caster",
+                      desc = "Active strategy set by the bot's talents — Balance caster" },
+                    { cmd = "heal",   field = "isHealer", name = "Healer",
+                      desc = "Active strategy set by the bot's talents — Restoration healer" },
                 },
             },
             {
                 header = "Support",
                 strategies = {
-                    { cmd = "offheal",    field = "offheal",   name = "Off-Heal",
+                    { cmd = "offheal", field = "offheal", name = "Off-Heal",
                       desc = "Provide supplemental healing while in a DPS role" },
-                    { cmd = "healer dps", field = "healerDps", name = "Healer DPS",
-                      desc = "Cast damage spells when not needed for healing" },
                 },
             },
         },

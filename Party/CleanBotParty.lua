@@ -177,22 +177,128 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
         return
     end
 
-    -- Two-column layout: left = combat groups, right = non-combat groups.
+    -- ── Spec group: rendered full-width above both columns ───────
+    -- The first combat group with a whisper field is the Spec selector.
+    -- It spans the top of classContent so both columns can start at the same Y.
+    local specGroup     = cs.combat and cs.combat[1] and cs.combat[1].whisper and cs.combat[1] or nil
+    local combatStartGi = specGroup and 2 or 1  -- index to start remaining combat groups from
+    local colTopAnchor  = nil                   -- set to setBtn bottom after Spec is rendered
+
+    if specGroup then
+        local gi          = 1
+        local strategies  = specGroup.strategies
+        local specWhisper = specGroup.whisper
+
+        local header = classContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", classContent, "TOPLEFT", 8, -10)
+        header:SetText(specGroup.header)
+
+        local showBtn = CreateFrame("Button",
+            "CleanBotShowTal_" .. counter .. "_" .. gi,
+            classContent, "UIPanelButtonTemplate")
+        showBtn:SetSize(100, 22)
+        showBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
+        showBtn:SetText("Show Talents")
+        showBtn:SetScript("OnClick", function()
+            local unit = CB_GetBotUnit(botName)
+            if not unit then return end
+            InspectUnit(unit)
+            for i = 1, 10 do
+                local tab = _G["InspectFrameTab" .. i]
+                if not tab then break end
+                local text = tab:GetText()
+                if text and strfind(strlower(text), "talent") then
+                    tab:Click()
+                    break
+                end
+            end
+        end)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleButton(showBtn) end
+
+        local setBtn = CreateFrame("Button",
+            "CleanBotSetTal_" .. counter .. "_" .. gi,
+            classContent, "UIPanelButtonTemplate")
+        setBtn:SetSize(100, 22)
+        setBtn:SetPoint("TOPLEFT", showBtn, "BOTTOMLEFT", 0, -4)
+        setBtn:SetText("Set Talents")
+        if NS.ElvUI_S then NS.ElvUI_S:HandleButton(setBtn) end
+
+        local ddName = "CleanBotClassDD_" .. counter .. "_" .. gi
+        local dd = CreateFrame("Frame", ddName, classContent, "UIDropDownMenuTemplate")
+        dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
+        UIDropDownMenu_SetWidth(dd, 130)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
+
+        local ddInfo = { dd = dd, strategies = strategies, selectedCmd = nil }
+        local cd = entry and entry.classData and entry.classData.combat
+        UIDropDownMenu_Initialize(dd, function(self)
+            for _, s in ipairs(strategies) do
+                local info           = UIDropDownMenu_CreateInfo()
+                info.text            = s.name
+                info.value           = s.field
+                info.tooltipTitle    = s.name
+                info.tooltipText     = s.desc
+                info.tooltipOnButton = 1
+                info.func            = function()
+                    UIDropDownMenu_SetText(self, s.name)
+                    ddInfo.selectedCmd = s.cmd
+                    local e = CleanBot_KnownBots[strlower(botName)]
+                    if e and e.classData then
+                        for _, rs in ipairs(strategies) do
+                            e.classData.combat[rs.field] = (rs.field == s.field)
+                        end
+                    end
+                end
+                info.checked = cd and (cd[s.field] == true)
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+        if cd then
+            for _, s in ipairs(strategies) do
+                if cd[s.field] == true then
+                    UIDropDownMenu_SetText(dd, s.name)
+                    ddInfo.selectedCmd = s.cmd
+                    break
+                end
+            end
+        end
+        setBtn:SetScript("OnClick", function()
+            if ddInfo.selectedCmd then
+                SendChatMessage(specWhisper .. " " .. ddInfo.selectedCmd, "WHISPER", nil, botName)
+            end
+        end)
+        combatDDs[#combatDDs + 1] = ddInfo
+        colTopAnchor = setBtn
+    end
+
+    -- ── Two-column layout below Spec (combat left, non-combat right) ──
+    -- A full-width divider frame provides a shared Y anchor for both columns.
+    -- Its TOP point sits exactly at classContent's horizontal midpoint.
+    local colDivider = CreateFrame("Frame", nil, classContent)
+    colDivider:SetHeight(1)
+    if colTopAnchor then
+        colDivider:SetPoint("TOPLEFT", colTopAnchor, "BOTTOMLEFT", 0, -12)
+    else
+        colDivider:SetPoint("TOPLEFT", classContent, "TOPLEFT", 0, 0)
+    end
+    colDivider:SetPoint("RIGHT", classContent, "RIGHT", 0, 0)
+
     local leftCol = CreateFrame("Frame", nil, classContent)
-    leftCol:SetPoint("TOPLEFT",     classContent, "TOPLEFT", 0,  0)
-    leftCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOM",  -4, 0)
+    leftCol:SetPoint("TOPLEFT",     colDivider,   "TOPLEFT",     0,  0)
+    leftCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOM",     -4,  0)
 
     local rightCol = CreateFrame("Frame", nil, classContent)
-    rightCol:SetPoint("TOPLEFT",     classContent, "TOP",         4, 0)
-    rightCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOMRIGHT", 0, 0)
+    rightCol:SetPoint("TOPLEFT",     colDivider,   "TOP",         4,  0)
+    rightCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOMRIGHT", 0,  0)
 
-    -- ── Left column: class combat groups ─────────────────────
+    -- ── Left column: remaining combat groups ─────────────────────
     if cs.combat then
         local prevBottom = nil
-        for gi, group in ipairs(cs.combat) do
+        for gi = combatStartGi, #cs.combat do
+            local group = cs.combat[gi]
 
             if group.type == "dropdown" and group.whisper then
-                -- Talents-spec layout: header / [Show Talents] / [Set Talents][Dropdown]
+                -- Secondary whisper-dropdown (unlikely but handled)
                 local strategies  = group.strategies
                 local specWhisper = group.whisper
 
@@ -236,13 +342,11 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
 
                 local ddName = "CleanBotClassDD_" .. counter .. "_" .. gi
                 local dd = CreateFrame("Frame", ddName, leftCol, "UIDropDownMenuTemplate")
-                -- UIDropDownMenuTemplate has ~16px of left padding; pull left to visually close the gap
                 dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
                 UIDropDownMenu_SetWidth(dd, 130)
                 if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
 
                 local ddInfo = { dd = dd, strategies = strategies, selectedCmd = nil }
-
                 local cd = entry and entry.classData and entry.classData.combat
                 UIDropDownMenu_Initialize(dd, function(self)
                     for _, s in ipairs(strategies) do
@@ -266,7 +370,6 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                         UIDropDownMenu_AddButton(info)
                     end
                 end)
-
                 if cd then
                     for _, s in ipairs(strategies) do
                         if cd[s.field] == true then
@@ -276,13 +379,11 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                         end
                     end
                 end
-
                 setBtn:SetScript("OnClick", function()
                     if ddInfo.selectedCmd then
                         SendChatMessage(specWhisper .. " " .. ddInfo.selectedCmd, "WHISPER", nil, botName)
                     end
                 end)
-
                 combatDDs[#combatDDs + 1] = ddInfo
                 prevBottom = setBtn
 
@@ -301,8 +402,8 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                 local ddName = "CleanBotClassDD_" .. counter .. "_" .. gi
                 local dd = CreateFrame("Frame", ddName, leftCol, "UIDropDownMenuTemplate")
                 dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
-                UIDropDownMenu_SetWidth(dd, 130)
-                if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
+                UIDropDownMenu_SetWidth(dd, 160)
+                if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 160) end
 
                 local ddInfo = { dd = dd, strategies = strategies, selectedCmd = nil }
                 local cd = entry and entry.classData and entry.classData.combat
@@ -344,8 +445,12 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                     end
                 end
 
+                if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
                 combatDDs[#combatDDs + 1] = ddInfo
-                prevBottom = dd
+                local ddAnchor = CreateFrame("Frame", nil, leftCol)
+                ddAnchor:SetSize(1, 1)
+                ddAnchor:SetPoint("TOPLEFT", dd, "TOPLEFT", 16, -28)
+                prevBottom = ddAnchor
 
             else
                 -- Checkbox group
@@ -397,8 +502,8 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                 local ddName = "CleanBotClassNCDD_" .. counter .. "_" .. gi
                 local dd = CreateFrame("Frame", ddName, rightCol, "UIDropDownMenuTemplate")
                 dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
-                UIDropDownMenu_SetWidth(dd, 130)
-                if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
+                UIDropDownMenu_SetWidth(dd, 160)
+                if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 160) end
 
                 UIDropDownMenu_Initialize(dd, function(self)
                     for _, s in ipairs(strategies) do
@@ -439,7 +544,10 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
                 end
 
                 nonCombatDDs[#nonCombatDDs + 1] = { dd = dd, strategies = strategies }
-                prevBottom = dd
+                local ddAnchor = CreateFrame("Frame", nil, rightCol)
+                ddAnchor:SetSize(1, 1)
+                ddAnchor:SetPoint("TOPLEFT", dd, "TOPLEFT", 16, -28)
+                prevBottom = ddAnchor
             else
                 local section, checkboxes = CB_BuildStrategySection(
                     rightCol, header, group.strategies, key, botName, counter,
@@ -490,13 +598,10 @@ NS.CleanBot_RefreshTabs = function()
     end
 
     if #bots == 0 then
-        CleanBotFrameText:SetText("No bots found in party.")
+        if NS.partyEmptyLabel then NS.partyEmptyLabel:SetText("No bots found in party.") end
         return
     end
-    CleanBotFrameText:SetText("")
-
-    CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
-    CleanBotFrame:SetWidth(NS.FRAME_WIDTH)
+    if NS.partyEmptyLabel then NS.partyEmptyLabel:SetText("") end
 
     local contentW = NS.partyContent:GetWidth()
     local contentH = NS.partyContent:GetHeight()
@@ -560,7 +665,7 @@ NS.CleanBot_RefreshTabs = function()
             local delta = x - dragLastX
             dragLastX   = x
             if delta ~= 0 then
-                modelRotation = modelRotation - delta * 0.013
+                modelRotation = modelRotation + delta * 0.013
                 model:SetRotation(modelRotation)
             end
         end)
