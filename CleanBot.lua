@@ -412,7 +412,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         local msg, sender = ...
         local key   = strlower(sender)
         local entry = CleanBot_KnownBots[key]
-        if entry then
+        if entry and strsub(msg, 1, 12) == "Strategies: " then
             if entry.awaitingCo then
                 entry.awaitingCo = false
                 local combat = NS.CB_ParseCombatStr(msg)
