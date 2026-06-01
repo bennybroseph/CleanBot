@@ -8,8 +8,10 @@ local NS = CleanBotNS
 -- Per-bot frame registries  (reset on each RefreshTabs call)
 -- ============================================================
 NS.activeBotTabs    = {}
-NS.activeBotNames   = {}  -- [tabIndex] = { name, unit }
+NS.activeBotNames   = {}  -- [tabIndex] = { name, unit, key }
 NS.activeTabIndex   = 0
+NS.selectedBotKey    = nil   -- strlower name of the currently selected bot; survives rebuilds
+NS.selectedIsTarget  = false -- true when the Target tab is active; keeps it selected while cycling targets
 NS.lastWavedAt      = nil -- bot name we most recently sent a wave to
 NS.botModelFrames   = {}
 NS.botControlFrames = {}
@@ -31,9 +33,6 @@ NS.botStarUpdaters   = {}
 -- Internal tab helpers
 -- ============================================================
 local function CleanBot_ClearTabs()
-    -- Preserve target-tab selection across rebuilds
-    local wasTargetTab = NS.activeTabIndex == -1
-
     for _, tab in ipairs(NS.activeBotTabs) do
         tab:Hide(); tab:SetParent(nil)
     end
@@ -58,18 +57,18 @@ local function CleanBot_ClearTabs()
     NS.botClassFrames    = {}
     NS.botStarUpdaters   = {}
     NS.activeBotNames    = {}
-    NS.activeTabIndex    = wasTargetTab and -1 or 0
+    NS.activeTabIndex    = 0
 end
 
-local CleanBot_SelectTab  -- forward-declared so UpdateTargetTab (in CleanBotTarget.lua) can reach it via NS
+local CleanBot_SelectTab
 CleanBot_SelectTab = function(index)
+    -- Always update selection state so RefreshTabs can restore it after rebuilds
+    local info = NS.activeBotNames and NS.activeBotNames[index]
+    NS.selectedBotKey   = info and info.key
+    NS.selectedIsTarget = info and info.isTarget or false
+
     if NS.activeTabIndex == index then return end
     NS.activeTabIndex = index
-
-    -- Deselect target tab visuals if it was active
-    if NS.targetTabBtn  then NS.targetTabBtn:SetNormalFontObject(GameFontNormalSmall); NS.targetTabBtn:SetButtonState("NORMAL") end
-    if NS.targetTabModel then NS.targetTabModel:Hide() end
-    if NS.targetTabCtrl  then NS.targetTabCtrl:Hide()  end
 
     for i, tab in ipairs(NS.activeBotTabs) do
         if i == index then
@@ -83,7 +82,6 @@ CleanBot_SelectTab = function(index)
     for i, model in ipairs(NS.botModelFrames) do
         if i == index then
             model:Show()
-            if model.SetAnimation then model:SetAnimation(66) end  -- EmoteWave
         else
             model:Hide()
         end
@@ -92,13 +90,11 @@ CleanBot_SelectTab = function(index)
         if i == index then ctrl:Show() else ctrl:Hide() end
     end
 
-    local botInfo = NS.activeBotNames and NS.activeBotNames[index]
-    if botInfo and botInfo.name ~= NS.lastWavedAt then
-        NS.lastWavedAt = botInfo.name
-        SendChatMessage("emote wave", "WHISPER", nil, botInfo.name)
+    if info and info.name ~= NS.lastWavedAt then
+        NS.lastWavedAt = info.name
+        SendChatMessage("emote wave", "WHISPER", nil, info.name)
     end
 end
-NS.CB_SelectTab = CleanBot_SelectTab  -- exposed for CleanBotTarget.lua
 
 -- ============================================================
 -- Strategy section builder — shared by combat, non-combat, and class tabs.
@@ -601,14 +597,12 @@ end
 
 -- ============================================================
 -- CB_BuildBotContent
--- Shared builder: wires up model rotation, star, inner tabs, and all
+-- Wires up model rotation, star, inner tabs, and all
 -- combat/non-combat/class content for one bot.
 -- ctrl  — right-side control frame (parent for all UI content)
 -- model — DressUpModel frame (parent for star button)
--- Returns a list of the top-level frames it created inside ctrl/model,
--- so the Target tab can clear them on target change.
 -- ============================================================
-NS.CB_BuildBotContent = function(ctrl, model, key, botName, botClass, entry, counter)
+local function CB_BuildBotContent(ctrl, model, key, botName, botClass, entry, counter)
     local topFrames = {}
 
     -- ── Model rotation via right-click drag ───────────────────
@@ -910,11 +904,17 @@ NS.CB_BuildBotContent = function(ctrl, model, key, botName, botClass, entry, cou
 end
 
 -- ============================================================
--- RefreshTabs  — rebuild all bot character tabs from scratch
+-- RefreshTabs  — rebuild all bot character tabs from scratch.
+-- Party bots are listed first; if the player is targeting a known
+-- bot that is NOT already in the party it is appended as a
+-- "Target" tab at the end.  Selection is restored by bot key so
+-- the active tab survives back-to-back rebuilds.
 -- ============================================================
 NS.CleanBot_RefreshTabs = function()
+    local prevKey = NS.selectedBotKey   -- save before ClearTabs wipes everything
     CleanBot_ClearTabs()
 
+    -- ── Collect party bots ─────────────────────────────────────
     local bots = {}
     local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
     for i = 1, numMembers do
@@ -922,8 +922,29 @@ NS.CleanBot_RefreshTabs = function()
         if UnitExists(unit) and NS.CleanBot_IsBot(unit) then
             local name = UnitName(unit)
             local _, class = UnitClass(unit)
-            table.insert(bots, { unit = unit, name = name, class = class or "WARRIOR" })
+            table.insert(bots, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
         end
+    end
+
+    -- ── Append target if it is a known bot not already in party ──
+    local targetName = UnitExists("target") and UnitIsPlayer("target") and UnitName("target")
+    local targetKey  = targetName and strlower(targetName)
+    if targetKey and CleanBot_KnownBots[targetKey] then
+        local tEntry = CleanBot_KnownBots[targetKey]
+        if not tEntry.queried then
+            tEntry.queried    = true
+            tEntry.awaitingCo = true
+            tEntry.awaitingNc = false
+            SendChatMessage("co ?", "WHISPER", nil, targetName)
+        end
+        local _, targetClass = UnitClass("target")
+        table.insert(bots, {
+            unit     = "target",
+            name     = targetName,
+            class    = targetClass or tEntry.class or "WARRIOR",
+            key      = targetKey,
+            isTarget = true,
+        })
     end
 
     if #bots == 0 then
@@ -941,28 +962,32 @@ NS.CleanBot_RefreshTabs = function()
         NS.tabCounter = NS.tabCounter + 1
         local counter = NS.tabCounter
 
-        -- ── Character tab button ───────────────────────────────────
+        -- ── Character tab button ──────────────────────────────────
         local tab = CreateFrame("Button", "CleanBotCharTab" .. counter,
                                 NS.botTabBar, "UIPanelButtonTemplate")
         tab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
         tab:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
-        tab:SetText("  " .. bot.name)
         tab:SetNormalFontObject(GameFontNormalSmall)
 
-        local icon = tab:CreateTexture(nil, "OVERLAY")
-        icon:SetSize(14, 14)
-        icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
-        icon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
-        local coords = NS.CLASS_ICON_COORDS[bot.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
-        icon:SetTexCoord(unpack(coords))
+        if bot.isTarget then
+            tab:SetText("Target")
+        else
+            tab:SetText("  " .. bot.name)
+            local icon = tab:CreateTexture(nil, "OVERLAY")
+            icon:SetSize(14, 14)
+            icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
+            icon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+            local coords = NS.CLASS_ICON_COORDS[bot.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
+            icon:SetTexCoord(unpack(coords))
+        end
 
         local idx = i
         tab:SetScript("OnClick", function() CleanBot_SelectTab(idx) end)
         table.insert(NS.activeBotTabs, tab)
-        NS.activeBotNames[i] = { name = bot.name, unit = bot.unit }
+        NS.activeBotNames[i] = { name = bot.name, unit = bot.unit, key = bot.key, isTarget = bot.isTarget }
         if NS.ElvUI_S then NS.ElvUI_S:HandleButton(tab) end
 
-        -- ── Model + control frames ─────────────────────────────────
+        -- ── Model + control frames ────────────────────────────────
         local model = CreateFrame("DressUpModel", "CleanBotModel" .. counter, NS.partyContent)
         model:SetSize(contentW / 3, contentH)
         model:SetPoint("TOPLEFT", NS.partyContent, "TOPLEFT", 0, 0)
@@ -976,23 +1001,21 @@ NS.CleanBot_RefreshTabs = function()
         ctrl:Hide()
         table.insert(NS.botControlFrames, ctrl)
 
-        local botName = bot.name
-        local key     = strlower(bot.name)
-        local entry   = CleanBot_KnownBots[key]
-        NS.CB_BuildBotContent(ctrl, model, key, botName, bot.class, entry, counter)
+        local entry = CleanBot_KnownBots[bot.key]
+        CB_BuildBotContent(ctrl, model, bot.key, bot.name, bot.class, entry, counter)
     end
 
-    -- Position Target tab after all bot tabs and refresh its state
-    if NS.targetTabBtn then
-        NS.targetTabBtn:ClearAllPoints()
-        NS.targetTabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT",
-            NS.PAD + #bots * (NS.TAB_WIDTH + 2), 0)
-        NS.CleanBot_UpdateTargetTab()
+    -- Restore selection: if the user was on the Target tab, find the new target entry
+    -- (bot key may have changed); otherwise restore by key, defaulting to first.
+    local restoreIdx = nil
+    if NS.selectedIsTarget then
+        for i, info in ipairs(NS.activeBotNames) do
+            if info.isTarget then restoreIdx = i; break end
+        end
+    elseif prevKey then
+        for i, info in ipairs(NS.activeBotNames) do
+            if info.key == prevKey then restoreIdx = i; break end
+        end
     end
-
-    if NS.activeTabIndex == 0 and #bots > 0 then
-        CleanBot_SelectTab(1)
-    end
+    CleanBot_SelectTab(restoreIdx or 1)
 end
-
--- Target tab logic lives in Party\CleanBotTarget.lua

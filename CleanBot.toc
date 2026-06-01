@@ -10,7 +10,6 @@ CleanBot.lua
 Party\CleanBotPartyData.lua
 Party\CleanBotClassData.lua
 Party\CleanBotParty.lua
-Party\CleanBotTarget.lua
 CleanBotManageTab.lua
 CleanBotSettingsTab.lua
 CleanBotCommands.lua

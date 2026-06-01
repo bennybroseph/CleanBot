@@ -306,9 +306,6 @@ function CleanBot_BuildFrames()
     NS.CB_ApplyPanelSkin(CleanBotFrame)
 
     NS.CleanBot_SelectTopTab(1)
-
-    -- Target tab: persistent frames (defined in CleanBotParty.lua, ready by PLAYER_LOGIN)
-    NS.CleanBot_InitTargetTab()
 end
 
 -- ============================================================
@@ -612,9 +609,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PLAYER_TARGET_CHANGED" then
-        -- Only act when the Party tab (which owns the Target tab) is visible
-        if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_UpdateTargetTab then
-            NS.CleanBot_UpdateTargetTab()
+        -- Rebuild party tabs so the Target tab appears/disappears as needed
+        if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_RefreshTabs then
+            NS.CleanBot_RefreshTabs()
         end
     end
 end)
