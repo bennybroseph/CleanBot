@@ -1,11 +1,12 @@
 -- ============================================================
--- CleanBotTargetTab.lua  —  Target tab: add / remove bots
+-- CleanBotTargetTab.lua  —  Manage tab: add / remove bots
 -- ============================================================
 local NS = CleanBotNS
 
 NS.CleanBot_BuildTargetContent = function()
     local function makeBtn(label, yOffset, onClick)
-        local btn = CreateFrame("Button", "CleanBotTarget" .. label .. "Btn",
+        local safeName = label:gsub("%s+", "")
+        local btn = CreateFrame("Button", "CleanBotTarget" .. safeName .. "Btn",
                                 NS.targetPanel, "UIPanelButtonTemplate")
         btn:SetSize(120, 24)
         btn:SetPoint("TOPLEFT", NS.targetPanel, "TOPLEFT", NS.PAD, yOffset)
@@ -15,7 +16,7 @@ NS.CleanBot_BuildTargetContent = function()
         return btn
     end
 
-    makeBtn("Add", -NS.PAD, function()
+    makeBtn("Add Target", -NS.PAD, function()
         if not UnitExists("target") or not UnitIsPlayer("target") then
             print("|cffffcc00CleanBot|r: No valid player target selected.")
             return
@@ -34,7 +35,7 @@ NS.CleanBot_BuildTargetContent = function()
         InviteUnit(target)
     end)
 
-    makeBtn("Remove", -(NS.PAD + 30), function()
+    makeBtn("Remove Target", -(NS.PAD + 30), function()
         if not UnitExists("target") or not UnitIsPlayer("target") then
             print("|cffffcc00CleanBot|r: No valid player target selected.")
             return
@@ -63,5 +64,85 @@ NS.CleanBot_BuildTargetContent = function()
         if removed == 0 then
             print("|cffffcc00CleanBot|r: No bots found in party to remove.")
         end
+    end)
+
+    -- ── Favorites section ─────────────────────────────────────
+    local favLabel = NS.targetPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    favLabel:SetPoint("TOPLEFT", NS.targetPanel, "TOPLEFT", NS.PAD, -(NS.PAD + 120))
+    favLabel:SetText("Favorites")
+
+    -- Builds a favorites dropdown and wires up its selection callback.
+    -- onSelect(displayName) is called when an entry is chosen.
+    local function makeFavDropdown(frameName, anchorBtn, onSelect)
+        local dd = CreateFrame("Frame", frameName, NS.targetPanel, "UIDropDownMenuTemplate")
+        dd:SetPoint("LEFT", anchorBtn, "RIGHT", -10, 0)
+        UIDropDownMenu_SetWidth(dd, 150)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 150) end
+        UIDropDownMenu_Initialize(dd, function(self)
+            UIDropDownMenu_SetText(dd, "")
+            onSelect(nil)
+            local favs = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots
+            if not favs then return end
+            local any = false
+            for key in pairs(favs) do
+                local displayName = key:sub(1, 1):upper() .. key:sub(2)
+                local info        = UIDropDownMenu_CreateInfo()
+                info.text         = displayName
+                info.value        = displayName
+                info.func         = function()
+                    UIDropDownMenu_SetText(self, displayName)
+                    onSelect(displayName)
+                end
+                UIDropDownMenu_AddButton(info)
+                any = true
+            end
+            if not any then
+                local info        = UIDropDownMenu_CreateInfo()
+                info.text         = "No favorites saved"
+                info.notCheckable = 1
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+        return dd
+    end
+
+    local selectedFavName = nil
+    local addFavBtn = CreateFrame("Button", "CleanBotAddFavoriteBtn", NS.targetPanel, "UIPanelButtonTemplate")
+    addFavBtn:SetSize(60, 24)
+    addFavBtn:SetPoint("TOPLEFT", favLabel, "BOTTOMLEFT", 0, -8)
+    addFavBtn:SetText("Invite")
+    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(addFavBtn) end
+    local favDD = makeFavDropdown("CleanBotFavoritesDD", addFavBtn, function(name) selectedFavName = name end)
+    addFavBtn:SetScript("OnClick", function()
+        if not selectedFavName then
+            print("|cffffcc00CleanBot|r: No favorite selected.")
+            return
+        end
+        SendChatMessage(".playerbots bot add " .. selectedFavName, "SAY")
+    end)
+
+    local selectedDelName = nil
+    local delFavBtn = CreateFrame("Button", "CleanBotDeleteFavoriteBtn", NS.targetPanel, "UIPanelButtonTemplate")
+    delFavBtn:SetSize(60, 24)
+    delFavBtn:SetPoint("TOPLEFT", addFavBtn, "BOTTOMLEFT", 0, -8)
+    delFavBtn:SetText("Delete")
+    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(delFavBtn) end
+    local delFavDD = makeFavDropdown("CleanBotFavoritesDelDD", delFavBtn, function(name) selectedDelName = name end)
+    delFavBtn:SetScript("OnClick", function()
+        if not selectedDelName then
+            print("|cffffcc00CleanBot|r: No favorite selected.")
+            return
+        end
+        local key = strlower(selectedDelName)
+        if CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots then
+            CleanBot_SavedVars.favoriteBots[key] = nil
+        end
+        if NS.botStarUpdaters and NS.botStarUpdaters[key] then
+            NS.botStarUpdaters[key]()
+        end
+        UIDropDownMenu_SetText(delFavDD, "")
+        UIDropDownMenu_SetText(favDD, "")
+        selectedDelName = nil
+        selectedFavName = nil
     end)
 end

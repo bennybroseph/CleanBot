@@ -3,11 +3,14 @@
 ## Notes: A clean interface to manage Playerbots. No more complex trees of buttons!
 ## Author: BennyBroseph
 ## Version: 0.1
+## SavedVariables: CleanBot_SavedVars
 
 CleanBot.xml
 CleanBot.lua
 Party\CleanBotPartyData.lua
+Party\CleanBotClassData.lua
 Party\CleanBotParty.lua
 CleanBotTargetTab.lua
 CleanBotSettingsTab.lua
 CleanBotCommands.lua
+CleanBotMinimap.lua

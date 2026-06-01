@@ -125,6 +125,60 @@ NS.CB_ParseNonCombatStr = function(msg)
 end
 
 -- ============================================================
+-- Class-specific data helpers
+-- (NS.CLASS_STRATEGIES is defined in CleanBotClassData.lua, loaded before this)
+-- ============================================================
+
+-- Returns a fresh classData table for a given class.
+NS.CB_DefaultClassData = function(class)
+    local result = { combat = {}, nonCombat = {} }
+    local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
+    if not cs then return result end
+    if cs.combat then
+        for _, group in ipairs(cs.combat) do
+            for _, s in ipairs(group.strategies) do
+                result.combat[s.field] = nil
+            end
+        end
+    end
+    if cs.nonCombat then
+        for _, group in ipairs(cs.nonCombat) do
+            for _, s in ipairs(group.strategies) do
+                result.nonCombat[s.field] = nil
+            end
+        end
+    end
+    return result
+end
+
+-- Parse a co? or nc? response for class-specific strategy tokens.
+-- section: "combat" or "nonCombat"
+-- Returns { field = bool } for every strategy in that section.
+NS.CB_ParseClassStr = function(msg, class, section)
+    local result = {}
+    local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
+    if not cs or not cs[section] then return result end
+
+    local map = {}
+    for _, group in ipairs(cs[section]) do
+        for _, s in ipairs(group.strategies) do
+            map[s.cmd]       = s.field
+            result[s.field]  = false
+        end
+    end
+
+    if not msg or msg == "" then return result end
+    local colon = strfind(msg, ":", 1, true)
+    local list  = colon and strsub(msg, colon + 1) or msg
+    for token in gmatch(list, "[^,]+") do
+        token = token:match("^%s*(.-)%s*$")
+        local field = map[token]
+        if field then result[field] = true end
+    end
+    return result
+end
+
+-- ============================================================
 -- Bot detection
 -- ============================================================
 NS.CleanBot_IsBot = function(unit)

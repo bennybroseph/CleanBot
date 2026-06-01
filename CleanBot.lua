@@ -146,8 +146,8 @@ CleanBot_KnownBots = {}  -- global so Commands.lua and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH  = 600
-NS.FRAME_HEIGHT = 480
+NS.FRAME_WIDTH  = 680
+NS.FRAME_HEIGHT = 560
 NS.TAB_HEIGHT   = 24
 NS.TAB_WIDTH    = 88
 NS.TITLE_H      = 28
@@ -193,7 +193,7 @@ NS.targetPanel   = nil
 NS.settingsPanel = nil
 
 -- ============================================================
--- Top-level tab management  (Party = 1, Target = 2, Settings = 3)
+-- Top-level tab management  (Manage = 1, Party = 2, Settings = 3)
 -- ============================================================
 NS.activeTopTabIndex = 0
 NS.topTabs           = {}
@@ -212,11 +212,11 @@ NS.CleanBot_SelectTopTab = function(index)
         end
     end
 
-    if NS.partyPanel   then if index == 1 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
-    if NS.targetPanel  then if index == 2 then NS.targetPanel:Show()   else NS.targetPanel:Hide()   end end
+    if NS.targetPanel   then if index == 1 then NS.targetPanel:Show()   else NS.targetPanel:Hide()   end end
+    if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
 
-    if index == 1 then
+    if index == 2 then
         for mi, model in ipairs(NS.botModelFrames or {}) do
             if mi == (NS.activeTabIndex or 0) then model:Show() else model:Hide() end
         end
@@ -241,7 +241,7 @@ function CleanBot_BuildFrames()
     NS.topTabBar:SetPoint("TOPRIGHT", CleanBotFrame, "TOPRIGHT", 0, -NS.TITLE_H)
     NS.topTabBar:SetHeight(NS.TOP_BAR_H)
 
-    local tabLabels = { "Party", "Target", "Settings" }
+    local tabLabels = { "Manage", "Party", "Settings" }
     for i, label in ipairs(tabLabels) do
         local tab = CreateFrame("Button", "CleanBotTopTab" .. i,
                                 NS.topTabBar, "UIPanelButtonTemplate")
@@ -353,6 +353,11 @@ initFrame:SetScript("OnEvent", function(self, event)
             NS.ElvUI_E = unpack(ElvUI)
             if NS.ElvUI_E then NS.ElvUI_S = NS.ElvUI_E:GetModule("Skins") end
         end
+
+        -- Initialise saved variables, preserving any existing data
+        if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
+        if type(CleanBot_SavedVars.favoriteBots) ~= "table" then CleanBot_SavedVars.favoriteBots = {} end
+
         CleanBot_BuildFrames()
         self:UnregisterEvent("PLAYER_LOGIN")
 
@@ -419,6 +424,30 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 syncCheckboxes(NS.botPositionFrames, NS.POSITION_STRATEGIES)
                 syncCheckboxes(NS.botTimingFrames,   NS.TIMING_STRATEGIES)
 
+                -- Parse class-specific combat flags from the same co? response.
+                local classCombat = NS.CB_ParseClassStr(msg, entry.class, "combat")
+                if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
+                entry.classData.combat = classCombat
+                local classFrames = NS.botClassFrames and NS.botClassFrames[key]
+                if classFrames then
+                    for field, cb in pairs(classFrames.combatCheckboxes) do
+                        cb:SetChecked(classCombat[field] == true)
+                    end
+                    if classFrames.combatDropdowns then
+                        for _, ddInfo in ipairs(classFrames.combatDropdowns) do
+                            local text = ""
+                            for _, s in ipairs(ddInfo.strategies) do
+                                if classCombat[s.field] == true then
+                                    text = s.name
+                                    ddInfo.selectedCmd = s.cmd
+                                    break
+                                end
+                            end
+                            UIDropDownMenu_SetText(ddInfo.dd, text)
+                        end
+                    end
+                end
+
                 entry.awaitingNc = true
                 SendChatMessage("nc ?", "WHISPER", nil, entry.name)
 
@@ -432,6 +461,17 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
                         local cb = data.checkboxes[s.field]
                         if cb then cb:SetChecked(nc[s.field] == true) end
+                    end
+                end
+
+                -- Parse class-specific non-combat flags from the same nc? response.
+                local classNc = NS.CB_ParseClassStr(msg, entry.class, "nonCombat")
+                if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
+                entry.classData.nonCombat = classNc
+                local classFrames = NS.botClassFrames and NS.botClassFrames[key]
+                if classFrames then
+                    for field, cb in pairs(classFrames.nonCombatCheckboxes) do
+                        cb:SetChecked(classNc[field] == true)
                     end
                 end
             end
@@ -459,6 +499,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                         class     = "WARRIOR",
                         combat    = NS.CB_DefaultCombat(),
                         nonCombat = NS.CB_DefaultNonCombat(),
+                        classData = NS.CB_DefaultClassData("WARRIOR"),
                     }
                 end
             end
@@ -479,6 +520,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     class      = classKey,
                     combat     = (existing and existing.combat)    or NS.CB_DefaultCombat(),
                     nonCombat  = (existing and existing.nonCombat) or NS.CB_DefaultNonCombat(),
+                    classData  = (existing and existing.classData) or NS.CB_DefaultClassData(classKey),
                     queried    = alreadyQueried,
                     awaitingCo = existing and existing.awaitingCo,
                     awaitingNc = existing and existing.awaitingNc,
