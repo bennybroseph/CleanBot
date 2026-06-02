@@ -7,7 +7,7 @@ local NS = CleanBotNS
 
 -- Creates and fully wires up a DressUpModel for one bot.
 -- Registers NS.botStarUpdaters[key] for star refresh.
--- Stores model._dragCapture so CleanBot_ClearTabs can dispose it.
+-- Rotation drag uses the shared capture frame (NS.CB_BeginCapture).
 -- Returns the model frame.
 NS.CB_CreateModel = function(parent, contentW, contentH, unit, key, counter)
     local model = CreateFrame("DressUpModel", "CleanBotModel" .. counter, parent)
@@ -20,24 +20,9 @@ NS.CB_CreateModel = function(parent, contentW, contentH, unit, key, counter)
     local modelRotation = 0
     local dragLastX     = 0
 
-    -- Full-screen capture frame absorbs mouse events during drag.
-    -- Parented to UIParent (not model) so it can cover the whole screen;
-    -- stored on the model so ClearTabs can clean it up.
-    local dragCapture = CreateFrame("Frame", "CleanBotDragCapture" .. counter, UIParent)
-    dragCapture:SetAllPoints(UIParent)
-    dragCapture:SetFrameStrata("FULLSCREEN_DIALOG")
-    dragCapture:EnableMouse(true)
-    dragCapture:Hide()
-    model._dragCapture = dragCapture
-
-    local function stopDrag()
-        dragCapture:Hide()
-        SetCursor(nil)
-    end
-    dragCapture:SetScript("OnMouseUp", function(self, button)
-        if button == "RightButton" then stopDrag() end
-    end)
-    dragCapture:SetScript("OnUpdate", function()
+    -- Rotation tracks the horizontal cursor delta while the shared
+    -- full-screen capture frame (NS.CB_BeginCapture) absorbs mouse events.
+    local function rotateOnUpdate()
         local x     = select(1, GetCursorPosition())
         local delta = x - dragLastX
         dragLastX   = x
@@ -45,14 +30,21 @@ NS.CB_CreateModel = function(parent, contentW, contentH, unit, key, counter)
             modelRotation = modelRotation + delta * 0.013
             model:SetRotation(modelRotation)
         end
-    end)
+    end
+
+    local function stopDrag()
+        NS.CB_EndCapture()
+        SetCursor(nil)
+    end
 
     model:EnableMouse(true)
     model:SetScript("OnMouseDown", function(self, button)
         if button == "RightButton" then
             dragLastX = select(1, GetCursorPosition())
             SetCursor("none")
-            dragCapture:Show()
+            NS.CB_BeginCapture(rotateOnUpdate, function(btn)
+                if btn == "RightButton" then stopDrag() end
+            end)
         end
     end)
     model:SetScript("OnMouseUp", function(self, button)
@@ -99,16 +91,13 @@ NS.CB_CreateModel = function(parent, contentW, contentH, unit, key, counter)
     starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- ── Refresh Equipment button ──────────────────────────────
-    local refreshBtn = CreateFrame("Button", "CleanBotRefreshEquip" .. counter, model, "UIPanelButtonTemplate")
-    refreshBtn:SetSize(110, 22)
-    refreshBtn:SetPoint("TOP", model, "TOP", 0, -6)
-    refreshBtn:SetText("Refresh Equipment")
-    refreshBtn:SetScript("OnClick", function()
+    local refreshBtn = NS.CB_CreateButton(model, "CleanBotRefreshEquip" .. counter,
+                                          "Refresh Equipment", 110, 22, function()
         if NS.CB_QueueEquipRefresh then
             NS.CB_QueueEquipRefresh({{ key = key, unit = unit }})
         end
     end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(refreshBtn) end
+    refreshBtn:SetPoint("TOP", model, "TOP", 0, -6)
 
     -- ── Equipment slot buttons (paperdoll layout) ─────────────
     NS.CB_CreateEquipSlots(model, key, counter, unit)

@@ -4,8 +4,7 @@
 local NS = CleanBotNS
 
 NS.CleanBot_BuildSettingsContent = function()
-    local cb = CreateFrame("CheckButton", "CleanBotAssumeBotsCheck",
-                           NS.settingsPanel, "UICheckButtonTemplate")
+    local cb = NS.CB_CreateCheckBox(NS.settingsPanel, "CleanBotAssumeBotsCheck")
     cb:SetPoint("TOPLEFT", NS.settingsPanel, "TOPLEFT", NS.PAD, -NS.PAD)
     cb:SetChecked(NS.ASSUME_ALL_PARTY_ARE_BOTS)
     cb:SetScript("OnClick", function(self)
@@ -27,6 +26,4 @@ NS.CleanBot_BuildSettingsContent = function()
         GameTooltip:Show()
     end)
     cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
 end

@@ -7,6 +7,8 @@
 
 CleanBot.xml
 CleanBot.lua
+CleanBotSkin.lua
+CleanBotBridge.lua
 Party\CleanBotPartyData.lua
 Party\CleanBotClassData.lua
 Party\CleanBotEquipData.lua
@@ -16,5 +18,6 @@ Party\CleanBotModel.lua
 Party\CleanBotParty.lua
 CleanBotManageTab.lua
 CleanBotSettingsTab.lua
+CleanBotDebug.lua
 CleanBotCommands.lua
 CleanBotMinimap.lua

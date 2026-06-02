@@ -27,6 +27,15 @@ NS.botClassFrames    = {}
 NS.botStarUpdaters   = {}
 NS.botEquipSlots     = {}
 
+-- All per-key registries above, gathered for one-shot teardown in
+-- CB_TearDownTabEntry (so adding a registry only needs the line above).
+NS.botRegistries = {
+    NS.botRoleDDs, NS.botTankFrames, NS.botDpsFrames, NS.botHealFrames,
+    NS.botCombatFrames, NS.botPositionFrames, NS.botTimingFrames,
+    NS.botInnerTabs, NS.botNcFrames, NS.botClassFrames,
+    NS.botStarUpdaters, NS.botEquipSlots,
+}
+
 -- ============================================================
 -- Geometry helper — single source of truth for layout constants
 -- ============================================================
@@ -38,20 +47,19 @@ local function CB_GetGeometry()
 
     local modelH   = contentH - NS.EQUIP_WEAPON_PAD
     local modelW   = math.floor(contentW / 3)
-    local eqStep   = math.floor(modelH / 8)
-    local eqSlot   = math.floor(eqStep * 0.88)
-    local eqGapX   = math.max(2, math.floor(modelW * 0.03))
-    local eqColW   = eqSlot + eqGapX
-    local ctrlLeft = eqColW + modelW + eqColW + NS.PAD
-    return contentW, contentH, modelH, eqColW, ctrlLeft
+    local g        = NS.CB_SlotGeometry(modelW, modelH)
+    local ctrlLeft = g.colW + modelW + g.colW + NS.PAD
+    return contentW, contentH, modelH, g.colW, ctrlLeft
 end
 
 -- ============================================================
 -- Strategy section builder — shared by combat, non-combat, and class tabs.
 -- onClickFn(strategy, checked) overrides the default "co +/-cmd" whisper.
+-- sourceTable supplies each checkbox's initial checked state (entry.combat,
+-- entry.nonCombat, or a classData section); nil leaves boxes unchecked.
 -- Returns (sectionFrame, checkboxes) where checkboxes is keyed by field name.
 -- ============================================================
-local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, counter, onClickFn)
+local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, counter, onClickFn, sourceTable)
     local section = CreateFrame("Frame", nil, ctrl)
     section:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -12)
     section:SetPoint("RIGHT",   ctrl,   "RIGHT",       0,   0)
@@ -59,9 +67,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
 
     local checkboxes = {}
     for i, s in ipairs(strategies) do
-        local cb = CreateFrame("CheckButton",
-                               "CleanBotCB_" .. s.field .. "_" .. counter,
-                               section, "UICheckButtonTemplate")
+        local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. counter)
         cb:SetSize(20, 20)
         cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -(i - 1) * 26)
 
@@ -77,8 +83,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
         end)
         cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        local cbEntry = CleanBot_PartyBots[key]
-        cb:SetChecked(cbEntry and cbEntry.combat and cbEntry.combat[s.field] == true)
+        cb:SetChecked(sourceTable and sourceTable[s.field] == true)
 
         local strat = s
         if onClickFn then
@@ -98,20 +103,26 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
             end)
         end
 
-        if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
         checkboxes[s.field] = cb
     end
 
     return section, checkboxes
 end
 
--- Returns the party unit ID for a bot by name, or nil.
-local function CB_GetBotUnit(name)
-    for i = 1, GetNumPartyMembers() do
-        local unit = "party" .. i
-        if UnitName(unit) == name then return unit end
+-- Applies a mutually-exclusive strategy selection: whispers a single
+-- "cmd +sel,-other,-other..." toggle list and mirrors the choice into
+-- dataTable (entry.combat or a classData section), if supplied.
+local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, botName, dataTable)
+    local parts = {}
+    for _, rs in ipairs(strategies) do
+        parts[#parts + 1] = (rs.field == selectedField and "+" or "-") .. rs.cmd
     end
-    return nil
+    SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, botName)
+    if dataTable then
+        for _, rs in ipairs(strategies) do
+            dataTable[rs.field] = (rs.field == selectedField)
+        end
+    end
 end
 
 -- ============================================================
@@ -133,22 +144,12 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
     end
     header:SetText(group.header)
 
-    local showBtn = CreateFrame("Button", "CleanBotShowTal_" .. counter .. "_" .. gi,
-                                parent, "UIPanelButtonTemplate")
-    showBtn:SetSize(100, 22)
-    showBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
-    showBtn:SetText("Show Talents")
-    showBtn:SetScript("OnClick", function()
-        local unit = CB_GetBotUnit(botName)
+    local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. counter .. "_" .. gi,
+                                       "Show Talents", 100, 22, function()
+        local unit = NS.CB_FindPartyUnit(botName)
         if not unit then return end
         InspectUnit(unit)
-        local elapsed = 0
-        local f = CreateFrame("Frame")
-        f:SetScript("OnUpdate", function(self, dt)
-            elapsed = elapsed + dt
-            if elapsed < 0.05 then return end
-            self:SetScript("OnUpdate", nil)
-
+        NS.CB_After(0.05, function()
             if Talented then
                 local entry = CleanBot_PartyBots[strlower(botName)]
                 local class = entry and entry.class or select(2, UnitClass(unit)) or "WARRIOR"
@@ -181,20 +182,14 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
             end
         end)
     end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(showBtn) end
+    showBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
 
-    local setBtn = CreateFrame("Button", "CleanBotSetTal_" .. counter .. "_" .. gi .. "s",
-                               parent, "UIPanelButtonTemplate")
-    setBtn:SetSize(100, 22)
+    local setBtn = NS.CB_CreateButton(parent, "CleanBotSetTal_" .. counter .. "_" .. gi .. "s",
+                                      "Set Talents", 100, 22)
     setBtn:SetPoint("TOPLEFT", showBtn, "BOTTOMLEFT", 0, -4)
-    setBtn:SetText("Set Talents")
-    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(setBtn) end
 
-    local dd = CreateFrame("Frame", "CleanBotClassDD_" .. counter .. "_" .. gi,
-                           parent, "UIDropDownMenuTemplate")
+    local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. counter .. "_" .. gi, 130)
     dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
-    UIDropDownMenu_SetWidth(dd, 130)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
 
     local ddInfo = { selectedCmd = nil }
     local entry  = CleanBot_PartyBots[strlower(botName)]
@@ -271,11 +266,8 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
             end
             header:SetText(group.header)
 
-            local dd = CreateFrame("Frame", "CleanBotClassDD_" .. cmd .. counter .. "_" .. gi,
-                                   col, "UIDropDownMenuTemplate")
+            local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. counter .. "_" .. gi, 160)
             dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
-            UIDropDownMenu_SetWidth(dd, 160)
-            if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 160) end
 
             local cd = entry and entry.classData and entry.classData[dataField]
             UIDropDownMenu_Initialize(dd, function(self)
@@ -288,17 +280,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                     info.tooltipOnButton = 1
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
-                        local parts = {}
-                        for _, rs in ipairs(strategies) do
-                            parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
-                        end
-                        SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, botName)
                         local e = CleanBot_PartyBots[strlower(botName)]
-                        if e and e.classData then
-                            for _, rs in ipairs(strategies) do
-                                e.classData[dataField][rs.field] = (rs.field == s.field)
-                            end
-                        end
+                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, botName,
+                            e and e.classData and e.classData[dataField])
                     end
                     info.checked = cd and (cd[s.field] == true)
                     UIDropDownMenu_AddButton(info)
@@ -335,13 +319,8 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                     SendChatMessage(cmd .. " " .. toggle, "WHISPER", nil, botName)
                     local e = CleanBot_PartyBots[strlower(botName)]
                     if e and e.classData then e.classData[dataField][s.field] = checked end
-                end)
-            if entry and entry.classData and entry.classData[dataField] then
-                for _, s in ipairs(group.strategies) do
-                    local cb = checkboxes[s.field]
-                    if cb then cb:SetChecked(entry.classData[dataField][s.field] == true) end
-                end
-            end
+                end,
+                entry and entry.classData and entry.classData[dataField])
             section:Show()
             if registry then
                 registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = group.strategies, dataField = dataField }
@@ -446,15 +425,12 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
 
     local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[botClass]) or botClass
     for j, lbl in ipairs({ "Combat", "Non-Combat", classDisplayName }) do
-        local itab = CreateFrame("Button", "CleanBotInnerTab" .. counter .. "_" .. j,
-                                 innerTabBar, "UIPanelButtonTemplate")
-        itab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
-        itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
-        itab:SetText(lbl)
-        itab:SetNormalFontObject(GameFontNormalSmall)
         local jj = j
-        itab:SetScript("OnClick", function() selectInnerTab(jj) end)
-        if NS.ElvUI_S then NS.ElvUI_S:HandleButton(itab) end
+        local itab = NS.CB_CreateButton(innerTabBar, "CleanBotInnerTab" .. counter .. "_" .. j,
+                                        lbl, NS.TAB_WIDTH, NS.TAB_HEIGHT,
+                                        function() selectInnerTab(jj) end)
+        itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
+        itab:SetNormalFontObject(GameFontNormalSmall)
         innerTabBtns[j] = itab
     end
     selectInnerTab(1)
@@ -478,13 +454,8 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
             SendChatMessage("nc " .. toggle, "WHISPER", nil, botName)
             local e = CleanBot_PartyBots[strlower(botName)]
             if e and e.nonCombat then e.nonCombat[s.field] = checked end
-        end)
-    if entry and entry.nonCombat then
-        for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
-            local cb = ncCheckboxes[s.field]
-            if cb then cb:SetChecked(entry.nonCombat[s.field] == true) end
-        end
-    end
+        end,
+        entry and entry.nonCombat)
     ncSection:Show()
     NS.botNcFrames[key] = { section = ncSection, checkboxes = ncCheckboxes }
 
@@ -517,10 +488,8 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     multiRoleLabel:SetText("Multiple Roles Selected")
     if multipleRoles then multiRoleLabel:Show() else multiRoleLabel:Hide() end
 
-    local dd = CreateFrame("Frame", "CleanBotRoleDD" .. counter, leftCol, "UIDropDownMenuTemplate")
+    local dd = NS.CB_CreateDropdown(leftCol, "CleanBotRoleDD" .. counter, 90)
     dd:SetPoint("LEFT", roleLabel, "RIGHT", 2, -2)
-    UIDropDownMenu_SetWidth(dd, 90)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 90) end
     UIDropDownMenu_Initialize(dd, function(self)
         for _, s in ipairs(NS.ROLE_STRATEGIES) do
             local info           = UIDropDownMenu_CreateInfo()
@@ -531,17 +500,9 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                local parts = {}
-                for _, rs in ipairs(NS.ROLE_STRATEGIES) do
-                    parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
-                end
-                SendChatMessage("co " .. table.concat(parts, ","), "WHISPER", nil, botName)
                 local e = CleanBot_PartyBots[strlower(botName)]
-                if e and e.combat then
-                    for _, rs in ipairs(NS.ROLE_STRATEGIES) do
-                        e.combat[rs.field] = (rs.field == s.field)
-                    end
-                end
+                CB_ApplyExclusiveSelection(NS.ROLE_STRATEGIES, s.field, "co", botName,
+                    e and e.combat)
                 local bk = strlower(botName)
                 local function showIf(tbl, roleField)
                     if tbl[bk] then
@@ -570,15 +531,17 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
 
     local ROLE_AREA_H = math.max(#NS.TANK_STRATEGIES, #NS.DPS_STRATEGIES, #NS.HEAL_STRATEGIES) * 26
 
-    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, key, botName, counter)
+    local combatData = entry and entry.combat
+
+    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, key, botName, counter, nil, combatData)
     if not multipleRoles and activeRole == "isTank" then tankSection:Show() else tankSection:Hide() end
     NS.botTankFrames[key] = { section = tankSection, checkboxes = tankCBs }
 
-    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, key, botName, counter)
+    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, key, botName, counter, nil, combatData)
     if not multipleRoles and activeRole == "isDPS" then dpsSection:Show() else dpsSection:Hide() end
     NS.botDpsFrames[key] = { section = dpsSection, checkboxes = dpsCBs }
 
-    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, key, botName, counter)
+    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, key, botName, counter, nil, combatData)
     if not multipleRoles and activeRole == "isHealer" then healSection:Show() else healSection:Hide() end
     NS.botHealFrames[key] = { section = healSection, checkboxes = healCBs }
 
@@ -590,7 +553,7 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     combatHeader:SetPoint("TOPLEFT", roleAreaEnd, "TOPLEFT", 4, -10)
     combatHeader:SetText("Combat Control")
 
-    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, key, botName, counter)
+    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, key, botName, counter, nil, combatData)
     combatSection:Show()
     NS.botCombatFrames[key] = { section = combatSection, checkboxes = combatCBs }
 
@@ -598,7 +561,7 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     posHeader:SetPoint("TOPLEFT", rightCol, "TOPLEFT", 4, -10)
     posHeader:SetText("Positioning")
 
-    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, key, botName, counter)
+    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, key, botName, counter, nil, combatData)
     posSection:Show()
     NS.botPositionFrames[key] = { section = posSection, checkboxes = posCBs }
 
@@ -606,7 +569,7 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     timingHeader:SetPoint("TOPLEFT", posSection, "BOTTOMLEFT", 4, -12)
     timingHeader:SetText("Timing & Marking")
 
-    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, key, botName, counter)
+    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, key, botName, counter, nil, combatData)
     timingSection:Show()
     NS.botTimingFrames[key] = { section = timingSection, checkboxes = timingCBs }
 end
@@ -619,27 +582,10 @@ end
 -- Deparenting ctrl is sufficient — all content frames are children of ctrl.
 local function CB_TearDownTabEntry(info)
     if info.tabBtn then info.tabBtn:Hide(); info.tabBtn:SetParent(nil) end
-    if info.model then
-        if info.model._dragCapture then
-            info.model._dragCapture:Hide()
-            info.model._dragCapture:SetParent(nil)
-        end
-        info.model:Hide(); info.model:SetParent(nil)
-    end
+    if info.model then info.model:Hide(); info.model:SetParent(nil) end
     if info.ctrl then info.ctrl:Hide(); info.ctrl:SetParent(nil) end
     local k = info.key
-    NS.botStarUpdaters[k]    = nil
-    NS.botEquipSlots[k]      = nil
-    NS.botRoleDDs[k]         = nil
-    NS.botTankFrames[k]      = nil
-    NS.botDpsFrames[k]       = nil
-    NS.botHealFrames[k]      = nil
-    NS.botCombatFrames[k]    = nil
-    NS.botPositionFrames[k]  = nil
-    NS.botTimingFrames[k]    = nil
-    NS.botInnerTabs[k]       = nil
-    NS.botNcFrames[k]        = nil
-    NS.botClassFrames[k]     = nil
+    for _, reg in ipairs(NS.botRegistries) do reg[k] = nil end
 end
 
 -- ============================================================
@@ -680,13 +626,13 @@ local function CB_BuildTabEntry(info, index)
     local contentW, contentH, modelH, eqColW, ctrlLeft = CB_GetGeometry()
 
     -- ── Tab button ────────────────────────────────────────────
-    local tab = CreateFrame("Button", "CleanBotCharTab" .. counter,
-                            NS.botTabBar, "UIPanelButtonTemplate")
-    tab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
+    info._tabIdx = index
+    local tab = NS.CB_CreateButton(NS.botTabBar, "CleanBotCharTab" .. counter,
+                                   "  " .. info.name, NS.TAB_WIDTH, NS.TAB_HEIGHT,
+                                   function() CleanBot_SelectTab(info._tabIdx) end)
     tab:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (index - 1) * (NS.TAB_WIDTH + 2), 0)
     tab:SetNormalFontObject(GameFontNormalSmall)
 
-    tab:SetText("  " .. info.name)
     local icon = tab:CreateTexture(nil, "OVERLAY")
     icon:SetSize(14, 14)
     icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
@@ -694,9 +640,6 @@ local function CB_BuildTabEntry(info, index)
     local coords = NS.CLASS_ICON_COORDS[info.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
     icon:SetTexCoord(unpack(coords))
 
-    info._tabIdx = index
-    tab:SetScript("OnClick", function() CleanBot_SelectTab(info._tabIdx) end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(tab) end
     info.tabBtn = tab
 
     -- ── Model ─────────────────────────────────────────────────
