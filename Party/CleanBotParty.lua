@@ -31,26 +31,16 @@ NS.lastWavedAt      = nil
 -- Per-key registries (keyed by strlower(botName)). On bind these are repointed
 -- to the bound slot's active frames; CB_UpdateTabData and the bridge read them
 -- by key without needing to know about slots.
-NS.botRoleDDs        = {}
-NS.botTankFrames     = {}
-NS.botDpsFrames      = {}
-NS.botHealFrames     = {}
-NS.botCombatFrames   = {}
-NS.botPositionFrames = {}
-NS.botTimingFrames   = {}
-NS.botInnerTabs      = {}
-NS.botNcFrames       = {}
-NS.botClassFrames    = {}
-NS.botStarUpdaters   = {}
-NS.botEquipSlots     = {}
+NS.botInnerTabs    = {}
+NS.botFrames       = {}   -- unified registry: all strategy groups (combat, nc, class)
+NS.botStarUpdaters = {}
+NS.botEquipSlots   = {}
 
 -- All per-key registries above, gathered so a slot's key entries can be
 -- cleared in one loop when it is unbound (adding a registry only needs the
 -- line above, plus a repoint in CB_BindRegistries).
 NS.botRegistries = {
-    NS.botRoleDDs, NS.botTankFrames, NS.botDpsFrames, NS.botHealFrames,
-    NS.botCombatFrames, NS.botPositionFrames, NS.botTimingFrames,
-    NS.botInnerTabs, NS.botNcFrames, NS.botClassFrames,
+    NS.botInnerTabs, NS.botFrames,
     NS.botStarUpdaters, NS.botEquipSlots,
 }
 
@@ -113,7 +103,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             local cbField = s.field
             cb:SetScript("OnClick", function(self)
                 local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
-                SendChatMessage("co " .. toggle, "WHISPER", nil, slot.name)
+                NS.CB_SendBotCommand(slot.name, "co " .. toggle)
                 local e = CleanBot_PartyBots[slot.key]
                 if e and e.combat then
                     e.combat[cbField] = self:GetChecked() and true or false
@@ -135,7 +125,7 @@ local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, 
     for _, rs in ipairs(strategies) do
         parts[#parts + 1] = (rs.field == selectedField and "+" or "-") .. rs.cmd
     end
-    SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, slot.name)
+    NS.CB_SendBotCommand(slot.name, cmd .. " " .. table.concat(parts, ","))
     if dataTable then
         for _, rs in ipairs(strategies) do
             dataTable[rs.field] = (rs.field == selectedField)
@@ -150,7 +140,7 @@ end
 -- prevBottom=nil anchors the header to parent's TOPLEFT; otherwise to prevBottom.
 -- Returns the Set Talents button, which becomes the next prevBottom.
 -- ============================================================
-local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, registry, dataField)
+local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, registry, getSource)
     local strategies  = group.strategies
     local specWhisper = group.whisper
 
@@ -212,7 +202,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
 
     UIDropDownMenu_Initialize(dd, function(self)
         local e  = CleanBot_PartyBots[slot.key]
-        local cd = e and e.classData and e.classData.combat
+        local cd = getSource(e)
         for _, s in ipairs(strategies) do
             local info           = UIDropDownMenu_CreateInfo()
             info.text            = s.name
@@ -222,10 +212,10 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                local ee = CleanBot_PartyBots[slot.key]
-                if ee and ee.classData then
+                local cd2 = getSource(CleanBot_PartyBots[slot.key])
+                if cd2 then
                     for _, rs in ipairs(strategies) do
-                        ee.classData.combat[rs.field] = (rs.field == s.field)
+                        cd2[rs.field] = (rs.field == s.field)
                     end
                 end
             end
@@ -233,34 +223,31 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             UIDropDownMenu_AddButton(info)
         end
     end)
-    -- Send the spec whisper for whichever strategy is currently selected in
-    -- the bound bot's data (resolved live, so rebinding the slot is safe).
     setBtn:SetScript("OnClick", function()
-        local e  = CleanBot_PartyBots[slot.key]
-        local cd = e and e.classData and e.classData.combat
+        local cd = getSource(CleanBot_PartyBots[slot.key])
         if not cd then return end
         for _, s in ipairs(strategies) do
             if cd[s.field] == true then
-                SendChatMessage(specWhisper .. " " .. s.cmd, "WHISPER", nil, slot.name)
+                NS.CB_SendBotCommand(slot.name, specWhisper .. " " .. s.cmd)
                 return
             end
         end
     end)
 
     if registry then
-        registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, dataField = dataField or "combat" }
+        registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource }
     end
     return setBtn
 end
 
 -- ============================================================
 -- CB_BuildColumnGroups
--- Renders one column's worth of class strategy groups into `col`.
+-- Renders one column's worth of strategy groups into `col`.
 -- cmd       = "co" or "nc"
--- dataField = "combat" or "nonCombat" (key into entry.classData)
+-- getSource = function(entry) -> mutable data table to read/write
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
-local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, startGi, registry)
+local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, registry, getSource)
     local entry      = CleanBot_PartyBots[slot.key]
     local prevBottom = nil
 
@@ -269,7 +256,99 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, star
 
         if group.type == "dropdown" and group.whisper then
             -- Talent/whisper group: Show Talents + Set Talents + whisper dropdown
-            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, slot, tag, gi, registry, dataField)
+            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, slot, tag, gi, registry, getSource)
+
+        elseif group.type == "roleDropdown" then
+            -- Exclusive dropdown that also shows/hides per-role sub-sections.
+            local strategies = group.strategies
+            local header = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            if prevBottom then
+                header:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, -12)
+            else
+                header:SetPoint("TOPLEFT", col, "TOPLEFT", 8, -10)
+            end
+            header:SetText(group.header)
+
+            local multiRoleLabel = col:CreateFontString(nil, "OVERLAY", "GameFontRed")
+            multiRoleLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -8)
+            multiRoleLabel:SetText("Multiple Roles Selected")
+            multiRoleLabel:Hide()
+
+            local dd = NS.CB_CreateDropdown(col, "CleanBotRoleDD_" .. tag, 90)
+            dd:SetPoint("LEFT", header, "RIGHT", 2, -2)
+
+            -- Build all sub-sections anchored to the same point; only one shows at a time.
+            local subSections = {}
+            local maxSubH     = 0
+            local initSrc     = getSource(entry) or {}
+            for _, sg in ipairs(group.subGroups) do
+                local sec, cbs = CB_BuildStrategySection(col, header, sg.strategies, slot, tag,
+                    function(s, checked)
+                        local toggle = (checked and "+" or "-") .. s.cmd
+                        NS.CB_SendBotCommand(slot.name, cmd .. " " .. toggle)
+                        local ds = getSource(CleanBot_PartyBots[slot.key])
+                        if ds then ds[s.field] = checked end
+                    end,
+                    initSrc)
+                sec:Hide()
+                subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sg.strategies }
+                maxSubH = math.max(maxSubH, #sg.strategies * 26)
+            end
+
+            -- Show the correct sub-section based on initial data.
+            local activeCount = 0
+            local activeField = nil
+            for _, s in ipairs(strategies) do
+                if initSrc[s.field] == true then
+                    activeCount = activeCount + 1
+                    if not activeField then activeField = s.field end
+                end
+            end
+            if activeCount > 1 then
+                multiRoleLabel:Show()
+            elseif activeField and subSections[activeField] then
+                subSections[activeField].section:Show()
+            end
+
+            UIDropDownMenu_Initialize(dd, function(self)
+                local src = getSource(CleanBot_PartyBots[slot.key]) or {}
+                for _, s in ipairs(strategies) do
+                    local info           = UIDropDownMenu_CreateInfo()
+                    info.text            = s.name
+                    info.value           = s.field
+                    info.tooltipTitle    = s.name
+                    info.tooltipText     = s.desc
+                    info.tooltipOnButton = 1
+                    info.func            = function()
+                        UIDropDownMenu_SetText(self, s.name)
+                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot,
+                            getSource(CleanBot_PartyBots[slot.key]))
+                        multiRoleLabel:Hide()
+                        for field, sub in pairs(subSections) do
+                            if field == s.field then sub.section:Show() else sub.section:Hide() end
+                        end
+                    end
+                    info.checked = src[s.field] == true
+                    UIDropDownMenu_AddButton(info)
+                end
+            end)
+
+            -- Spacer to hold vertical room for the tallest sub-section.
+            local spacer = CreateFrame("Frame", nil, col)
+            spacer:SetSize(1, 1)
+            spacer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -(12 + maxSubH))
+            prevBottom = spacer
+
+            if registry then
+                registry[#registry + 1] = {
+                    type           = "roleDropdown",
+                    dd             = dd,
+                    strategies     = strategies,
+                    getSource      = getSource,
+                    subSections    = subSections,
+                    multiRoleLabel = multiRoleLabel,
+                }
+            end
 
         elseif group.type == "dropdown" then
             -- Exclusive dropdown: selection sends cmd +/- for each strategy
@@ -286,8 +365,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, star
             dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
 
             UIDropDownMenu_Initialize(dd, function(self)
-                local e  = CleanBot_PartyBots[slot.key]
-                local cd = e and e.classData and e.classData[dataField]
+                local cd = getSource(CleanBot_PartyBots[slot.key])
                 for _, s in ipairs(strategies) do
                     local info           = UIDropDownMenu_CreateInfo()
                     info.text            = s.name
@@ -297,9 +375,8 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, star
                     info.tooltipOnButton = 1
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
-                        local ee = CleanBot_PartyBots[slot.key]
                         CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot,
-                            ee and ee.classData and ee.classData[dataField])
+                            getSource(CleanBot_PartyBots[slot.key]))
                     end
                     info.checked = cd and (cd[s.field] == true)
                     UIDropDownMenu_AddButton(info)
@@ -308,7 +385,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, star
             if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
 
             if registry then
-                registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, dataField = dataField }
+                registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource }
             end
             local ddAnchor = CreateFrame("Frame", nil, col)
             ddAnchor:SetSize(1, 1)
@@ -328,14 +405,14 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, star
             local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
                     local toggle = (checked and "+" or "-") .. s.cmd
-                    SendChatMessage(cmd .. " " .. toggle, "WHISPER", nil, slot.name)
-                    local e = CleanBot_PartyBots[slot.key]
-                    if e and e.classData then e.classData[dataField][s.field] = checked end
+                    NS.CB_SendBotCommand(slot.name, cmd .. " " .. toggle)
+                    local ds = getSource(CleanBot_PartyBots[slot.key])
+                    if ds then ds[s.field] = checked end
                 end,
-                entry and entry.classData and entry.classData[dataField])
+                getSource(entry))
             section:Show()
             if registry then
-                registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = group.strategies, dataField = dataField }
+                registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = group.strategies, getSource = getSource }
             end
             prevBottom = section
         end
@@ -359,7 +436,7 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
     local specGroup     = cs.combat and cs.combat[1] and cs.combat[1].whisper and cs.combat[1] or nil
     local combatStartGi = specGroup and 2 or 1
     local classRegistry = {}
-    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, slot, tag, 1, classRegistry, "combat") or nil
+    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, slot, tag, 1, classRegistry, function(e) return e and e.classData and e.classData.combat end) or nil
 
     local colDivider = CreateFrame("Frame", nil, classContent)
     colDivider:SetHeight(1)
@@ -378,10 +455,34 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
     rightCol:SetPoint("TOPLEFT",     colDivider,   "TOP",         4,  0)
     rightCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOMRIGHT", 0,  0)
 
-    if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", "combat",    slot, tag, combatStartGi, classRegistry) end
-    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", "nonCombat", slot, tag, 1,            classRegistry) end
+    if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", slot, tag, combatStartGi, classRegistry, function(e) return e and e.classData and e.classData.combat    end) end
+    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", slot, tag, 1,            classRegistry, function(e) return e and e.classData and e.classData.nonCombat end) end
 
     return classRegistry
+end
+
+-- Splits groups by `column` field and renders them into two side-by-side
+-- columns inside `parent`. Groups without a column field go left by default.
+local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry, getSource)
+    local leftGroups, rightGroups = {}, {}
+    for _, grp in ipairs(groups) do
+        if grp.column == "right" then
+            rightGroups[#rightGroups + 1] = grp
+        else
+            leftGroups[#leftGroups + 1] = grp
+        end
+    end
+
+    local leftCol = CreateFrame("Frame", nil, parent)
+    leftCol:SetPoint("TOPLEFT",     parent, "TOPLEFT", 0,  0)
+    leftCol:SetPoint("BOTTOMRIGHT", parent, "BOTTOM",  -4, 0)
+
+    local rightCol = CreateFrame("Frame", nil, parent)
+    rightCol:SetPoint("TOPLEFT",     parent, "TOP",         4, 0)
+    rightCol:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+
+    CB_BuildColumnGroups(leftCol,  leftGroups,  cmd, slot, tag, 1, registry, getSource)
+    CB_BuildColumnGroups(rightCol, rightGroups, cmd, slot, tag, 1, registry, getSource)
 end
 
 -- ============================================================
@@ -451,137 +552,20 @@ local function CB_BuildBotContent(container, slot, class, tag)
     end
     selectInnerTab(1)
 
+    local allFrames = {}
+
+    CB_BuildTwoColumnContent(combatContent,    NS.STRATEGIES,    "co", slot, tag, allFrames, function(e) return e and e.combat    end)
+    CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", slot, tag, allFrames, function(e) return e and e.nonCombat end)
+
+    -- Class tab.
     local classFrames = CB_BuildClassTabContent(classContent, class, slot, tag)
-
-    local ncHeader = nonCombatContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ncHeader:SetPoint("TOPLEFT", nonCombatContent, "TOPLEFT", 12, -10)
-    ncHeader:SetText("General")
-
-    local ncSection, ncCheckboxes = CB_BuildStrategySection(
-        nonCombatContent, ncHeader, NS.NC_GENERAL_STRATEGIES, slot, tag,
-        function(s, checked)
-            local toggle = (checked and "+" or "-") .. s.cmd
-            SendChatMessage("nc " .. toggle, "WHISPER", nil, slot.name)
-            local e = CleanBot_PartyBots[slot.key]
-            if e and e.nonCombat then e.nonCombat[s.field] = checked end
-        end,
-        entry and entry.nonCombat)
-    ncSection:Show()
-
-    local leftCol = CreateFrame("Frame", nil, combatContent)
-    leftCol:SetPoint("TOPLEFT",     combatContent, "TOPLEFT", 0,  0)
-    leftCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOM",  -4, 0)
-
-    local rightCol = CreateFrame("Frame", nil, combatContent)
-    rightCol:SetPoint("TOPLEFT",     combatContent, "TOP",         4, 0)
-    rightCol:SetPoint("BOTTOMRIGHT", combatContent, "BOTTOMRIGHT", 0, 0)
-
-    local roleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    roleLabel:SetPoint("TOPLEFT", leftCol, "TOPLEFT", 8, -10)
-    roleLabel:SetText("Role")
-
-    local activeRole  = nil
-    local activeCount = 0
-    if entry and entry.combat then
-        for _, s in ipairs(NS.ROLE_STRATEGIES) do
-            if entry.combat[s.field] == true then
-                activeCount = activeCount + 1
-                if not activeRole then activeRole = s.field end
-            end
-        end
-    end
-    local multipleRoles = activeCount > 1
-
-    local multiRoleLabel = leftCol:CreateFontString(nil, "OVERLAY", "GameFontRed")
-    multiRoleLabel:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 4, -8)
-    multiRoleLabel:SetText("Multiple Roles Selected")
-    if multipleRoles then multiRoleLabel:Show() else multiRoleLabel:Hide() end
-
-    local dd = NS.CB_CreateDropdown(leftCol, "CleanBotRoleDD" .. tag, 90)
-    dd:SetPoint("LEFT", roleLabel, "RIGHT", 2, -2)
-    UIDropDownMenu_Initialize(dd, function(self)
-        local e = CleanBot_PartyBots[slot.key]
-        for _, s in ipairs(NS.ROLE_STRATEGIES) do
-            local info           = UIDropDownMenu_CreateInfo()
-            info.text            = s.name
-            info.value           = s.field
-            info.tooltipTitle    = s.name
-            info.tooltipText     = s.desc
-            info.tooltipOnButton = 1
-            info.func            = function()
-                UIDropDownMenu_SetText(self, s.name)
-                local ee = CleanBot_PartyBots[slot.key]
-                CB_ApplyExclusiveSelection(NS.ROLE_STRATEGIES, s.field, "co", slot,
-                    ee and ee.combat)
-                local bk = slot.key
-                local function showIf(tbl, roleField)
-                    if tbl[bk] then
-                        if s.field == roleField then tbl[bk].section:Show()
-                        else                         tbl[bk].section:Hide() end
-                    end
-                end
-                showIf(NS.botTankFrames, "isTank")
-                showIf(NS.botDpsFrames,  "isDPS")
-                showIf(NS.botHealFrames, "isHealer")
-                multiRoleLabel:Hide()
-            end
-            info.checked = e and e.combat and (e.combat[s.field] == true)
-            UIDropDownMenu_AddButton(info)
-        end
-    end)
-
-    local ROLE_AREA_H = math.max(#NS.TANK_STRATEGIES, #NS.DPS_STRATEGIES, #NS.HEAL_STRATEGIES) * 26
-
-    local combatData = entry and entry.combat
-
-    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, slot, tag, nil, combatData)
-    if not multipleRoles and activeRole == "isTank" then tankSection:Show() else tankSection:Hide() end
-
-    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, slot, tag, nil, combatData)
-    if not multipleRoles and activeRole == "isDPS" then dpsSection:Show() else dpsSection:Hide() end
-
-    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, slot, tag, nil, combatData)
-    if not multipleRoles and activeRole == "isHealer" then healSection:Show() else healSection:Hide() end
-
-    local roleAreaEnd = CreateFrame("Frame", nil, leftCol)
-    roleAreaEnd:SetSize(1, 1)
-    roleAreaEnd:SetPoint("TOPLEFT", roleLabel, "BOTTOMLEFT", 0, -(12 + ROLE_AREA_H))
-
-    local combatHeader = leftCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    combatHeader:SetPoint("TOPLEFT", roleAreaEnd, "TOPLEFT", 4, -10)
-    combatHeader:SetText("Combat Control")
-
-    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, slot, tag, nil, combatData)
-    combatSection:Show()
-
-    local posHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    posHeader:SetPoint("TOPLEFT", rightCol, "TOPLEFT", 4, -10)
-    posHeader:SetText("Positioning")
-
-    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, slot, tag, nil, combatData)
-    posSection:Show()
-
-    local timingHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    timingHeader:SetPoint("TOPLEFT", posSection, "BOTTOMLEFT", 4, -12)
-    timingHeader:SetText("Timing & Marking")
-
-    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, slot, tag, nil, combatData)
-    timingSection:Show()
+    for _, cf in ipairs(classFrames) do allFrames[#allFrames + 1] = cf end
 
     return {
         container      = container,
         selectInnerTab = selectInnerTab,
-        multiRoleLabel = multiRoleLabel,
         innerTabs      = { combatPanel = combatContent, nonCombatPanel = nonCombatContent, classPanel = classContent },
-        ncFrames       = { section = ncSection,     checkboxes = ncCheckboxes },
-        roleDD         = dd,
-        tankFrames     = { section = tankSection,   checkboxes = tankCBs },
-        dpsFrames      = { section = dpsSection,     checkboxes = dpsCBs },
-        healFrames     = { section = healSection,    checkboxes = healCBs },
-        combatFrames   = { section = combatSection,  checkboxes = combatCBs },
-        positionFrames = { section = posSection,     checkboxes = posCBs },
-        timingFrames   = { section = timingSection,  checkboxes = timingCBs },
-        classFrames    = classFrames,
+        frames         = allFrames,
     }
 end
 
@@ -606,7 +590,7 @@ CleanBot_SelectTab = function(index)
 
     if slot.name ~= NS.lastWavedAt then
         NS.lastWavedAt = slot.name
-        SendChatMessage("emote wave", "WHISPER", nil, slot.name)
+        NS.CB_SendBotCommand(slot.name, "emote wave")
     end
 end
 
@@ -679,33 +663,10 @@ end
 local function CB_BindRegistries(slot)
     local k = slot.key
     local c = slot.activeContent
-    NS.botStarUpdaters[k]   = slot.updateStar
-    NS.botEquipSlots[k]     = slot.equipSlots
-    NS.botRoleDDs[k]        = c.roleDD
-    NS.botTankFrames[k]     = c.tankFrames
-    NS.botDpsFrames[k]      = c.dpsFrames
-    NS.botHealFrames[k]     = c.healFrames
-    NS.botCombatFrames[k]   = c.combatFrames
-    NS.botPositionFrames[k] = c.positionFrames
-    NS.botTimingFrames[k]   = c.timingFrames
-    NS.botInnerTabs[k]      = c.innerTabs
-    NS.botNcFrames[k]       = c.ncFrames
-    NS.botClassFrames[k]    = c.classFrames
-end
-
--- Shows/hides the "Multiple Roles Selected" label from current data
--- (CB_UpdateTabData syncs everything else but not this informational label).
-local function CB_RefreshMultiRole(slot)
-    local c = slot.activeContent
-    if not c or not c.multiRoleLabel then return end
-    local entry = CleanBot_PartyBots[slot.key]
-    local count = 0
-    if entry and entry.combat then
-        for _, s in ipairs(NS.ROLE_STRATEGIES) do
-            if entry.combat[s.field] == true then count = count + 1 end
-        end
-    end
-    if count > 1 then c.multiRoleLabel:Show() else c.multiRoleLabel:Hide() end
+    NS.botStarUpdaters[k] = slot.updateStar
+    NS.botEquipSlots[k]   = slot.equipSlots
+    NS.botInnerTabs[k]    = c.innerTabs
+    NS.botFrames[k]       = c.frames
 end
 
 -- Frees a slot: clears its key registries and hides its frames. The container
@@ -758,7 +719,6 @@ local function CB_BindSlot(slot, info)
     if slot.updateStar then slot.updateStar() end
     if NS.CB_RefreshEquipSlots then NS.CB_RefreshEquipSlots(slot.key, slot.unit) end
     NS.CB_UpdateTabData(info.key)
-    CB_RefreshMultiRole(slot)
 end
 
 -- ============================================================
@@ -871,18 +831,15 @@ NS.CB_UpdateTabData = function(key)
 
     if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
 
-    -- Generic checkbox sync: applies source[s.field] to each checkbox in the set.
     local function syncCheckboxes(checkboxes, stratList, source)
-        if not checkboxes then return end
+        if not checkboxes or not source then return end
         for _, s in ipairs(stratList) do
             local cb = checkboxes[s.field]
             if cb then cb:SetChecked(source[s.field] == true) end
         end
     end
-    -- Generic dropdown sync: sets text to the first strategy active in source.
-    -- Returns the active field (or nil) for callers that need the selection.
     local function syncDropdown(dd, stratList, source)
-        if not dd then return nil end
+        if not dd or not source then return nil end
         UIDropDownMenu_SetText(dd, "")
         for _, s in ipairs(stratList) do
             if source[s.field] == true then
@@ -892,38 +849,36 @@ NS.CB_UpdateTabData = function(key)
         end
         return nil
     end
-    -- Shorthand: pull .checkboxes from a keyed registry entry.
-    local function boxes(tbl) local d = tbl[key]; return d and d.checkboxes end
 
-    local combat     = entry.combat or {}
-    local activeRole = syncDropdown(NS.botRoleDDs[key], NS.ROLE_STRATEGIES, combat)
+    local frames = NS.botFrames[key]
+    if not frames then return end
 
-    local function syncSection(tbl, roleField, stratList)
-        local data = tbl[key]; if not data then return end
-        if activeRole == roleField then data.section:Show() else data.section:Hide() end
-        syncCheckboxes(data.checkboxes, stratList, combat)
-    end
-    syncSection(NS.botTankFrames,  "isTank",   NS.TANK_STRATEGIES)
-    syncSection(NS.botDpsFrames,   "isDPS",    NS.DPS_STRATEGIES)
-    syncSection(NS.botHealFrames,  "isHealer", NS.HEAL_STRATEGIES)
+    for _, cf in ipairs(frames) do
+        local cd = cf.getSource and cf.getSource(entry)
+        if cf.type == "dropdown" then
+            syncDropdown(cf.dd, cf.strategies, cd)
 
-    syncCheckboxes(boxes(NS.botCombatFrames),   NS.COMBAT_STRATEGIES,   combat)
-    syncCheckboxes(boxes(NS.botPositionFrames), NS.POSITION_STRATEGIES, combat)
-    syncCheckboxes(boxes(NS.botTimingFrames),   NS.TIMING_STRATEGIES,   combat)
+        elseif cf.type == "checkboxes" then
+            syncCheckboxes(cf.checkboxes, cf.strategies, cd)
 
-    local nonCombat = entry.nonCombat or {}
-    syncCheckboxes(boxes(NS.botNcFrames), NS.NC_GENERAL_STRATEGIES, nonCombat)
-
-    -- Class-specific dropdowns and checkboxes
-    local classData   = entry.classData or {}
-    local classFrames = NS.botClassFrames[key]
-    if classFrames then
-        for _, cf in ipairs(classFrames) do
-            local cd = classData[cf.dataField] or {}
-            if cf.type == "dropdown" then
-                syncDropdown(cf.dd, cf.strategies, cd)
-            elseif cf.type == "checkboxes" then
-                syncCheckboxes(cf.checkboxes, cf.strategies, cd)
+        elseif cf.type == "roleDropdown" then
+            local activeRole = syncDropdown(cf.dd, cf.strategies, cd)
+            local count = 0
+            if cd then
+                for _, s in ipairs(cf.strategies) do
+                    if cd[s.field] == true then count = count + 1 end
+                end
+            end
+            if cf.multiRoleLabel then
+                if count > 1 then cf.multiRoleLabel:Show() else cf.multiRoleLabel:Hide() end
+            end
+            for field, sub in pairs(cf.subSections) do
+                if count <= 1 and activeRole == field then
+                    sub.section:Show()
+                else
+                    sub.section:Hide()
+                end
+                syncCheckboxes(sub.checkboxes, sub.strategies, cd)
             end
         end
     end

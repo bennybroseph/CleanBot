@@ -35,7 +35,7 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 local function CB_EquipItem(key, botName, link)
     local itemId     = strmatch(link, "item:(%d+)")
     local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
-    SendChatMessage("e " .. (apiLink or link), "WHISPER", nil, botName)
+    NS.CB_SendBotCommand(botName, "e " .. (apiLink or link))
     NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
 end
 

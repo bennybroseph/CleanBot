@@ -66,10 +66,111 @@ local function CB_ProbePartyForBots()
             if not CleanBot_PartyBots[key] and not NS.probed[key] then
                 NS.probed[key]        = true
                 NS.awaitingProbe[key] = true
-                SendChatMessage("co ?", "WHISPER", nil, nm)
+                NS.CB_SendBotCommand(nm, "co ?")
             end
         end
     end
+end
+
+-- ============================================================
+-- Bridge allowlists — mirror of MultiBotBridge.cpp IsAllowed*()
+-- Source: https://github.com/Wishmaster117/mod-multibot-bridge/blob/main/src/MultiBotBridge.cpp
+-- Keep in sync with the server when the bridge is updated.
+-- ============================================================
+
+-- RUN~COMBAT — IsAllowedCombatCommand()
+local BRIDGE_COMBAT_CMDS = {
+    ["CO +FOCUS"]           = true,
+    ["CO -FOCUS"]           = true,
+    ["CO +DPS ASSIST"]      = true,
+    ["CO -DPS ASSIST"]      = true,
+    ["CO +AOE"]             = true,
+    ["CO -AOE"]             = true,
+    ["CO +DPS AOE"]         = true,
+    ["CO -DPS AOE"]         = true,
+    ["CO +TANK ASSIST"]     = true,
+    ["CO -TANK ASSIST"]     = true,
+    ["CO +AVOID AOE"]       = true,
+    ["CO -AVOID AOE"]       = true,
+    ["CO +SAVE MANA"]       = true,
+    ["CO -SAVE MANA"]       = true,
+    ["CO +THREAT"]          = true,
+    ["CO -THREAT"]          = true,
+    ["CO +BEHIND"]          = true,
+    ["CO -BEHIND"]          = true,
+    ["CO +WAIT FOR ATTACK"] = true,
+    ["CO -WAIT FOR ATTACK"] = true,
+    -- "wait for attack time N" (N = 0–60) handled via pattern below
+}
+
+-- RUN~LOOT — IsAllowedLootCommand()  (case-sensitive after trim)
+local BRIDGE_LOOT_CMDS = {
+    ["nc +loot"] = true,
+    ["nc -loot"] = true,
+    ["ll all"]   = true,
+    ["ll normal"] = true,
+    ["ll gray"]  = true,
+    ["ll quest"] = true,
+    ["ll skill"] = true,
+}
+
+-- RUN~RTI — IsAllowedRTIIcon()
+local BRIDGE_RTI_ICONS = {
+    ["STAR"]     = true,
+    ["CIRCLE"]   = true,
+    ["DIAMOND"]  = true,
+    ["TRIANGLE"] = true,
+    ["MOON"]     = true,
+    ["SQUARE"]   = true,
+    ["CROSS"]    = true,
+    ["SKULL"]    = true,
+}
+
+local function CB_GetBridgeOpcode(command)
+    -- COMBAT: static set
+    if BRIDGE_COMBAT_CMDS[strupper(command)] then return "COMBAT" end
+
+    -- COMBAT: "wait for attack time N" — no "co" prefix, N must be 0–60
+    local n = strmatch(command, "^[Ww][Aa][Ii][Tt]%s+[Ff][Oo][Rr]%s+[Aa][Tt][Tt][Aa][Cc][Kk]%s+[Tt][Ii][Mm][Ee]%s+(%d+)$")
+    if n and tonumber(n) <= 60 then return "COMBAT" end
+
+    -- POSITION: "disperse disable" or "disperse set N" (0 < N ≤ 100)
+    local lower = strlower(command)
+    if lower == "disperse disable" then return "POSITION" end
+    local dval = strmatch(lower, "^disperse set%s+(.+)$")
+    if dval then
+        local v = tonumber(dval)
+        if v and v > 0 and v <= 100 then return "POSITION" end
+    end
+
+    -- LOOT: static set (case-sensitive)
+    if BRIDGE_LOOT_CMDS[command] then return "LOOT" end
+
+    -- RTI: "attack/pull rti target", "rti <icon>", "rti cc <icon>"
+    local upper = strupper(command)
+    if upper == "ATTACK RTI TARGET" or upper == "PULL RTI TARGET" then return "RTI" end
+    local rtiIcon = strmatch(upper, "^RTI%s+(%S+)$")
+    if rtiIcon and BRIDGE_RTI_ICONS[rtiIcon] then return "RTI" end
+    local rtiCCIcon = strmatch(upper, "^RTI%s+CC%s+(%S+)$")
+    if rtiCCIcon and BRIDGE_RTI_ICONS[rtiCCIcon] then return "RTI" end
+
+    return nil
+end
+
+-- Sends a command to a bot. Routes through the bridge (silent, no whisper
+-- spam) when the bridge is present and the command is allowlisted; falls back
+-- to a whisper for everything else or when bridge is absent. Safe to use for
+-- all commands including queries — unlisted commands always whisper, so
+-- replies still arrive normally via CHAT_MSG_WHISPER.
+NS.CB_SendBotCommand = function(botName, command)
+    if NS.bridgeState == "present" then
+        local opcode = CB_GetBridgeOpcode(command)
+        if opcode then
+            SendAddonMessage("MBOT", "RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command, "PARTY")
+            return
+        end
+    end
+    SendChatMessage(command, "WHISPER", nil, botName)
 end
 
 NS.CB_RequestSync = function()
@@ -121,7 +222,7 @@ NS.CB_FetchInventory = function(key, botName)
     else
         entry.awaitingInventory = true
         entry.invTimeout        = 0
-        SendChatMessage("items", "WHISPER", nil, botName)
+        NS.CB_SendBotCommand(botName, "items")
     end
 end
 
@@ -203,7 +304,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CB_StoreCombat(entry, msg)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
                 entry.awaitingNc = true
-                SendChatMessage("nc ?", "WHISPER", nil, entry.name)
+                NS.CB_SendBotCommand(entry.name, "nc ?")
             elseif entry.awaitingNc then
                 entry.awaitingNc = false
                 NS.CB_StoreNonCombat(entry, msg)
@@ -224,7 +325,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             }
             CleanBot_PartyBots[key] = entry
             NS.CB_StoreCombat(entry, msg)
-            SendChatMessage("nc ?", "WHISPER", nil, sender)
+            NS.CB_SendBotCommand(sender, "nc ?")
             if CleanBotFrame:IsShown() then NS.CleanBot_RefreshTabs() end
         end
         return

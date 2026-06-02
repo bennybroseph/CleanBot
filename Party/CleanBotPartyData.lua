@@ -6,40 +6,84 @@ local NS = CleanBotNS
 
 -- ============================================================
 -- Combat strategy definitions  (single source of truth)
+--
+-- Format mirrors NS.CLASS_STRATEGIES:
+--   { header, group, column, [type], strategies = { {cmd, field, name, desc} } }
+--
+-- column = "left" | "right"  — which panel column the group renders in.
+-- type   = "roleDropdown"    — exclusive dropdown whose selection shows one
+--   of the subGroups:  { field, header, strategies }
+--
+-- Derived flat tables (NS.ROLE_STRATEGIES, NS.TANK_STRATEGIES, …) are built
+-- automatically below for any callers that still need them.
 -- ============================================================
 NS.STRATEGIES = {
-    -- Role
-    { cmd = "tank",       field = "isTank",         name = "Tank",              group = "role",     desc = "Use threat-generating abilities" },
-    { cmd = "dps assist", field = "isDPS",           name = "DPS",               group = "role",     desc = "Use DPS abilities" },
-    { cmd = "heal",       field = "isHealer",        name = "Healer",            group = "role",     desc = "Focus on party healing" },
-    -- Tank
-    { cmd = "tank assist",    field = "peelAggro",      name = "Tank Assist",       group = "tank",     desc = "Tank pulls mobs off others" },
-    { cmd = "pull",           field = "pull",            name = "Pull",              group = "tank",     desc = "Tank pulls mobs using a ranged skill" },
-    { cmd = "pull back",      field = "pullBack",        name = "Pull Back",         group = "tank",     desc = "Pull mob then return to starting position" },
-    { cmd = "tank face",      field = "faceTargetAway",  name = "Face Target Away",  group = "tank",     desc = "Ensure target does not face ranged players" },
-    -- DPS
-    { cmd = "aoe",        field = "aoeTarget",       name = "AoE",               group = "dps",      desc = "Target many mobs at a time" },
-    { cmd = "threat",     field = "avoidAggro",      name = "Avoid Aggro",       group = "dps",      desc = "DPS actively avoids grabbing threat" },
-    -- Healing
-    { cmd = "save mana",  field = "saveMana",        name = "Save Mana",         group = "heal",     desc = "Healers prioritize high-efficiency spells" },
-    { cmd = "healer dps", field = "healerDps",       name = "Healer DPS",        group = "heal",     desc = "Healers cast damage spells when mana allows" },
-    -- Combat Control
-    { cmd = "cc",         field = "useCC",           name = "Crowd Control",     group = "combat",   desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
-    { cmd = "boost",      field = "useCooldowns",    name = "Use Cooldowns",     group = "combat",   desc = "Use major cooldowns" },
-    { cmd = "focus",      field = "calmCast",        name = "Calm Cast",         group = "combat",   desc = "Stop casting AoE threat and debuff spells" },
-    { cmd = "avoid aoe",  field = "avoidAoe",        name = "Avoid AoE",         group = "combat",   desc = "Automatically avoid harmful AoE spells" },
-    -- Positioning
-    { cmd = "behind",         field = "stayBehindTarget", name = "Stay Behind",   group = "position", desc = "Move to target's back when not behind" },
-    -- Timing & Marking
-    { cmd = "wait for attack", field = "waitAttack",  name = "Wait to Attack",   group = "timing",   desc = "Wait a set time before attacking or healing" },
-    { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",     group = "timing",   desc = "Automatically mark unmarked combat attackers" },
-    -- Other
-    { cmd = "grind",      field = "grindMobs",       name = "Grind Mobs",        desc = "Attack any visible target" },
+    {
+        header     = "Role",
+        group      = "role",
+        column     = "left",
+        type       = "roleDropdown",
+        strategies = {
+            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities" },
+            { cmd = "dps assist", field = "isDPS",    name = "DPS",    desc = "Use DPS abilities" },
+            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing" },
+        },
+        subGroups = {
+            { field = "isTank",   header = "Tank",    strategies = {
+                { cmd = "tank assist", field = "peelAggro",      name = "Peel Aggro",       desc = "Tank pulls mobs off other party members" },
+                { cmd = "pull",        field = "pull",           name = "Pull",             desc = "Tank pulls mobs using a ranged skill" },
+                { cmd = "pull back",   field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
+                { cmd = "tank face",   field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
+            }},
+            { field = "isDPS",    header = "DPS",     strategies = {
+                { cmd = "aoe",    field = "aoeTarget",  name = "AoE",         desc = "Target many mobs at a time" },
+                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro", desc = "DPS actively avoids grabbing threat" },
+            }},
+            { field = "isHealer", header = "Healing", strategies = {
+                { cmd = "save mana",  field = "saveMana",  name = "Save Mana",  desc = "Healers prioritize high-efficiency spells" },
+                { cmd = "healer dps", field = "healerDps", name = "Healer DPS", desc = "Healers cast damage spells when mana allows" },
+            }},
+        },
+    },
+    {
+        header = "Combat Control",
+        group  = "combat",
+        column = "left",
+        strategies = {
+            { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
+            { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns" },
+            { cmd = "focus",     field = "lowThreatCast",   name = "Low Threat Casting",    desc = "Stop casting AoE threat and debuff spells" },
+            { cmd = "avoid aoe", field = "avoidAoe",        name = "Avoid AoE",             desc = "Automatically avoid harmful AoE spells" },
+        },
+    },
+    {
+        header = "Positioning",
+        group  = "position",
+        column = "right",
+        strategies = {
+            { cmd = "behind", field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
+        },
+    },
+    {
+        header = "Timing & Marking",
+        group  = "timing",
+        column = "right",
+        strategies = {
+            { cmd = "wait for attack", field = "waitAttack",  name = "Wait to Attack", desc = "Wait a set time before attacking or healing" },
+            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
+        },
+    },
+    {
+        header = "Other",
+        group  = "other",
+        column = "right",
+        strategies = {
+            { cmd = "grind", field = "grindMobs", name = "Grind Mobs", desc = "Attack any visible target" },
+        },
+    },
 }
 
-NS.STRATEGY_MAP = {}
-for _, s in ipairs(NS.STRATEGIES) do NS.STRATEGY_MAP[s.cmd] = s.field end
-
+NS.STRATEGY_MAP        = {}
 NS.ROLE_STRATEGIES     = {}
 NS.TANK_STRATEGIES     = {}
 NS.DPS_STRATEGIES      = {}
@@ -47,40 +91,99 @@ NS.HEAL_STRATEGIES     = {}
 NS.COMBAT_STRATEGIES   = {}
 NS.POSITION_STRATEGIES = {}
 NS.TIMING_STRATEGIES   = {}
-for _, s in ipairs(NS.STRATEGIES) do
-    if s.group == "role"     then NS.ROLE_STRATEGIES[#NS.ROLE_STRATEGIES         + 1] = s end
-    if s.group == "tank"     then NS.TANK_STRATEGIES[#NS.TANK_STRATEGIES         + 1] = s end
-    if s.group == "dps"      then NS.DPS_STRATEGIES[#NS.DPS_STRATEGIES           + 1] = s end
-    if s.group == "heal"     then NS.HEAL_STRATEGIES[#NS.HEAL_STRATEGIES         + 1] = s end
-    if s.group == "combat"   then NS.COMBAT_STRATEGIES[#NS.COMBAT_STRATEGIES     + 1] = s end
-    if s.group == "position" then NS.POSITION_STRATEGIES[#NS.POSITION_STRATEGIES + 1] = s end
-    if s.group == "timing"   then NS.TIMING_STRATEGIES[#NS.TIMING_STRATEGIES     + 1] = s end
+do
+    local groupToTable = {
+        role     = NS.ROLE_STRATEGIES,
+        combat   = NS.COMBAT_STRATEGIES,
+        position = NS.POSITION_STRATEGIES,
+        timing   = NS.TIMING_STRATEGIES,
+    }
+    local subFieldToTable = {
+        isTank   = NS.TANK_STRATEGIES,
+        isDPS    = NS.DPS_STRATEGIES,
+        isHealer = NS.HEAL_STRATEGIES,
+    }
+    for _, grp in ipairs(NS.STRATEGIES) do
+        for _, s in ipairs(grp.strategies) do
+            NS.STRATEGY_MAP[s.cmd] = s.field
+            local t = groupToTable[grp.group]
+            if t then t[#t + 1] = s end
+        end
+        if grp.subGroups then
+            for _, sg in ipairs(grp.subGroups) do
+                for _, s in ipairs(sg.strategies) do
+                    NS.STRATEGY_MAP[s.cmd] = s.field
+                    local t = subFieldToTable[sg.field]
+                    if t then t[#t + 1] = s end
+                end
+            end
+        end
+    end
 end
 
 -- ============================================================
 -- Non-combat strategy definitions
+--
+-- Same grouped format as NS.STRATEGIES and NS.CLASS_STRATEGIES.
+-- NS.NC_GENERAL_STRATEGIES is derived below; the UI uses it directly.
 -- ============================================================
 NS.NC_STRATEGIES = {
-    { cmd = "food", field = "useFood",  name = "Eat & Drink", group = "general", desc = "Automatically eat and drink when low on health or mana" },
-    { cmd = "pvp",  field = "pvpMode",  name = "PvP Mode",    group = "general", desc = "Enable PvP mode — bot will flag for PvP and engage enemy players" },
-    { cmd = "loot", field = "autoLoot", name = "Auto Loot",   group = "general", desc = "Automatically loot nearby corpses after combat" },
+    {
+        header = "General",
+        group  = "general",
+        column = "left",
+        strategies = {
+            { cmd = "food", field = "useFood",   name = "Eat & Drink", desc = "Automatically eat and drink when low on health or mana" },
+            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Enable PvP mode — bot will flag for PvP and engage enemy players" },
+        },
+    },
+    {
+        header = "Loot & Gather",
+        group  = "lootGather",
+        column = "right",
+        strategies = {
+            { cmd = "loot",   field = "autoLoot",   name = "Auto Loot",   desc = "Automatically loot nearby corpses after combat" },
+            { cmd = "gather", field = "autoGather", name = "Auto Gather", desc = "Automatically gather nearby nodes after combat" },
+        },
+    },
 }
-NS.NC_STRATEGY_MAP = {}
-for _, s in ipairs(NS.NC_STRATEGIES) do NS.NC_STRATEGY_MAP[s.cmd] = s.field end
-NS.NC_GENERAL_STRATEGIES = NS.NC_STRATEGIES
+
+NS.NC_STRATEGY_MAP      = {}
+NS.NC_GENERAL_STRATEGIES = {}
+do
+    local groupToTable = {
+        general      = NS.NC_GENERAL_STRATEGIES,
+    }
+    for _, grp in ipairs(NS.NC_STRATEGIES) do
+        for _, s in ipairs(grp.strategies) do
+            NS.NC_STRATEGY_MAP[s.cmd] = s.field
+            local t = groupToTable[grp.group]
+            if t then t[#t + 1] = s end
+        end
+    end
+end
 
 -- ============================================================
 -- Default state constructors
 -- ============================================================
 NS.CB_DefaultCombat = function()
     local t = {}
-    for _, s in ipairs(NS.STRATEGIES) do t[s.field] = nil end
+    for _, grp in ipairs(NS.STRATEGIES) do
+        for _, s in ipairs(grp.strategies) do t[s.field] = nil end
+        if grp.subGroups then
+            for _, sg in ipairs(grp.subGroups) do
+                for _, s in ipairs(sg.strategies) do t[s.field] = nil end
+            end
+        end
+    end
     return t
 end
 
 NS.CB_DefaultNonCombat = function()
     local t = {}
-    for _, s in ipairs(NS.NC_STRATEGIES) do t[s.field] = nil end
+    for _, grp in ipairs(NS.NC_STRATEGIES) do
+        for _, s in ipairs(grp.strategies) do t[s.field] = nil end
+    end
     return t
 end
 

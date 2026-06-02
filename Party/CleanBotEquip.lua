@@ -71,7 +71,7 @@ local function CB_ShowEquipMenu(btn)
         info.func         = function()
             local botName = btn.slot.name
             if not botName then return end
-            SendChatMessage("ue " .. btn.itemLink, "WHISPER", nil, botName)
+            NS.CB_SendBotCommand(botName, "ue " .. btn.itemLink)
         end
         UIDropDownMenu_AddButton(info)
 
