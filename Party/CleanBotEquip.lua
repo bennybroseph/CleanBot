@@ -20,6 +20,78 @@
 -- ============================================================
 local NS = CleanBotNS
 
+-- ── Shared Wowhead URL popup ──────────────────────────────────────────────
+-- Plain-text URL in a selectable EditBox — Ctrl+C works fine on regular text.
+local function CB_GetWowheadPopup()
+    if NS.wowheadPopup then return NS.wowheadPopup end
+
+    local popup = CreateFrame("Frame", "CleanBotWowheadPopup", UIParent)
+    popup:SetSize(380, 110)
+    popup:SetPoint("CENTER")
+    popup:SetFrameStrata("DIALOG")
+    popup:SetMovable(true)
+    popup:EnableMouse(true)
+    popup:RegisterForDrag("LeftButton")
+    popup:SetScript("OnDragStart", popup.StartMoving)
+    popup:SetScript("OnDragStop",  popup.StopMovingOrSizing)
+    NS.CB_ApplyPanelSkin(popup)
+    popup:Hide()
+
+    local label = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:SetPoint("TOPLEFT", popup, "TOPLEFT", 18, -16)
+    label:SetText("Wowhead  (Ctrl+C to copy, then open in browser)")
+
+    local box = CreateFrame("EditBox", nil, popup, "InputBoxTemplate")
+    box:SetSize(344, 20)
+    box:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -6)
+    box:SetAutoFocus(true)
+    box:SetScript("OnEscapePressed", function(self) self:GetParent():Hide() end)
+    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    popup.box = box
+
+    if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
+
+    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+    closeBtn:SetSize(80, 22)
+    closeBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 12)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() popup:Hide() end)
+    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(closeBtn) end
+
+    NS.wowheadPopup = popup
+    return popup
+end
+
+-- ── Shared right-click context menu ──────────────────────────────────────
+local equipMenu = CreateFrame("Frame", "CleanBotEquipMenu", UIParent, "UIDropDownMenuTemplate")
+
+local function CB_ShowEquipMenu(btn)
+    if not btn.itemLink then return end
+    UIDropDownMenu_Initialize(equipMenu, function()
+        local info = UIDropDownMenu_CreateInfo()
+
+        info.text         = "Open on Wowhead"
+        info.notCheckable = true
+        info.func         = function()
+            local itemId = strmatch(btn.itemLink, "item:(%d+)")
+            if not itemId then return end
+            local url    = "https://www.wowhead.com/wotlk/item=" .. itemId
+            local popup  = CB_GetWowheadPopup()
+            popup.box:SetText(url)
+            popup:Show()
+            popup.box:SetFocus()
+            popup.box:HighlightText()
+        end
+        UIDropDownMenu_AddButton(info)
+
+        info.text         = "Close"
+        info.notCheckable = true
+        info.func         = function() CloseDropDownMenus() end
+        UIDropDownMenu_AddButton(info)
+    end, "MENU")
+    ToggleDropDownMenu(1, nil, equipMenu, btn, 0, 0)
+end
+
 NS.CB_CreateEquipSlots = function(model, key, counter, unit)
     NS.botEquipSlots[key] = {}
 
@@ -78,6 +150,13 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
         btn.unit   = unit
         btn.slotId = slot.id
         btn.slotName = slot.name
+
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:SetScript("OnClick", function(self, mouseBtn)
+            if mouseBtn == "RightButton" and self.itemLink then
+                CB_ShowEquipMenu(self)
+            end
+        end)
 
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

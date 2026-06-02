@@ -148,11 +148,36 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
             elapsed = elapsed + dt
             if elapsed < 0.05 then return end
             self:SetScript("OnUpdate", nil)
-            for i = 1, 10 do
-                local tab = _G["InspectFrameTab" .. i]
-                if not tab then break end
-                local text = tab:GetText()
-                if text and strfind(strlower(text), "talent") then tab:Click(); break end
+
+            if Talented then
+                local entry = CleanBot_PartyBots[strlower(botName)]
+                local class = entry and entry.class or select(2, UnitClass(unit)) or "WARRIOR"
+                local template = { name = botName, class = class }
+                local numTabs = GetNumTalentTabs(true)
+                for tab = 1, numTabs do
+                    local ranks = {}
+                    for index = 1, GetNumTalents(tab, true) do
+                        ranks[index] = select(5, GetTalentInfo(tab, index, true)) or 0
+                    end
+                    template[tab] = ranks
+                end
+                local ok = pcall(Talented.OpenTemplate, Talented, template)
+                if not ok then
+                    pcall(function()
+                        Talented:CreateBaseFrame()
+                        Talented:SetTemplate(template)
+                        local base = Talented.base
+                        if base and not base:IsVisible() then ShowUIPanel(base) end
+                    end)
+                end
+                HideUIPanel(InspectFrame)
+            else
+                for i = 1, 10 do
+                    local tab = _G["InspectFrameTab" .. i]
+                    if not tab then break end
+                    local text = tab:GetText()
+                    if text and strfind(strlower(text), "talent") then tab:Click(); break end
+                end
             end
         end)
     end)
