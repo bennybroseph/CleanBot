@@ -142,12 +142,19 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
         local unit = CB_GetBotUnit(botName)
         if not unit then return end
         InspectUnit(unit)
-        for i = 1, 10 do
-            local tab = _G["InspectFrameTab" .. i]
-            if not tab then break end
-            local text = tab:GetText()
-            if text and strfind(strlower(text), "talent") then tab:Click(); break end
-        end
+        local elapsed = 0
+        local f = CreateFrame("Frame")
+        f:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0.05 then return end
+            self:SetScript("OnUpdate", nil)
+            for i = 1, 10 do
+                local tab = _G["InspectFrameTab" .. i]
+                if not tab then break end
+                local text = tab:GetText()
+                if text and strfind(strlower(text), "talent") then tab:Click(); break end
+            end
+        end)
     end)
     if NS.ElvUI_S then NS.ElvUI_S:HandleButton(showBtn) end
 
