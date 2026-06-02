@@ -190,6 +190,47 @@ NS.CleanBot_IsBot = function(unit)
 end
 
 -- ============================================================
+-- Strategy storage helpers (shared by bridge GET~STATES and
+-- the no-bridge co?/nc? whisper read paths)
+-- ============================================================
+
+-- Returns the party unit id ("partyN") whose name matches, or nil.
+NS.CB_FindPartyUnit = function(name)
+    for i = 1, GetNumPartyMembers() do
+        local unit = "party" .. i
+        if UnitName(unit) == name then return unit end
+    end
+    return nil
+end
+
+-- Resolves a bot's class token from the live party roster (authoritative),
+-- falling back to the supplied value (or WARRIOR) when the unit isn't found.
+NS.CB_ResolveClass = function(name, fallback)
+    local unit = NS.CB_FindPartyUnit(name)
+    if unit then
+        local _, class = UnitClass(unit)
+        if class then return class end
+    end
+    return fallback or "WARRIOR"
+end
+
+-- Parses a combat strategy string into entry.combat + entry.classData.combat.
+NS.CB_StoreCombat = function(entry, combatStr)
+    if not entry then return end
+    entry.combat = NS.CB_ParseCombatStr(combatStr)
+    if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
+    entry.classData.combat = NS.CB_ParseClassStr(combatStr, entry.class, "combat")
+end
+
+-- Parses a non-combat strategy string into entry.nonCombat + entry.classData.nonCombat.
+NS.CB_StoreNonCombat = function(entry, ncStr)
+    if not entry then return end
+    entry.nonCombat = NS.CB_ParseNonCombatStr(ncStr)
+    if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
+    entry.classData.nonCombat = NS.CB_ParseClassStr(ncStr, entry.class, "nonCombat")
+end
+
+-- ============================================================
 -- Class icon texture coordinates
 -- ============================================================
 NS.CLASS_ICON_COORDS = {

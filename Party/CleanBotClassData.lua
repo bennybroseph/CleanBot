@@ -324,9 +324,9 @@ NS.CLASS_STRATEGIES = {
                 header = "Totems (Combat)",
                 type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",  field = "coBdps",  name = "Strength Totem",
+                    { cmd = "bdps",  field = "coStrength",  name = "Strength Totem",
                       desc = "Drop Strength of Earth / Windfury Totem during combat" },
-                    { cmd = "bmana", field = "coBmana", name = "Mana Totem",
+                    { cmd = "bmana", field = "coManaSpring", name = "Mana Spring Totem",
                       desc = "Drop Mana Spring Totem during combat" },
                 },
             },
@@ -336,9 +336,9 @@ NS.CLASS_STRATEGIES = {
                 header = "Totems (Out of Combat)",
                 type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",  field = "ncBdps",  name = "Strength Totem",
+                    { cmd = "bdps",  field = "ncStrength",  name = "Strength Totem",
                       desc = "Drop Strength of Earth / Windfury Totem out of combat" },
-                    { cmd = "bmana", field = "ncBmana", name = "Mana Totem",
+                    { cmd = "bmana", field = "ncManaSpring", name = "Mana Spring Totem",
                       desc = "Drop Mana Spring Totem out of combat" },
                 },
             },

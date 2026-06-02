@@ -27,6 +27,13 @@ NS.lastRawStates = nil
 NS.lastHelloAck  = nil
 NS.bridgeReady   = false
 
+-- Bridge availability: "unknown" until detection resolves, then "present"
+-- (HELLO_ACK received) or "absent" (detection timed out). Drives whether
+-- strategy reads use GET~STATES (bridge) or co?/nc? whispers (no bridge).
+NS.bridgeState   = "unknown"
+NS.probed        = {}   -- name-key -> true: party member already probed for bot-hood
+NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strategies:" reply
+
 local function CB_FormatKnownBots()
     local lines = {
         "=== Handshake ===",
@@ -321,6 +328,37 @@ end
 -- ============================================================
 NS.syncPending = false
 
+-- No-bridge discovery: whisper "co ?" to each party member exactly once.
+-- Only members that reply with a "Strategies: " line are treated as bots
+-- (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so they
+-- are probed a single time and then ignored.
+local function CB_ProbePartyForBots()
+    local n = GetNumPartyMembers()
+
+    -- Forget probe records for members who have left, so a rejoin re-probes.
+    local present = {}
+    for i = 1, n do
+        local nm = UnitName("party" .. i)
+        if nm then present[strlower(nm)] = true end
+    end
+    for k in pairs(NS.probed) do
+        if not present[k] then NS.probed[k] = nil; NS.awaitingProbe[k] = nil end
+    end
+
+    for i = 1, n do
+        local unit = "party" .. i
+        local nm   = UnitName(unit)
+        if nm and UnitIsPlayer(unit) then
+            local key = strlower(nm)
+            if not CleanBot_PartyBots[key] and not NS.probed[key] then
+                NS.probed[key]        = true
+                NS.awaitingProbe[key] = true
+                SendChatMessage("co ?", "WHISPER", nil, nm)
+            end
+        end
+    end
+end
+
 NS.CB_RequestSync = function()
     if NS.syncPending then return end
     NS.syncPending = true
@@ -331,9 +369,12 @@ NS.CB_RequestSync = function()
         if elapsed >= 0.5 then
             NS.syncPending = false
             ticker:SetScript("OnUpdate", nil)
-            if NS.bridgeReady then
+            if NS.bridgeState == "present" then
                 SendAddonMessage("MBOT", "GET~ROSTER",  "PARTY")
                 SendAddonMessage("MBOT", "GET~DETAILS", "PARTY")
+                SendAddonMessage("MBOT", "GET~STATES",  "PARTY")
+            elseif NS.bridgeState == "absent" then
+                CB_ProbePartyForBots()
             end
             if CleanBotFrame:IsShown() then
                 NS.CleanBot_RefreshTabs()
@@ -359,6 +400,31 @@ local function CB_SendHello()
     end
 end
 
+-- Sends HELLO and, if no HELLO_ACK arrives within the timeout, declares the
+-- bridge absent and switches to no-bridge (whisper) discovery. Only runs while
+-- the bridge state is still unknown.
+local function CB_StartBridgeDetection()
+    if NS.bridgeState ~= "unknown" then return end
+    if NS.bridgeDetecting then return end           -- a detection timer is already running
+    if GetNumPartyMembers() == 0 then return end    -- nothing to detect against yet
+    NS.bridgeDetecting = true
+    CB_SendHello()
+
+    local ticker  = CreateFrame("Frame")
+    local elapsed = 0
+    ticker:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed >= 3 then
+            ticker:SetScript("OnUpdate", nil)
+            NS.bridgeDetecting = false
+            if NS.bridgeState == "unknown" then
+                NS.bridgeState = "absent"
+                NS.CB_RequestSync()
+            end
+        end
+    end)
+end
+
 -- ============================================================
 -- Initialise at login (ElvUI is ready by PLAYER_LOGIN)
 -- ============================================================
@@ -380,9 +446,13 @@ initFrame:SetScript("OnEvent", function(self, event)
         self:UnregisterEvent("PLAYER_LOGIN")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        NS.bridgeReady = false
+        NS.bridgeReady     = false
+        NS.bridgeState     = "unknown"
+        NS.bridgeDetecting = false
+        NS.probed          = {}
+        NS.awaitingProbe   = {}
         CleanBot_PartyBots = {}
-        CB_SendHello()
+        CB_StartBridgeDetection()
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     end
 end)
@@ -420,32 +490,41 @@ bridgeFrame:RegisterEvent("INSPECT_READY")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
+        if strsub(msg, 1, 12) ~= "Strategies: " then return end
         local key   = strlower(sender)
         local entry = CleanBot_PartyBots[key]
-        if entry and strsub(msg, 1, 12) == "Strategies: " then
+
+        if entry then
+            -- Known bot: response to a co?/nc? read (no-bridge mode, or a manual re-read).
             if entry.awaitingCo then
                 entry.awaitingCo = false
-                entry.combat     = NS.CB_ParseCombatStr(msg)
-
-                -- Parse class-specific combat flags from the same co? response.
-                if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
-                entry.classData.combat = NS.CB_ParseClassStr(msg, entry.class, "combat")
-
+                entry.class = NS.CB_ResolveClass(sender, entry.class)
+                NS.CB_StoreCombat(entry, msg)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
-
                 entry.awaitingNc = true
                 SendChatMessage("nc ?", "WHISPER", nil, entry.name)
-
             elseif entry.awaitingNc then
                 entry.awaitingNc = false
-                entry.nonCombat  = NS.CB_ParseNonCombatStr(msg)
-
-                -- Parse class-specific non-combat flags from the same nc? response.
-                if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
-                entry.classData.nonCombat = NS.CB_ParseClassStr(msg, entry.class, "nonCombat")
-
+                NS.CB_StoreNonCombat(entry, msg)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
             end
+
+        elseif NS.awaitingProbe[key] then
+            -- No-bridge discovery: a probed party member replied, so it IS a bot.
+            NS.awaitingProbe[key] = nil
+            local class = NS.CB_ResolveClass(sender, "WARRIOR")
+            entry = {
+                name       = sender,
+                class      = class,
+                combat     = NS.CB_DefaultCombat(),
+                nonCombat  = NS.CB_DefaultNonCombat(),
+                classData  = NS.CB_DefaultClassData(class),
+                awaitingNc = true,
+            }
+            CleanBot_PartyBots[key] = entry
+            NS.CB_StoreCombat(entry, msg)
+            SendChatMessage("nc ?", "WHISPER", nil, sender)
+            if CleanBotFrame:IsShown() then NS.CleanBot_RefreshTabs() end
         end
         return
 
@@ -456,7 +535,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         if msg and strsub(msg, 1, 10) == "HELLO_ACK~" then
             NS.lastHelloAck = msg
             if not NS.bridgeReady then
-                NS.bridgeReady = true
+                NS.bridgeReady     = true
+                NS.bridgeState     = "present"
+                NS.bridgeDetecting = false
                 CB_BridgeRequest()
                 NS.CleanBot_FetchLinkedAccounts()
             end
@@ -481,48 +562,51 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             if name and className then
                 local classKey = strupper(className)
                 classKey = gsub(classKey, "%s+", "")
-                local key            = strlower(name)
-                local existing       = CleanBot_PartyBots[key]
-                local alreadyQueried = existing and existing.queried
-                -- Preserve all in-flight state so a duplicate DETAIL~ (e.g. from a second
-                -- GET~DETAILS fired while awaiting a co ?/nc ? response) doesn't silently
-                -- drop the awaiting flags.
+                local key      = strlower(name)
+                local existing = CleanBot_PartyBots[key]
+                -- Bridge mode: strategy data arrives via GET~STATES (STATE~ packets),
+                -- so DETAIL~ only establishes identity/class. Preserve any strategy
+                -- data already parsed from an earlier STATE~ packet.
                 CleanBot_PartyBots[key] = {
-                    name       = name,
-                    class      = classKey,
-                    combat     = (existing and existing.combat)    or NS.CB_DefaultCombat(),
-                    nonCombat  = (existing and existing.nonCombat) or NS.CB_DefaultNonCombat(),
-                    classData  = (existing and existing.classData) or NS.CB_DefaultClassData(classKey),
-                    queried    = alreadyQueried,
-                    awaitingCo = existing and existing.awaitingCo,
-                    awaitingNc = existing and existing.awaitingNc,
+                    name      = name,
+                    class     = classKey,
+                    combat    = (existing and existing.combat)    or NS.CB_DefaultCombat(),
+                    nonCombat = (existing and existing.nonCombat) or NS.CB_DefaultNonCombat(),
+                    classData = (existing and existing.classData) or NS.CB_DefaultClassData(classKey),
                 }
-                if not alreadyQueried then
-                    CleanBot_PartyBots[key].queried    = true
-                    CleanBot_PartyBots[key].awaitingCo = true
-                    CleanBot_PartyBots[key].awaitingNc = false
-                    SendChatMessage("co ?", "WHISPER", nil, name)
-                end
             end
             if CleanBotFrame:IsShown() then
                 NS.CleanBot_RefreshTabs()
             end
 
-        elseif msg and strsub(msg, 1, 7) == "STATES~" then
-            local payload = strsub(msg, 8)
-            NS.lastRawStates = payload
-            for entry in gmatch(payload .. ";", "([^;]*);") do
-                if entry ~= "" then
-                    local name, rest   = NS.CB_SplitOnce(entry, "~")
-                    local combatStr, _ = NS.CB_SplitOnce(rest,  "~")
-                    name = name:match("^%s*(.-)%s*$")
-                    if name and name ~= "" then
-                        local key = strlower(name)
-                        if CleanBot_PartyBots[key] then
-                            CleanBot_PartyBots[key].combat = NS.CB_ParseCombatStr(combatStr)
-                        end
-                    end
+        elseif msg and strsub(msg, 1, 6) == "STATE~" then
+            -- Bridge strategy snapshot for one bot: STATE~Name~combat~nonCombat
+            -- (combat / nonCombat are comma-separated strategy lists.)
+            NS.lastRawStates = msg
+            local rest             = strsub(msg, 7)
+            local name, r2         = NS.CB_SplitOnce(rest, "~")
+            local combatStr, ncStr = NS.CB_SplitOnce(r2,   "~")
+            name = name:match("^%s*(.-)%s*$")
+            if name and name ~= "" then
+                local key   = strlower(name)
+                local entry = CleanBot_PartyBots[key]
+                if not entry then
+                    -- STATE~ arrived before ROSTER~/DETAIL~; create a minimal entry.
+                    local class = NS.CB_ResolveClass(name, "WARRIOR")
+                    entry = {
+                        name      = name,
+                        class     = class,
+                        combat    = NS.CB_DefaultCombat(),
+                        nonCombat = NS.CB_DefaultNonCombat(),
+                        classData = NS.CB_DefaultClassData(class),
+                    }
+                    CleanBot_PartyBots[key] = entry
+                else
+                    entry.class = NS.CB_ResolveClass(name, entry.class)
                 end
+                NS.CB_StoreCombat(entry, combatStr)
+                NS.CB_StoreNonCombat(entry, ncStr)
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
             end
         end
 
@@ -544,8 +628,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PARTY_MEMBERS_CHANGED" then
-        if not NS.bridgeReady then
-            CB_SendHello()
+        if NS.bridgeState == "unknown" then
+            CB_StartBridgeDetection()
         else
             NS.CB_RequestSync()
         end
