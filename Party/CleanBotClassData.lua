@@ -32,7 +32,7 @@ NS.CLASS_STRATEGIES = {
     WARRIOR = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -57,7 +57,7 @@ NS.CLASS_STRATEGIES = {
     PALADIN = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -138,7 +138,7 @@ NS.CLASS_STRATEGIES = {
     HUNTER = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -185,7 +185,7 @@ NS.CLASS_STRATEGIES = {
     ROGUE = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -219,7 +219,7 @@ NS.CLASS_STRATEGIES = {
     PRIEST = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -253,7 +253,7 @@ NS.CLASS_STRATEGIES = {
     DEATHKNIGHT = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -301,8 +301,8 @@ NS.CLASS_STRATEGIES = {
     -- ──────────────────────────────────────────────────────────
     SHAMAN = {
         combat = {
-            {
-                header  = "Spec",
+             {
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -321,25 +321,68 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Totems (Combat)",
-                type   = "dropdown",
+                header   = "Strategy",
+                type     = "dropdown",
+                readonly = true,
                 strategies = {
-                    { cmd = "bdps",  field = "coStrength",  name = "Strength Totem",
-                      desc = "Drop Strength of Earth / Windfury Totem during combat" },
-                    { cmd = "bmana", field = "coManaSpring", name = "Mana Spring Totem",
-                      desc = "Drop Mana Spring Totem during combat" },
+                    { cmd = "ele",   field = "ele",   name = "Elemental",
+                      desc = "Elemental spec — Lightning Bolt and Chain Lightning" },
+                    { cmd = "enh",   field = "enh",   name = "Enhancement",
+                      desc = "Enhancement spec — Stormstrike and Windfury procs" },
+                    { cmd = "resto", field = "resto", name = "Restoration",
+                      desc = "Restoration spec — Chain Heal and Earth Shield" },
                 },
             },
-        },
-        nonCombat = {
             {
-                header = "Totems (Out of Combat)",
+                header = "Earth Totem",
                 type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",  field = "ncStrength",  name = "Strength Totem",
-                      desc = "Drop Strength of Earth / Windfury Totem out of combat" },
-                    { cmd = "bmana", field = "ncManaSpring", name = "Mana Spring Totem",
-                      desc = "Drop Mana Spring Totem out of combat" },
+                    { cmd = "strength of earth", field = "strengthOfEarth", name = "Strength of Earth",
+                      desc = "Drop Strength of Earth Totem — increases Strength and Agility" },
+                    { cmd = "stoneskin",         field = "stoneskin",        name = "Stoneskin",
+                      desc = "Drop Stoneskin Totem — reduces melee damage taken by party" },
+                    { cmd = "tremor",            field = "tremor",           name = "Tremor",
+                      desc = "Drop Tremor Totem — pulses to remove Fear, Charm, Sleep" },
+                    { cmd = "earthbind",         field = "earthbind",        name = "Earthbind",
+                      desc = "Drop Earthbind Totem — slows nearby enemies" },
+                },
+            },
+            {
+                header = "Fire Totem",
+                type   = "dropdown",
+                strategies = {
+                    { cmd = "searing",     field = "searing",     name = "Searing",
+                      desc = "Drop Searing Totem — attacks a nearby enemy" },
+                    { cmd = "magma",       field = "magma",       name = "Magma",
+                      desc = "Drop Magma Totem — deals AoE fire damage around itself" },
+                    { cmd = "flametongue", field = "flametongue", name = "Flametongue",
+                      desc = "Drop Flametongue Totem — increases spell damage for the party" },
+                    { cmd = "wrath",       field = "wrath",       name = "Totem of Wrath",
+                      desc = "Drop Totem of Wrath — increases spell hit and crit for the party" },
+                },
+            },
+            {
+                header = "Water Totem",
+                type   = "dropdown",
+                strategies = {
+                    { cmd = "healing stream", field = "healingStream", name = "Healing Stream",
+                      desc = "Drop Healing Stream Totem — periodically heals party members" },
+                    { cmd = "mana spring",    field = "manaSpring",    name = "Mana Spring",
+                      desc = "Drop Mana Spring Totem — restores mana to party members" },
+                    { cmd = "cleansing",      field = "cleansing",     name = "Cleansing",
+                      desc = "Drop Cleansing Totem — pulses to remove poison and disease" },
+                },
+            },
+            {
+                header = "Air Totem",
+                type   = "dropdown",
+                strategies = {
+                    { cmd = "wrath of air", field = "wrathOfAir", name = "Wrath of Air",
+                      desc = "Drop Wrath of Air Totem — increases spell haste for the party" },
+                    { cmd = "windfury",     field = "windfury",   name = "Windfury",
+                      desc = "Drop Windfury Totem — grants melee party members extra attacks" },
+                    { cmd = "grounding",    field = "grounding",  name = "Grounding",
+                      desc = "Drop Grounding Totem — absorbs the next hostile spell" },
                 },
             },
         },
@@ -349,7 +392,7 @@ NS.CLASS_STRATEGIES = {
     MAGE = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -393,7 +436,7 @@ NS.CLASS_STRATEGIES = {
     WARLOCK = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
@@ -467,7 +510,7 @@ NS.CLASS_STRATEGIES = {
     DRUID = {
         combat = {
             {
-                header  = "Spec",
+                header  = "Talent Spec",
                 type    = "dropdown",
                 whisper = "talents spec",
                 strategies = {
