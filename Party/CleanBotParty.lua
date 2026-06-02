@@ -121,7 +121,7 @@ end
 -- prevBottom=nil anchors the header to parent's TOPLEFT; otherwise to prevBottom.
 -- Returns the Set Talents button, which becomes the next prevBottom.
 -- ============================================================
-local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, gi)
+local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, gi, registry, dataField)
     local strategies  = group.strategies
     local specWhisper = group.whisper
 
@@ -204,6 +204,9 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
         end
     end)
 
+    if registry then
+        registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, dataField = dataField or "combat" }
+    end
     return setBtn
 end
 
@@ -214,7 +217,7 @@ end
 -- dataField = "combat" or "nonCombat" (key into entry.classData)
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
-local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, counter, startGi)
+local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, counter, startGi, registry)
     local entry      = CleanBot_PartyBots[key]
     local prevBottom = nil
 
@@ -223,7 +226,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
 
         if group.type == "dropdown" and group.whisper then
             -- Talent/whisper group: Show Talents + Set Talents + whisper dropdown
-            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, botName, counter, gi)
+            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, botName, counter, gi, registry, dataField)
 
         elseif group.type == "dropdown" then
             -- Exclusive dropdown: selection sends cmd +/- for each strategy
@@ -276,6 +279,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
             end
             if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
 
+            if registry then
+                registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, dataField = dataField }
+            end
             local ddAnchor = CreateFrame("Frame", nil, col)
             ddAnchor:SetSize(1, 1)
             ddAnchor:SetPoint("TOPLEFT", dd, "TOPLEFT", 16, -28)
@@ -305,6 +311,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                 end
             end
             section:Show()
+            if registry then
+                registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = group.strategies, dataField = dataField }
+            end
             prevBottom = section
         end
     end
@@ -327,7 +336,8 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
     -- Spec group: full-width above both columns (first combat group with a whisper field)
     local specGroup     = cs.combat and cs.combat[1] and cs.combat[1].whisper and cs.combat[1] or nil
     local combatStartGi = specGroup and 2 or 1
-    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, botName, counter, 1) or nil
+    local classRegistry = {}
+    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, botName, counter, 1, classRegistry, "combat") or nil
 
     local colDivider = CreateFrame("Frame", nil, classContent)
     colDivider:SetHeight(1)
@@ -346,10 +356,10 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
     rightCol:SetPoint("TOPLEFT",     colDivider,   "TOP",         4,  0)
     rightCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOMRIGHT", 0,  0)
 
-    if cs.combat   then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", "combat",    key, botName, counter, combatStartGi) end
-    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", "nonCombat", key, botName, counter, 1)            end
+    if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", "combat",    key, botName, counter, combatStartGi, classRegistry) end
+    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", "nonCombat", key, botName, counter, 1,            classRegistry) end
 
-    NS.botClassFrames[key] = {}
+    NS.botClassFrames[key] = classRegistry
 end
 
 -- ============================================================
@@ -600,19 +610,6 @@ local function CB_TearDownTabEntry(info)
     NS.botClassFrames[k]     = nil
 end
 
-local function CleanBot_ClearTabs()
-    for _, info in ipairs(NS.tabList) do
-        CB_TearDownTabEntry(info)
-    end
-    NS.tabList          = {}
-    NS.selectedTabIndex = 0
-    -- Bulk-clear registries (CB_TearDownTabEntry nils per-key; this handles any stragglers)
-    NS.botRoleDDs = {}; NS.botTankFrames = {}; NS.botDpsFrames = {}
-    NS.botHealFrames = {}; NS.botCombatFrames = {}; NS.botPositionFrames = {}
-    NS.botTimingFrames = {}; NS.botInnerTabs = {}; NS.botNcFrames = {}
-    NS.botClassFrames = {}; NS.botStarUpdaters = {}; NS.botEquipSlots = {}
-end
-
 -- ============================================================
 -- Unified tab selection — works for any index in NS.tabList
 -- ============================================================
@@ -794,45 +791,60 @@ NS.CB_UpdateTabData = function(key)
 
     if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
 
-    local combat     = entry.combat or {}
-    local activeRole = nil
-    if NS.botRoleDDs[key] then
-        for _, s in ipairs(NS.ROLE_STRATEGIES) do
-            if combat[s.field] == true then
-                UIDropDownMenu_SetText(NS.botRoleDDs[key], s.name)
-                activeRole = s.field; break
-            end
+    -- Generic checkbox sync: applies source[s.field] to each checkbox in the set.
+    local function syncCheckboxes(checkboxes, stratList, source)
+        if not checkboxes then return end
+        for _, s in ipairs(stratList) do
+            local cb = checkboxes[s.field]
+            if cb then cb:SetChecked(source[s.field] == true) end
         end
     end
+    -- Generic dropdown sync: sets text to the first strategy active in source.
+    -- Returns the active field (or nil) for callers that need the selection.
+    local function syncDropdown(dd, stratList, source)
+        if not dd then return nil end
+        UIDropDownMenu_SetText(dd, "")
+        for _, s in ipairs(stratList) do
+            if source[s.field] == true then
+                UIDropDownMenu_SetText(dd, s.name)
+                return s.field
+            end
+        end
+        return nil
+    end
+    -- Shorthand: pull .checkboxes from a keyed registry entry.
+    local function boxes(tbl) local d = tbl[key]; return d and d.checkboxes end
+
+    local combat     = entry.combat or {}
+    local activeRole = syncDropdown(NS.botRoleDDs[key], NS.ROLE_STRATEGIES, combat)
 
     local function syncSection(tbl, roleField, stratList)
         local data = tbl[key]; if not data then return end
         if activeRole == roleField then data.section:Show() else data.section:Hide() end
-        for _, s in ipairs(stratList) do
-            local cb = data.checkboxes[s.field]
-            if cb then cb:SetChecked(combat[s.field] == true) end
-        end
+        syncCheckboxes(data.checkboxes, stratList, combat)
     end
     syncSection(NS.botTankFrames,  "isTank",   NS.TANK_STRATEGIES)
     syncSection(NS.botDpsFrames,   "isDPS",    NS.DPS_STRATEGIES)
     syncSection(NS.botHealFrames,  "isHealer", NS.HEAL_STRATEGIES)
 
-    local function syncCheckboxes(tbl, stratList)
-        local data = tbl[key]; if not data then return end
-        for _, s in ipairs(stratList) do
-            local cb = data.checkboxes[s.field]
-            if cb then cb:SetChecked(combat[s.field] == true) end
-        end
-    end
-    syncCheckboxes(NS.botCombatFrames,   NS.COMBAT_STRATEGIES)
-    syncCheckboxes(NS.botPositionFrames, NS.POSITION_STRATEGIES)
-    syncCheckboxes(NS.botTimingFrames,   NS.TIMING_STRATEGIES)
+    syncCheckboxes(boxes(NS.botCombatFrames),   NS.COMBAT_STRATEGIES,   combat)
+    syncCheckboxes(boxes(NS.botPositionFrames), NS.POSITION_STRATEGIES, combat)
+    syncCheckboxes(boxes(NS.botTimingFrames),   NS.TIMING_STRATEGIES,   combat)
 
     local nonCombat = entry.nonCombat or {}
-    if NS.botNcFrames[key] then
-        for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
-            local cb = NS.botNcFrames[key].checkboxes[s.field]
-            if cb then cb:SetChecked(nonCombat[s.field] == true) end
+    syncCheckboxes(boxes(NS.botNcFrames), NS.NC_GENERAL_STRATEGIES, nonCombat)
+
+    -- Class-specific dropdowns and checkboxes
+    local classData   = entry.classData or {}
+    local classFrames = NS.botClassFrames[key]
+    if classFrames then
+        for _, cf in ipairs(classFrames) do
+            local cd = classData[cf.dataField] or {}
+            if cf.type == "dropdown" then
+                syncDropdown(cf.dd, cf.strategies, cd)
+            elseif cf.type == "checkboxes" then
+                syncCheckboxes(cf.checkboxes, cf.strategies, cd)
+            end
         end
     end
 end
