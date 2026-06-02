@@ -40,7 +40,7 @@ local function CB_FormatKnownBots()
         "",
     }
     local count = 0
-    for key, bot in pairs(CleanBot_KnownBots) do
+    for key, bot in pairs(CleanBot_PartyBots) do
         count = count + 1
         lines[#lines + 1] = string.format("[%d]  %s  (%s)", count, bot.name or key, bot.class or "?")
         if bot.combat then
@@ -63,7 +63,7 @@ local function CB_FormatKnownBots()
         end
         lines[#lines + 1] = ""
     end
-    if count == 0 then return "(CleanBot_KnownBots is empty)" end
+    if count == 0 then return "(CleanBot_PartyBots is empty)" end
     return table.concat(lines, "\n")
 end
 
@@ -141,7 +141,7 @@ end
 -- ============================================================
 NS.ASSUME_ALL_PARTY_ARE_BOTS = false
 
-CleanBot_KnownBots = {}  -- global so Commands.lua and XML scripts can reach it
+CleanBot_PartyBots = {}  -- global so Commands.lua and XML scripts can reach it
 
 -- ============================================================
 -- Layout constants
@@ -381,7 +381,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         NS.bridgeReady = false
-        CleanBot_KnownBots = {}
+        CleanBot_PartyBots = {}
         CB_SendHello()
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     end
@@ -421,98 +421,30 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
         local key   = strlower(sender)
-        local entry = CleanBot_KnownBots[key]
+        local entry = CleanBot_PartyBots[key]
         if entry and strsub(msg, 1, 12) == "Strategies: " then
             if entry.awaitingCo then
                 entry.awaitingCo = false
-                local combat = NS.CB_ParseCombatStr(msg)
-                entry.combat = combat
-
-                local dd = NS.botRoleDDs and NS.botRoleDDs[key]
-                if dd then
-                    local roleText = ""
-                    for _, s in ipairs(NS.ROLE_STRATEGIES) do
-                        if combat[s.field] == true then roleText = s.name; break end
-                    end
-                    UIDropDownMenu_SetText(dd, roleText)
-                end
-
-                local function syncSection(tbl, roleField, stratList)
-                    local data = tbl and tbl[key]
-                    if not data then return end
-                    if combat[roleField] == true then data.section:Show()
-                    else                              data.section:Hide() end
-                    for _, s in ipairs(stratList) do
-                        local cb = data.checkboxes[s.field]
-                        if cb then cb:SetChecked(combat[s.field] == true) end
-                    end
-                end
-                syncSection(NS.botTankFrames, "isTank",   NS.TANK_STRATEGIES)
-                syncSection(NS.botDpsFrames,  "isDPS",    NS.DPS_STRATEGIES)
-                syncSection(NS.botHealFrames, "isHealer", NS.HEAL_STRATEGIES)
-
-                local function syncCheckboxes(tbl, stratList)
-                    local data = tbl and tbl[key]
-                    if not data then return end
-                    for _, s in ipairs(stratList) do
-                        local cb = data.checkboxes[s.field]
-                        if cb then cb:SetChecked(combat[s.field] == true) end
-                    end
-                end
-                syncCheckboxes(NS.botCombatFrames,   NS.COMBAT_STRATEGIES)
-                syncCheckboxes(NS.botPositionFrames, NS.POSITION_STRATEGIES)
-                syncCheckboxes(NS.botTimingFrames,   NS.TIMING_STRATEGIES)
+                entry.combat     = NS.CB_ParseCombatStr(msg)
 
                 -- Parse class-specific combat flags from the same co? response.
-                local classCombat = NS.CB_ParseClassStr(msg, entry.class, "combat")
                 if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
-                entry.classData.combat = classCombat
-                local classFrames = NS.botClassFrames and NS.botClassFrames[key]
-                if classFrames then
-                    for field, cb in pairs(classFrames.combatCheckboxes) do
-                        cb:SetChecked(classCombat[field] == true)
-                    end
-                    if classFrames.combatDropdowns then
-                        for _, ddInfo in ipairs(classFrames.combatDropdowns) do
-                            local text = ""
-                            for _, s in ipairs(ddInfo.strategies) do
-                                if classCombat[s.field] == true then
-                                    text = s.name
-                                    ddInfo.selectedCmd = s.cmd
-                                    break
-                                end
-                            end
-                            UIDropDownMenu_SetText(ddInfo.dd, text)
-                        end
-                    end
-                end
+                entry.classData.combat = NS.CB_ParseClassStr(msg, entry.class, "combat")
+
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
 
                 entry.awaitingNc = true
                 SendChatMessage("nc ?", "WHISPER", nil, entry.name)
 
             elseif entry.awaitingNc then
                 entry.awaitingNc = false
-                local nc = NS.CB_ParseNonCombatStr(msg)
-                entry.nonCombat = nc
-
-                local data = NS.botNcFrames and NS.botNcFrames[key]
-                if data then
-                    for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
-                        local cb = data.checkboxes[s.field]
-                        if cb then cb:SetChecked(nc[s.field] == true) end
-                    end
-                end
+                entry.nonCombat  = NS.CB_ParseNonCombatStr(msg)
 
                 -- Parse class-specific non-combat flags from the same nc? response.
-                local classNc = NS.CB_ParseClassStr(msg, entry.class, "nonCombat")
                 if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
-                entry.classData.nonCombat = classNc
-                local classFrames = NS.botClassFrames and NS.botClassFrames[key]
-                if classFrames then
-                    for field, cb in pairs(classFrames.nonCombatCheckboxes) do
-                        cb:SetChecked(classNc[field] == true)
-                    end
-                end
+                entry.classData.nonCombat = NS.CB_ParseClassStr(msg, entry.class, "nonCombat")
+
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
             end
         end
         return
@@ -533,8 +465,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local name = strmatch(msg, "^ROSTER~([^,]+),")
             if name then
                 local key = strlower(name)
-                if not CleanBot_KnownBots[key] then
-                    CleanBot_KnownBots[key] = {
+                if not CleanBot_PartyBots[key] then
+                    CleanBot_PartyBots[key] = {
                         name      = name,
                         class     = "WARRIOR",
                         combat    = NS.CB_DefaultCombat(),
@@ -550,12 +482,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 local classKey = strupper(className)
                 classKey = gsub(classKey, "%s+", "")
                 local key            = strlower(name)
-                local existing       = CleanBot_KnownBots[key]
+                local existing       = CleanBot_PartyBots[key]
                 local alreadyQueried = existing and existing.queried
                 -- Preserve all in-flight state so a duplicate DETAIL~ (e.g. from a second
                 -- GET~DETAILS fired while awaiting a co ?/nc ? response) doesn't silently
                 -- drop the awaiting flags.
-                CleanBot_KnownBots[key] = {
+                CleanBot_PartyBots[key] = {
                     name       = name,
                     class      = classKey,
                     combat     = (existing and existing.combat)    or NS.CB_DefaultCombat(),
@@ -566,9 +498,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     awaitingNc = existing and existing.awaitingNc,
                 }
                 if not alreadyQueried then
-                    CleanBot_KnownBots[key].queried    = true
-                    CleanBot_KnownBots[key].awaitingCo = true
-                    CleanBot_KnownBots[key].awaitingNc = false
+                    CleanBot_PartyBots[key].queried    = true
+                    CleanBot_PartyBots[key].awaitingCo = true
+                    CleanBot_PartyBots[key].awaitingNc = false
                     SendChatMessage("co ?", "WHISPER", nil, name)
                 end
             end
@@ -586,8 +518,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     name = name:match("^%s*(.-)%s*$")
                     if name and name ~= "" then
                         local key = strlower(name)
-                        if CleanBot_KnownBots[key] then
-                            CleanBot_KnownBots[key].combat = NS.CB_ParseCombatStr(combatStr)
+                        if CleanBot_PartyBots[key] then
+                            CleanBot_PartyBots[key].combat = NS.CB_ParseCombatStr(combatStr)
                         end
                     end
                 end

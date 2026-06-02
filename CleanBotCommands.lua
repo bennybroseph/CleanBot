@@ -49,7 +49,7 @@ SlashCmdList["CBDEBUG"] = function()
         local unit = "party" .. i
         local name = UnitName(unit)
         local _, class = UnitClass(unit)
-        local inCache = name and CleanBot_KnownBots[strlower(name)] ~= nil
+        local inCache = name and CleanBot_PartyBots[strlower(name)] ~= nil
         print(string.format("  [%d] name=%s exists=%s isPlayer=%s class=%s inCache=%s",
             i,
             tostring(name),
@@ -60,7 +60,7 @@ SlashCmdList["CBDEBUG"] = function()
     end
     print("KnownBots cache:")
     local count = 0
-    for k, v in pairs(CleanBot_KnownBots) do
+    for k, v in pairs(CleanBot_PartyBots) do
         print("  " .. k .. " = " .. tostring(v.class))
         count = count + 1
     end

@@ -78,7 +78,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
         end)
         cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        local cbEntry = CleanBot_KnownBots[key]
+        local cbEntry = CleanBot_PartyBots[key]
         cb:SetChecked(cbEntry and cbEntry.combat and cbEntry.combat[s.field] == true)
 
         local strat = s
@@ -92,7 +92,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
             cb:SetScript("OnClick", function(self)
                 local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
                 SendChatMessage("co " .. toggle, "WHISPER", nil, botName)
-                local e = CleanBot_KnownBots[strlower(botName)]
+                local e = CleanBot_PartyBots[strlower(botName)]
                 if e and e.combat then
                     e.combat[cbField] = self:GetChecked() and true or false
                 end
@@ -166,7 +166,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
     if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, 130) end
 
     local ddInfo = { selectedCmd = nil }
-    local entry  = CleanBot_KnownBots[strlower(botName)]
+    local entry  = CleanBot_PartyBots[strlower(botName)]
     local cd     = entry and entry.classData and entry.classData.combat
     UIDropDownMenu_Initialize(dd, function(self)
         for _, s in ipairs(strategies) do
@@ -179,7 +179,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
                 ddInfo.selectedCmd = s.cmd
-                local e = CleanBot_KnownBots[strlower(botName)]
+                local e = CleanBot_PartyBots[strlower(botName)]
                 if e and e.classData then
                     for _, rs in ipairs(strategies) do
                         e.classData.combat[rs.field] = (rs.field == s.field)
@@ -216,7 +216,7 @@ end
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
 local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, counter, startGi)
-    local entry      = CleanBot_KnownBots[key]
+    local entry      = CleanBot_PartyBots[key]
     local prevBottom = nil
 
     for gi = (startGi or 1), #groups do
@@ -259,7 +259,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                             parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
                         end
                         SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, botName)
-                        local e = CleanBot_KnownBots[strlower(botName)]
+                        local e = CleanBot_PartyBots[strlower(botName)]
                         if e and e.classData then
                             for _, rs in ipairs(strategies) do
                                 e.classData[dataField][rs.field] = (rs.field == s.field)
@@ -296,7 +296,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                 function(s, checked)
                     local toggle = (checked and "+" or "-") .. s.cmd
                     SendChatMessage(cmd .. " " .. toggle, "WHISPER", nil, botName)
-                    local e = CleanBot_KnownBots[strlower(botName)]
+                    local e = CleanBot_PartyBots[strlower(botName)]
                     if e and e.classData then e.classData[dataField][s.field] = checked end
                 end)
             if entry and entry.classData and entry.classData[dataField] then
@@ -435,7 +435,7 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
         function(s, checked)
             local toggle = (checked and "+" or "-") .. s.cmd
             SendChatMessage("nc " .. toggle, "WHISPER", nil, botName)
-            local e = CleanBot_KnownBots[strlower(botName)]
+            local e = CleanBot_PartyBots[strlower(botName)]
             if e and e.nonCombat then e.nonCombat[s.field] = checked end
         end)
     if entry and entry.nonCombat then
@@ -495,7 +495,7 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
                     parts[#parts + 1] = (rs.field == s.field and "+" or "-") .. rs.cmd
                 end
                 SendChatMessage("co " .. table.concat(parts, ","), "WHISPER", nil, botName)
-                local e = CleanBot_KnownBots[strlower(botName)]
+                local e = CleanBot_PartyBots[strlower(botName)]
                 if e and e.combat then
                     for _, rs in ipairs(NS.ROLE_STRATEGIES) do
                         e.combat[rs.field] = (rs.field == s.field)
@@ -649,8 +649,7 @@ local function CB_GetTargetEntry()
     local name = UnitName("target")
     if not name then return nil end
     local key   = strlower(name)
-    local entry = CleanBot_KnownBots[key]
-    if not entry then return nil end
+    if not CleanBot_PartyBots[key] then return nil end
     local _, class = UnitClass("target")
     return { unit = "target", name = name, class = class or "WARRIOR", key = key, isTarget = true }
 end
@@ -673,20 +672,16 @@ local function CB_BuildTabEntry(info, index)
     tab:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (index - 1) * (NS.TAB_WIDTH + 2), 0)
     tab:SetNormalFontObject(GameFontNormalSmall)
 
-    if info.isTarget then
-        tab:SetText("Target")
-    else
-        tab:SetText("  " .. info.name)
-        local icon = tab:CreateTexture(nil, "OVERLAY")
-        icon:SetSize(14, 14)
-        icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
-        icon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
-        local coords = NS.CLASS_ICON_COORDS[info.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
-        icon:SetTexCoord(unpack(coords))
-    end
+    tab:SetText("  " .. info.name)
+    local icon = tab:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(14, 14)
+    icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
+    icon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+    local coords = NS.CLASS_ICON_COORDS[info.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
+    icon:SetTexCoord(unpack(coords))
 
-    local idx = index
-    tab:SetScript("OnClick", function() CleanBot_SelectTab(idx) end)
+    info._tabIdx = index
+    tab:SetScript("OnClick", function() CleanBot_SelectTab(info._tabIdx) end)
     if NS.ElvUI_S then NS.ElvUI_S:HandleButton(tab) end
     info.tabBtn = tab
 
@@ -703,7 +698,7 @@ local function CB_BuildTabEntry(info, index)
     ctrl:Hide()
     info.ctrl = ctrl
 
-    local entry = CleanBot_KnownBots[info.key]
+    local entry = CleanBot_PartyBots[info.key]
     CB_BuildBotContent(ctrl, info.key, info.name, info.class, entry, counter)
 
     -- Send co ? on first visit to a target tab bot
@@ -713,68 +708,170 @@ local function CB_BuildTabEntry(info, index)
         entry.awaitingNc = false
         SendChatMessage("co ?", "WHISPER", nil, info.name)
     end
+
+end
+
+-- Updates a tab button's position and stored index after a list reshuffle.
+local function CB_RepositionTabButton(info, index)
+    info._tabIdx = index
+    info.tabBtn:ClearAllPoints()
+    info.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (index - 1) * (NS.TAB_WIDTH + 2), 0)
 end
 
 -- ============================================================
--- RefreshTabs — rebuilds all party bot tabs and the target tab.
+-- RefreshTabs — diff-based: only adds/removes/repositions what changed.
 -- ============================================================
 NS.CleanBot_RefreshTabs = function()
-    local prevKey      = NS.selectedBotKey
-    local prevIsTarget = NS.selectedIsTarget
-    CleanBot_ClearTabs()
-
-    -- ── Collect party bots ─────────────────────────────────────
-    local entries = {}
+    -- ── 1. Compute desired tab list ────────────────────────────
+    local desired    = {}
     local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
     for i = 1, numMembers do
         local unit = "party" .. i
         if UnitExists(unit) and NS.CleanBot_IsBot(unit) then
             local name = UnitName(unit)
             local _, class = UnitClass(unit)
-            table.insert(entries, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
+            table.insert(desired, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
+        end
+    end
+    -- Prune CleanBot_PartyBots to only current party members
+    local partyKeySet = {}
+    for _, d in ipairs(desired) do partyKeySet[d.key] = true end
+    for key in pairs(CleanBot_PartyBots) do
+        if not partyKeySet[key] then CleanBot_PartyBots[key] = nil end
+    end
+
+    local partyBotCount = #desired
+    local targetEntry = CB_GetTargetEntry()
+    if targetEntry then
+        local inParty = false
+        for _, d in ipairs(desired) do
+            if d.key == targetEntry.key then inParty = true; break end
+        end
+        if inParty then
+            -- Target is already a party tab — select it instead of creating a duplicate
+            NS.selectedBotKey   = targetEntry.key
+            NS.selectedIsTarget = false
+        else
+            table.insert(desired, targetEntry)
+            NS.selectedIsTarget = true
         end
     end
 
-    if #entries == 0 then
-        if NS.partyEmptyLabel then NS.partyEmptyLabel:SetText("No bots found in party.") end
-    else
-        if NS.partyEmptyLabel then NS.partyEmptyLabel:SetText("") end
+    if NS.partyEmptyLabel then
+        NS.partyEmptyLabel:SetText(#desired == 0 and "No bots found in party." or "")
     end
 
-    -- ── Append target tab if valid ─────────────────────────────
-    local targetEntry = CB_GetTargetEntry()
-    if targetEntry then table.insert(entries, targetEntry) end
+    -- ── 2. Build lookups ───────────────────────────────────────
+    local currentByKey = {}
+    for _, info in ipairs(NS.tabList) do currentByKey[info.key] = info end
 
-    -- ── Build all tabs ─────────────────────────────────────────
-    for i, info in ipairs(entries) do
-        CB_BuildTabEntry(info, i)
-        NS.tabList[i] = info
+    local newTabList  = {}
+    local newEntries  = {}
+    local desiredByKey = {}
+    for i, d in ipairs(desired) do
+        desiredByKey[d.key] = true
+        local existing = currentByKey[d.key]
+        if existing then
+            -- Keep existing tab; update unit if it shifted party slots
+            if existing.unit ~= d.unit then
+                existing.unit = d.unit
+                if existing.model then existing.model:SetUnit(d.unit) end
+            end
+            newTabList[i] = existing
+        else
+            newTabList[i] = d
+            newEntries[#newEntries + 1] = { info = d, index = i }
+        end
     end
 
-    -- ── Kick off equipment inspect chain ──────────────────────
-    if NS.CB_QueueEquipRefresh and #NS.tabList > 0 then
+    -- ── 3. Tear down tabs no longer in the desired list ────────
+    for _, info in ipairs(NS.tabList) do
+        if not desiredByKey[info.key] then CB_TearDownTabEntry(info) end
+    end
+    NS.tabList = newTabList
+
+    -- ── 4. Build frames for new entries ───────────────────────
+    for _, e in ipairs(newEntries) do CB_BuildTabEntry(e.info, e.index) end
+
+    -- ── 5. Reposition all tab buttons ─────────────────────────
+    for i, info in ipairs(NS.tabList) do CB_RepositionTabButton(info, i) end
+
+    -- ── 6. Equip refresh for new entries only ─────────────────
+    if NS.CB_QueueEquipRefresh and #newEntries > 0 then
         local toInspect = {}
-        for _, info in ipairs(NS.tabList) do
-            if info.unit and UnitExists(info.unit) then
-                table.insert(toInspect, info)
+        for _, e in ipairs(newEntries) do
+            if e.info.unit and UnitExists(e.info.unit) then
+                table.insert(toInspect, e.info)
             end
         end
         NS.CB_QueueEquipRefresh(toInspect)
     end
 
-    -- ── Restore selection ──────────────────────────────────────
+    -- ── 7. Restore or establish selection ─────────────────────
     if #NS.tabList == 0 then return end
-
     local restoreIdx = nil
-    if prevIsTarget then
+    if NS.selectedIsTarget then
         for i, info in ipairs(NS.tabList) do
             if info.isTarget then restoreIdx = i; break end
         end
-    elseif prevKey then
+    elseif NS.selectedBotKey then
         for i, info in ipairs(NS.tabList) do
-            if info.key == prevKey then restoreIdx = i; break end
+            if info.key == NS.selectedBotKey then restoreIdx = i; break end
         end
     end
-    CleanBot_SelectTab(restoreIdx or 1)
+    CleanBot_SelectTab(restoreIdx or NS.selectedTabIndex or 1)
 end
 
+-- ============================================================
+-- NS.CB_UpdateTabData — refreshes all UI elements for one tab
+-- from CleanBot_PartyBots[key] without touching layout.
+-- Call after any code that modifies a bot's combat/nonCombat data.
+-- ============================================================
+NS.CB_UpdateTabData = function(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+
+    if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
+
+    local combat     = entry.combat or {}
+    local activeRole = nil
+    if NS.botRoleDDs[key] then
+        for _, s in ipairs(NS.ROLE_STRATEGIES) do
+            if combat[s.field] == true then
+                UIDropDownMenu_SetText(NS.botRoleDDs[key], s.name)
+                activeRole = s.field; break
+            end
+        end
+    end
+
+    local function syncSection(tbl, roleField, stratList)
+        local data = tbl[key]; if not data then return end
+        if activeRole == roleField then data.section:Show() else data.section:Hide() end
+        for _, s in ipairs(stratList) do
+            local cb = data.checkboxes[s.field]
+            if cb then cb:SetChecked(combat[s.field] == true) end
+        end
+    end
+    syncSection(NS.botTankFrames,  "isTank",   NS.TANK_STRATEGIES)
+    syncSection(NS.botDpsFrames,   "isDPS",    NS.DPS_STRATEGIES)
+    syncSection(NS.botHealFrames,  "isHealer", NS.HEAL_STRATEGIES)
+
+    local function syncCheckboxes(tbl, stratList)
+        local data = tbl[key]; if not data then return end
+        for _, s in ipairs(stratList) do
+            local cb = data.checkboxes[s.field]
+            if cb then cb:SetChecked(combat[s.field] == true) end
+        end
+    end
+    syncCheckboxes(NS.botCombatFrames,   NS.COMBAT_STRATEGIES)
+    syncCheckboxes(NS.botPositionFrames, NS.POSITION_STRATEGIES)
+    syncCheckboxes(NS.botTimingFrames,   NS.TIMING_STRATEGIES)
+
+    local nonCombat = entry.nonCombat or {}
+    if NS.botNcFrames[key] then
+        for _, s in ipairs(NS.NC_GENERAL_STRATEGIES) do
+            local cb = NS.botNcFrames[key].checkboxes[s.field]
+            if cb then cb:SetChecked(nonCombat[s.field] == true) end
+        end
+    end
+end

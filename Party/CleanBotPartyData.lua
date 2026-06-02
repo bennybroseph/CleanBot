@@ -184,7 +184,7 @@ end
 NS.CleanBot_IsBot = function(unit)
     local name = UnitName(unit)
     if not name then return false end
-    if CleanBot_KnownBots[strlower(name)] then return true end
+    if CleanBot_PartyBots[strlower(name)] then return true end
     if NS.ASSUME_ALL_PARTY_ARE_BOTS then return true end
     return false
 end
