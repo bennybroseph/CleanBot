@@ -70,6 +70,15 @@ local function CB_ShowEquipMenu(btn)
     UIDropDownMenu_Initialize(equipMenu, function()
         local info = UIDropDownMenu_CreateInfo()
 
+        info.text         = "Unequip"
+        info.notCheckable = true
+        info.func         = function()
+            local botName = UnitName(btn.unit)
+            if not botName then return end
+            SendChatMessage("ue " .. btn.itemLink, "WHISPER", nil, botName)
+        end
+        UIDropDownMenu_AddButton(info)
+
         info.text         = "Open on Wowhead"
         info.notCheckable = true
         info.func         = function()
