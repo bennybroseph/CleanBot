@@ -6,12 +6,11 @@ local NS = CleanBotNS
 
 -- ============================================================
 -- Unified tab list and selection state
--- Each entry: { key, unit, name, class, isTarget, tabBtn, model, ctrl }
+-- Each entry: { key, unit, name, class, tabBtn, model, ctrl }
 -- ============================================================
-NS.tabList          = {}   -- ordered list of all active tabs (party + target)
+NS.tabList          = {}   -- ordered list of all active tabs
 NS.selectedTabIndex = 0    -- index into tabList of the currently shown tab
 NS.selectedBotKey   = nil  -- key of selected tab; survives RefreshTabs rebuilds
-NS.selectedIsTarget = false
 NS.lastWavedAt      = nil
 
 -- Per-key registries (keyed by strlower(botName))
@@ -624,7 +623,6 @@ CleanBot_SelectTab = function(index)
     local info = NS.tabList[index]
     NS.selectedTabIndex = index
     NS.selectedBotKey   = info.key
-    NS.selectedIsTarget = info.isTarget or false
 
     for i, t in ipairs(NS.tabList) do
         local sel = (i == index)
@@ -640,23 +638,10 @@ CleanBot_SelectTab = function(index)
     end
 end
 
--- ============================================================
--- CB_GetTargetEntry — returns a tab descriptor for the current
--- target if it is a known bot, or nil.
--- ============================================================
-local function CB_GetTargetEntry()
-    if not UnitExists("target") or not UnitIsPlayer("target") then return nil end
-    local name = UnitName("target")
-    if not name then return nil end
-    local key   = strlower(name)
-    if not CleanBot_PartyBots[key] then return nil end
-    local _, class = UnitClass("target")
-    return { unit = "target", name = name, class = class or "WARRIOR", key = key, isTarget = true }
-end
 
 -- ============================================================
 -- CB_BuildTabEntry — builds all frames for one tab slot.
--- info = { key, unit, name, class, [isTarget] }
+-- info = { key, unit, name, class }
 -- index = position in NS.tabList (governs tab button X offset).
 -- Stores tabBtn, model, ctrl back onto info.
 -- ============================================================
@@ -700,15 +685,6 @@ local function CB_BuildTabEntry(info, index)
 
     local entry = CleanBot_PartyBots[info.key]
     CB_BuildBotContent(ctrl, info.key, info.name, info.class, entry, counter)
-
-    -- Send co ? on first visit to a target tab bot
-    if info.isTarget and entry and not entry.queried then
-        entry.queried    = true
-        entry.awaitingCo = true
-        entry.awaitingNc = false
-        SendChatMessage("co ?", "WHISPER", nil, info.name)
-    end
-
 end
 
 -- Updates a tab button's position and stored index after a list reshuffle.
@@ -740,21 +716,10 @@ NS.CleanBot_RefreshTabs = function()
         if not partyKeySet[key] then CleanBot_PartyBots[key] = nil end
     end
 
-    local partyBotCount = #desired
-    local targetEntry = CB_GetTargetEntry()
-    if targetEntry then
-        local inParty = false
-        for _, d in ipairs(desired) do
-            if d.key == targetEntry.key then inParty = true; break end
-        end
-        if inParty then
-            -- Target is already a party tab — select it instead of creating a duplicate
-            NS.selectedBotKey   = targetEntry.key
-            NS.selectedIsTarget = false
-        else
-            table.insert(desired, targetEntry)
-            NS.selectedIsTarget = true
-        end
+    -- If targeting a current party bot, pre-select their tab
+    if UnitExists("target") and UnitIsPlayer("target") then
+        local targetKey = strlower(UnitName("target") or "")
+        if CleanBot_PartyBots[targetKey] then NS.selectedBotKey = targetKey end
     end
 
     if NS.partyEmptyLabel then
@@ -810,11 +775,7 @@ NS.CleanBot_RefreshTabs = function()
     -- ── 7. Restore or establish selection ─────────────────────
     if #NS.tabList == 0 then return end
     local restoreIdx = nil
-    if NS.selectedIsTarget then
-        for i, info in ipairs(NS.tabList) do
-            if info.isTarget then restoreIdx = i; break end
-        end
-    elseif NS.selectedBotKey then
+    if NS.selectedBotKey then
         for i, info in ipairs(NS.tabList) do
             if info.key == NS.selectedBotKey then restoreIdx = i; break end
         end

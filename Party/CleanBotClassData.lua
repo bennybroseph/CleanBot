@@ -76,6 +76,26 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
+                header = "Auras (Combat)",
+                type   = "dropdown",
+                strategies = {
+                    { cmd = "barmor",  field = "barmor",  name = "Devotion Aura",
+                      desc = "Emit Devotion Aura — increases armor of nearby party members" },
+                    { cmd = "baoe",    field = "baoe",    name = "Retribution Aura",
+                      desc = "Emit Retribution Aura — deals Holy damage to attackers" },
+                    { cmd = "bcast",   field = "bcast",   name = "Concentration Aura",
+                      desc = "Emit Concentration Aura — reduces spell pushback for casters" },
+                    { cmd = "bspeed",  field = "bspeed",  name = "Crusader Aura",
+                      desc = "Emit Crusader Aura — increases mounted speed" },
+                    { cmd = "rfire",   field = "rfire",   name = "Fire Resist Aura",
+                      desc = "Emit Fire Resistance Aura" },
+                    { cmd = "rfrost",  field = "rfrost",  name = "Frost Resist Aura",
+                      desc = "Emit Frost Resistance Aura" },
+                    { cmd = "rshadow", field = "rshadow", name = "Shadow Resist Aura",
+                      desc = "Emit Shadow Resistance Aura" },
+                },
+            },
+            {
                 header = "Blessings",
                 type   = "dropdown",
                 strategies = {
@@ -92,7 +112,7 @@ NS.CLASS_STRATEGIES = {
         },
         nonCombat = {
             {
-                header = "Auras",
+                header = "Auras (Out of Combat)",
                 type   = "dropdown",
                 strategies = {
                     { cmd = "barmor",  field = "barmor",  name = "Devotion Aura",
@@ -137,7 +157,7 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Tactics",
+                header = "Other",
                 strategies = {
                     { cmd = "trap weave", field = "trapWeave", name = "Trap Weaving",
                       desc = "Weave Explosive Trap into the rotation by kiting mobs" },
@@ -148,13 +168,13 @@ NS.CLASS_STRATEGIES = {
             {
                 header = "Aspects",
                 strategies = {
-                    { cmd = "bdps",    field = "bdps",    name = "Aspect: Hawk",
+                    { cmd = "bdps",    field = "bdps",    name = "Aspect of the Hawk",
                       desc = "Maintain Aspect of the Hawk for maximum ranged attack power" },
-                    { cmd = "bmana",   field = "bmana",   name = "Aspect: Viper",
+                    { cmd = "bmana",   field = "bmana",   name = "Aspect of the Viper",
                       desc = "Maintain Aspect of the Viper for mana regeneration" },
-                    { cmd = "bspeed",  field = "bspeed",  name = "Aspect: Pack",
+                    { cmd = "bspeed",  field = "bspeed",  name = "Aspect of the Pack",
                       desc = "Maintain Aspect of the Pack/Cheetah for movement speed" },
-                    { cmd = "rnature", field = "rnature", name = "Aspect: Wild",
+                    { cmd = "rnature", field = "rnature", name = "Aspect of the Wild",
                       desc = "Maintain Aspect of the Wild for nature resistance" },
                 },
             },
@@ -217,25 +237,10 @@ NS.CLASS_STRATEGIES = {
                       desc = "Shadow PvP — Silence and Dispersion burst windows" },
                 },
             },
-            {
-                header = "Role",
-                strategies = {
-                    { cmd = "holy heal",     field = "holyHeal",    name = "Holy Heal",
-                      desc = "Holy healing rotation — Flash Heal, Greater Heal, Circle of Healing" },
-                    { cmd = "holy dps",      field = "holyDps",     name = "Holy DPS",
-                      desc = "Holy damage rotation — Smite and Holy Fire" },
-                    { cmd = "shadow",        field = "shadow",      name = "Shadow",
-                      desc = "Shadow DPS rotation — Mind Blast, Mind Flay, Shadow Word: Pain" },
-                    { cmd = "shadow debuff", field = "shadowDebuff", name = "Shadow Debuffs",
-                      desc = "Apply Shadow debuffs (Vampiric Touch, Shadow Weaving) before damage" },
-                    { cmd = "shadow aoe",   field = "shadowAoe",   name = "Shadow AoE",
-                      desc = "Shadow AoE rotation using Mind Sear" },
-                },
-            },
         },
         nonCombat = {
             {
-                header = "Party Buffs",
+                header = "Other",
                 strategies = {
                     { cmd = "rshadow", field = "rshadow", name = "Shadow Protection",
                       desc = "Apply Prayer of Shadow Protection to all party members" },
@@ -269,18 +274,20 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Presence",
+                header = "Specialization",
+                type = "dropdown",
                 strategies = {
-                    { cmd = "blood",  field = "blood",  name = "Blood Presence",
-                      desc = "Blood Presence — improved damage and life-steal" },
-                    { cmd = "frost",  field = "frost",  name = "Frost Presence",
-                      desc = "Frost Presence — improved threat and damage reduction (tanking)" },
-                    { cmd = "unholy", field = "unholy", name = "Unholy Presence",
-                      desc = "Unholy Presence — increased attack speed and movement" },
+                    { cmd = "blood",  field = "blood",  name = "Blood",
+                      desc = "Blood Specialization — improved damage and life-steal" },
+                    { cmd = "frost",  field = "frost",  name = "Frost",
+                      desc = "Frost Specialization — improved threat and damage reduction (tanking)" },
+                    { cmd = "unholy", field = "unholy", name = "Unholy",
+                      desc = "Unholy Specialization — increased attack speed and movement" },
                 },
             },
             {
                 header = "AoE Rotation",
+                type = "dropdown",
                 strategies = {
                     { cmd = "frost aoe",  field = "frostAoe",  name = "Frost AoE",
                       desc = "Frost AoE rotation using Howling Blast and Frost Strike" },
@@ -364,25 +371,19 @@ NS.CLASS_STRATEGIES = {
             },
             {
                 header = "Spell School",
+                type = "dropdown",
                 strategies = {
-                    { cmd = "arcane",        field = "arcane",      name = "Arcane",
-                      desc = "Arcane single-target rotation (Arcane Blast, Arcane Missiles)" },
-                    { cmd = "arcane aoe",    field = "arcaneAoe",   name = "Arcane AoE",
-                      desc = "Arcane AoE rotation" },
                     { cmd = "frost",         field = "frost",       name = "Frost",
                       desc = "Frost single-target rotation (Frostbolt, Ice Lance)" },
-                    { cmd = "frost aoe",     field = "frostAoe",    name = "Frost AoE",
-                      desc = "Frost AoE rotation (Blizzard, Cone of Cold)" },
                     { cmd = "fire",          field = "fire",        name = "Fire",
                       desc = "Fire single-target rotation (Fireball, Pyroblast)" },
-                    { cmd = "fire aoe",      field = "fireAoe",     name = "Fire AoE",
-                      desc = "Fire AoE rotation (Flamestrike, Blast Wave)" },
-                    { cmd = "frostfire",     field = "frostfire",   name = "Frostfire",
-                      desc = "Frostfire Bolt single-target rotation" },
-                    { cmd = "frostfire aoe", field = "frostfireAoe", name = "Frostfire AoE",
-                      desc = "Frostfire AoE rotation" },
+                },
+            },
+            {
+                header = "Other",
+                strategies = {
                     { cmd = "firestarter",   field = "firestarter", name = "Firestarter",
-                      desc = "Melee-range firestarter mode using Scorch and melee attacks" },
+                      desc = "Melee-range strategy which utilizes the instant cast Flamestrike from the Firestarter talent" },
                 },
             },
         },
@@ -411,9 +412,9 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Metamorphosis",
+                header = "Other",
                 strategies = {
-                    { cmd = "meta melee", field = "metaMelee", name = "Meta Melee",
+                    { cmd = "meta melee", field = "metaMelee", name = "Metamorphosis Melee",
                       desc = "Metamorphosis melee mode — DPS in Demon Form at close range" },
                 },
             },

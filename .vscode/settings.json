@@ -26,5 +26,13 @@
         "StaticPopup_Show",
         "UIDropDownMenu_DisableDropDown",
         "InspectFrame"
+    ],
+    "cSpell.words": [
+        "Firestarter",
+        "Flamestrike",
+        "Frostbolt",
+        "Frostfire",
+        "Pyroblast",
+        "Shadowbolt"
     ]
 }

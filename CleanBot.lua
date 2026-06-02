@@ -556,12 +556,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "UNIT_INVENTORY_CHANGED" then
-        -- Covers equipment changes mid-session (swapping gear, etc.)
         local unit = ...
-        if unit and NS.tabList and NS.CB_RefreshEquipSlots then
+        if unit and NS.tabList and NS.CB_QueueEquipRefresh then
             for _, info in ipairs(NS.tabList) do
                 if info.unit == unit then
-                    NS.CB_RefreshEquipSlots(info.key, unit)
+                    NS.CB_QueueEquipRefresh({{ key = info.key, unit = unit }})
                     break
                 end
             end

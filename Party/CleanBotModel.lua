@@ -98,6 +98,18 @@ NS.CB_CreateModel = function(parent, contentW, contentH, unit, key, counter)
     end)
     starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- ── Refresh Equipment button ──────────────────────────────
+    local refreshBtn = CreateFrame("Button", "CleanBotRefreshEquip" .. counter, model, "UIPanelButtonTemplate")
+    refreshBtn:SetSize(110, 22)
+    refreshBtn:SetPoint("TOP", model, "TOP", 0, -6)
+    refreshBtn:SetText("Refresh Equipment")
+    refreshBtn:SetScript("OnClick", function()
+        if NS.CB_QueueEquipRefresh then
+            NS.CB_QueueEquipRefresh({{ key = key, unit = unit }})
+        end
+    end)
+    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(refreshBtn) end
+
     -- ── Equipment slot buttons (paperdoll layout) ─────────────
     NS.CB_CreateEquipSlots(model, key, counter, unit)
 
