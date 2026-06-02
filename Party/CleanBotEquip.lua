@@ -51,12 +51,8 @@ local function CB_GetWowheadPopup()
 
     if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
 
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    closeBtn:SetSize(80, 22)
+    local closeBtn = NS.CB_CreateButton(popup, nil, "Close", 80, 22, function() popup:Hide() end)
     closeBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 12)
-    closeBtn:SetText("Close")
-    closeBtn:SetScript("OnClick", function() popup:Hide() end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(closeBtn) end
 
     NS.wowheadPopup = popup
     return popup
@@ -107,11 +103,12 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
     local modelW = model:GetWidth()
     local modelH = model:GetHeight()
 
-    -- ── Proportional geometry ─────────────────────────────────
-    local step     = math.floor(modelH / 8)
-    local slotSize = math.floor(step * 0.88)
-    local gapX     = math.max(2, math.floor(modelW * 0.03))
-    local gapYBot  = math.max(2, math.floor(modelH * 0.02))
+    -- ── Proportional geometry (shared with CB_GetGeometry) ────
+    local g        = NS.CB_SlotGeometry(modelW, modelH)
+    local step     = g.step
+    local slotSize = g.slot
+    local gapX     = g.gapX
+    local gapYBot  = g.gapYBot
 
     for _, slot in ipairs(NS.EQUIP_SLOTS) do
         local btn = CreateFrame("Button", "CleanBotEquip_" .. counter .. "_" .. slot.id, model)

@@ -93,40 +93,39 @@ NS.CB_SplitOnce = function(str, sep)
     return str, ""
 end
 
--- Parse a bot whisper response to "co ?".
--- Skips any "Label: " prefix, then reads comma-separated strategy names.
-NS.CB_ParseCombatStr = function(msg)
-    local combat = {}
-    for _, field in pairs(NS.STRATEGY_MAP) do combat[field] = false end
-    if not msg or msg == "" then return combat end
+-- Parse a comma-separated strategy reply into a { field = bool } table.
+-- `map` is token(cmd) -> field. Every field present in `map` is seeded
+-- false, then any token found in the message (after an optional "Label: "
+-- prefix) flips its field true.
+local function CB_ParseTokens(msg, map)
+    local result = {}
+    for _, field in pairs(map) do result[field] = false end
+    if not msg or msg == "" then return result end
     local colon = strfind(msg, ":", 1, true)
     local list  = colon and strsub(msg, colon + 1) or msg
     for token in gmatch(list, "[^,]+") do
         token = token:match("^%s*(.-)%s*$")
-        local field = NS.STRATEGY_MAP[token]
-        if field then combat[field] = true end
+        local field = map[token]
+        if field then result[field] = true end
     end
-    return combat
+    return result
+end
+
+-- Parse a bot whisper response to "co ?".
+NS.CB_ParseCombatStr = function(msg)
+    return CB_ParseTokens(msg, NS.STRATEGY_MAP)
 end
 
 -- Parse a bot whisper response to "nc ?".
 NS.CB_ParseNonCombatStr = function(msg)
-    local nc = {}
-    for _, field in pairs(NS.NC_STRATEGY_MAP) do nc[field] = false end
-    if not msg or msg == "" then return nc end
-    local colon = strfind(msg, ":", 1, true)
-    local list  = colon and strsub(msg, colon + 1) or msg
-    for token in gmatch(list, "[^,]+") do
-        token = token:match("^%s*(.-)%s*$")
-        local field = NS.NC_STRATEGY_MAP[token]
-        if field then nc[field] = true end
-    end
-    return nc
+    return CB_ParseTokens(msg, NS.NC_STRATEGY_MAP)
 end
 
 -- ============================================================
 -- Class-specific data helpers
--- (NS.CLASS_STRATEGIES is defined in CleanBotClassData.lua, loaded before this)
+-- (NS.CLASS_STRATEGIES is defined in CleanBotClassData.lua, which loads after
+--  this file. These helpers are only called at event time, so the forward
+--  reference resolves before first use.)
 -- ============================================================
 
 -- Returns a fresh classData table for a given class.
@@ -155,27 +154,16 @@ end
 -- section: "combat" or "nonCombat"
 -- Returns { field = bool } for every strategy in that section.
 NS.CB_ParseClassStr = function(msg, class, section)
-    local result = {}
     local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
-    if not cs or not cs[section] then return result end
+    if not cs or not cs[section] then return {} end
 
     local map = {}
     for _, group in ipairs(cs[section]) do
         for _, s in ipairs(group.strategies) do
-            map[s.cmd]       = s.field
-            result[s.field]  = false
+            map[s.cmd] = s.field
         end
     end
-
-    if not msg or msg == "" then return result end
-    local colon = strfind(msg, ":", 1, true)
-    local list  = colon and strsub(msg, colon + 1) or msg
-    for token in gmatch(list, "[^,]+") do
-        token = token:match("^%s*(.-)%s*$")
-        local field = map[token]
-        if field then result[field] = true end
-    end
-    return result
+    return CB_ParseTokens(msg, map)
 end
 
 -- ============================================================

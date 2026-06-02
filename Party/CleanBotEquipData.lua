@@ -6,6 +6,28 @@
 -- ============================================================
 local NS = CleanBotNS
 
+-- Proportional paperdoll slot geometry derived from the live model size.
+-- Single source of truth shared by the equip-column layout (CleanBotParty's
+-- CB_GetGeometry) and the slot-button creation (CleanBotEquip's
+-- CB_CreateEquipSlots) so the two layouts never drift.
+--   step    = modelH / 8    (8 slots distributed down the model height)
+--   slot    = step * 0.88   (12% gap between consecutive slots)
+--   gapX    = modelW * 0.03 (column separation from the model edge)
+--   gapYBot = modelH * 0.02 (weapon-row clearance below the model)
+--   colW    = slot + gapX   (full width of one equip column)
+NS.CB_SlotGeometry = function(modelW, modelH)
+    local step = math.floor(modelH / 8)
+    local slot = math.floor(step * 0.88)
+    local gapX = math.max(2, math.floor(modelW * 0.03))
+    return {
+        step    = step,
+        slot    = slot,
+        gapX    = gapX,
+        gapYBot = math.max(2, math.floor(modelH * 0.02)),
+        colW    = slot + gapX,
+    }
+end
+
 NS.EQUIP_SLOTS = {
     -- ── Left column (top → bottom) ────────────────────────────
     { id=1,  name="Head",      side="left",   order=1, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Head"          },
