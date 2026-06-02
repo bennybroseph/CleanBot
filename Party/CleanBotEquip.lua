@@ -180,6 +180,36 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
 
         NS.botEquipSlots[key][slot.id] = btn
     end
+
+    -- ── Bag icon — opens the inventory frame ──────────────────
+    local bagBtn = CreateFrame("Button", "CleanBotBagBtn_" .. counter, model)
+    bagBtn:SetSize(slotSize, slotSize)
+    local wristBtn   = NS.botEquipSlots[key][9]
+    local mainHndBtn = NS.botEquipSlots[key][16]
+    bagBtn:SetPoint("LEFT",  wristBtn,   "LEFT",  0, 0)
+    bagBtn:SetPoint("TOP", mainHndBtn, "TOP", 0, 0)
+
+    local bagIcon = bagBtn:CreateTexture(nil, "ARTWORK")
+    bagIcon:SetAllPoints()
+    bagIcon:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
+    bagBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    bagBtn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+
+    bagBtn:SetScript("OnClick", function()
+        local entry   = CleanBot_PartyBots[key]
+        local botName = entry and entry.name or key
+        if NS.botInventoryFrames[key] and NS.botInventoryFrames[key]:IsShown() then
+            NS.botInventoryFrames[key]:Hide()
+        else
+            NS.CB_RequestInventory(key, botName)
+        end
+    end)
+    bagBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Open Inventory", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 -- ── Equipment refresh via InspectUnit chain ───────────────────────────────

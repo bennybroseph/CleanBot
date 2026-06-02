@@ -387,6 +387,40 @@ function CleanBot_RequestRosterThenRefresh()
     NS.CB_RequestSync()
 end
 
+-- Tick inventory timeouts for the whisper path (3s silence = done)
+local invTickFrame = CreateFrame("Frame")
+invTickFrame:SetScript("OnUpdate", function(self, dt)
+    for key, entry in pairs(CleanBot_PartyBots) do
+        if entry.awaitingInventory then
+            entry.invTimeout = (entry.invTimeout or 0) + dt
+            if entry.invTimeout >= 3 then
+                entry.awaitingInventory = false
+                entry.invTimeout        = 0
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and f:IsShown() then NS.CB_RenderInventory(key) end
+            end
+        end
+    end
+end)
+
+NS.CB_RequestInventory = function(key, botName)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+
+    -- Reset any previous inventory data before requesting fresh data
+    entry.inventory = { items = {} }
+
+    if NS.bridgeState == "present" then
+        SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", "PARTY")
+    else
+        entry.awaitingInventory = true
+        entry.invTimeout        = 0
+        SendChatMessage("items", "WHISPER", nil, botName)
+    end
+
+    NS.CB_ShowInventory(key, botName)
+end
+
 -- ============================================================
 -- Bridge handshake
 -- ============================================================
@@ -490,9 +524,23 @@ bridgeFrame:RegisterEvent("INSPECT_READY")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
-        if strsub(msg, 1, 12) ~= "Strategies: " then return end
         local key   = strlower(sender)
         local entry = CleanBot_PartyBots[key]
+
+        -- Inventory collection (whisper path): grab any item link, ignore everything else
+        if entry and entry.awaitingInventory then
+            if strfind(msg, "|Hitem:", 1, true) then
+                local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(msg)
+                if item then
+                    local items = entry.inventory and entry.inventory.items
+                    if items then items[#items + 1] = item end
+                end
+            end
+            entry.invTimeout = 0   -- reset timeout on every whisper from this bot
+            return
+        end
+
+        if strsub(msg, 1, 12) ~= "Strategies: " then return end
 
         if entry then
             -- Known bot: response to a co?/nc? read (no-bridge mode, or a manual re-read).
@@ -607,6 +655,53 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CB_StoreCombat(entry, combatStr)
                 NS.CB_StoreNonCombat(entry, ncStr)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
+            end
+
+        elseif msg and strsub(msg, 1, 10) == "INV_BEGIN~" then
+            local rest = strsub(msg, 11)
+            local name = NS.CB_SplitOnce(rest, "~")
+            local key  = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.inventory = { items = {} }
+            end
+
+        elseif msg and strsub(msg, 1, 12) == "INV_SUMMARY~" then
+            local rest                  = strsub(msg, 13)
+            local name, r2              = NS.CB_SplitOnce(rest, "~")
+            local _, r3                 = NS.CB_SplitOnce(r2,   "~")  -- skip token
+            local gold, r4              = NS.CB_SplitOnce(r3,   "~")  -- skip gold
+            local silver, r5            = NS.CB_SplitOnce(r4,   "~")  -- skip silver
+            local copper, r6            = NS.CB_SplitOnce(r5,   "~")  -- skip copper
+            local bagUsed, bagTotal     = NS.CB_SplitOnce(r6,   "~")
+            local key   = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry and entry.inventory then
+                entry.inventory.bagUsed  = tonumber(bagUsed)  or 0
+                entry.inventory.bagTotal = tonumber(bagTotal) or 0
+            end
+
+        elseif msg and strsub(msg, 1, 9) == "INV_ITEM~" then
+            local rest      = strsub(msg, 10)
+            local name, r2  = NS.CB_SplitOnce(rest, "~")
+            local _, encoded = NS.CB_SplitOnce(r2,  "~")   -- skip token
+            local key   = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry and entry.inventory then
+                local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(encoded)
+                if item then
+                    local items = entry.inventory.items
+                    items[#items + 1] = item
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 8) == "INV_END~" then
+            local rest = strsub(msg, 9)
+            local name = NS.CB_SplitOnce(rest, "~")
+            local key  = strlower(name)
+            local f    = NS.botInventoryFrames and NS.botInventoryFrames[key]
+            if f and f:IsShown() then
+                NS.CB_RenderInventory(key)
             end
         end
 
