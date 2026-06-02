@@ -73,48 +73,104 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     section:SetPoint("RIGHT",   ctrl,   "RIGHT",       0,   0)
     section:SetHeight(#strategies * 26)
 
-    local checkboxes = {}
-    for i, s in ipairs(strategies) do
-        local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
-        cb:SetSize(20, 20)
-        cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -(i - 1) * 26)
+    local controls = {}
+    local rowIndex = 0
+    for _, s in ipairs(strategies) do
+        if s.type == "timerDropdown" then
+            local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            lbl:SetPoint("TOPLEFT", section, "TOPLEFT", 28, -(rowIndex * 26) - 3)
+            lbl:SetText(s.name .. ":")
 
-        local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-        lbl:SetText(s.name)
+            local dd = NS.CB_CreateDropdown(section, "CleanBotTimerDD_" .. s.field .. "_" .. tag, 80)
+            dd:SetPoint("LEFT", lbl, "RIGHT", -8, -1)
 
-        cb:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(s.name, 1, 1, 1)
-            GameTooltip:AddLine(s.desc, 0.8, 0.8, 0.8, true)
-            GameTooltip:Show()
-        end)
-        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        cb:SetChecked(sourceTable and sourceTable[s.field] == true)
-
-        local strat = s
-        if onClickFn then
-            cb:SetScript("OnClick", function(self)
-                onClickFn(strat, self:GetChecked() and true or false)
-            end)
-        else
-            local cbCmd   = s.cmd
-            local cbField = s.field
-            cb:SetScript("OnClick", function(self)
-                local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
-                NS.CB_SendBotCommand(slot.name, "co " .. toggle)
-                local e = CleanBot_PartyBots[slot.key]
-                if e and e.combat then
-                    e.combat[cbField] = self:GetChecked() and true or false
+            local strat = s
+            UIDropDownMenu_Initialize(dd, function(self)
+                local src = sourceTable
+                for _, v in ipairs(strat.values) do
+                    local info           = UIDropDownMenu_CreateInfo()
+                    info.text            = v .. " sec"
+                    info.value           = v
+                    info.notCheckable    = false
+                    info.tooltipTitle    = strat.name
+                    info.tooltipText     = strat.desc
+                    info.tooltipOnButton = 1
+                    info.func            = function()
+                        UIDropDownMenu_SetText(self, v .. " sec")
+                        NS.CB_SendBotCommand(slot.name, strat.cmd .. " " .. v)
+                        local e = CleanBot_PartyBots[slot.key]
+                        if e and e.combat then e.combat[strat.field] = v end
+                    end
+                    info.checked = src and (src[strat.field] == v)
+                    UIDropDownMenu_AddButton(info)
                 end
             end)
-        end
 
-        checkboxes[s.field] = cb
+            local initVal = sourceTable and sourceTable[s.field]
+            UIDropDownMenu_SetText(dd, initVal and (initVal .. " sec") or "")
+
+            controls[s.field] = dd
+            rowIndex = rowIndex + 1
+        else
+            local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
+            cb:SetSize(20, 20)
+            cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -rowIndex * 26)
+
+            local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+            lbl:SetText(s.name)
+
+            cb:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(s.name, 1, 1, 1)
+                GameTooltip:AddLine(s.desc, 0.8, 0.8, 0.8, true)
+                GameTooltip:Show()
+            end)
+            cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            cb:SetChecked(sourceTable and sourceTable[s.field] == true)
+
+            local strat = s
+            if onClickFn then
+                cb:SetScript("OnClick", function(self)
+                    onClickFn(strat, self:GetChecked() and true or false)
+                end)
+            else
+                local cbCmd   = s.cmd
+                local cbField = s.field
+                cb:SetScript("OnClick", function(self)
+                    local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
+                    NS.CB_SendBotCommand(slot.name, "co " .. toggle)
+                    local e = CleanBot_PartyBots[slot.key]
+                    if e and e.combat then
+                        e.combat[cbField] = self:GetChecked() and true or false
+                    end
+                end)
+            end
+
+            controls[s.field] = cb
+            rowIndex = rowIndex + 1
+        end
     end
 
-    return section, checkboxes
+    -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked dropdown.
+    for _, s in ipairs(strategies) do
+        if s.type == "timerDropdown" and s.dependsOn then
+            local cb = controls[s.dependsOn]
+            local dd = controls[s.field]
+            if cb and dd then
+                if not cb:GetChecked() then UIDropDownMenu_DisableDropDown(dd) end
+                local orig = cb:GetScript("OnClick")
+                cb:SetScript("OnClick", function(self)
+                    if orig then orig(self) end
+                    if self:GetChecked() then UIDropDownMenu_EnableDropDown(dd)
+                    else UIDropDownMenu_DisableDropDown(dd) end
+                end)
+            end
+        end
+    end
+
+    return section, controls
 end
 
 -- Applies a mutually-exclusive strategy selection: whispers a single
@@ -831,11 +887,21 @@ NS.CB_UpdateTabData = function(key)
 
     if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
 
-    local function syncCheckboxes(checkboxes, stratList, source)
-        if not checkboxes or not source then return end
+    local function syncControls(controls, stratList, source)
+        if not controls or not source then return end
         for _, s in ipairs(stratList) do
-            local cb = checkboxes[s.field]
-            if cb then cb:SetChecked(source[s.field] == true) end
+            local ctrl = controls[s.field]
+            if not ctrl then
+            elseif s.type == "timerDropdown" then
+                local val = source[s.field]
+                UIDropDownMenu_SetText(ctrl, val and (val .. " sec") or "")
+                if s.dependsOn then
+                    if source[s.dependsOn] then UIDropDownMenu_EnableDropDown(ctrl)
+                    else UIDropDownMenu_DisableDropDown(ctrl) end
+                end
+            else
+                ctrl:SetChecked(source[s.field] == true)
+            end
         end
     end
     local function syncDropdown(dd, stratList, source)
@@ -859,7 +925,7 @@ NS.CB_UpdateTabData = function(key)
             syncDropdown(cf.dd, cf.strategies, cd)
 
         elseif cf.type == "checkboxes" then
-            syncCheckboxes(cf.checkboxes, cf.strategies, cd)
+            syncControls(cf.checkboxes, cf.strategies, cd)
 
         elseif cf.type == "roleDropdown" then
             local activeRole = syncDropdown(cf.dd, cf.strategies, cd)
@@ -878,7 +944,7 @@ NS.CB_UpdateTabData = function(key)
                 else
                     sub.section:Hide()
                 end
-                syncCheckboxes(sub.checkboxes, sub.strategies, cd)
+                syncControls(sub.checkboxes, sub.strategies, cd)
             end
         end
     end

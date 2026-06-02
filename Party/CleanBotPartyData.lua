@@ -65,12 +65,14 @@ NS.STRATEGIES = {
         },
     },
     {
-        header = "Timing & Marking",
+        header = "Wait to Attack",
         group  = "timing",
         column = "right",
         strategies = {
-            { cmd = "wait for attack", field = "waitAttack",  name = "Wait to Attack", desc = "Wait a set time before attacking or healing" },
-            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
+            { cmd = "wait for attack",      field = "waitAttack",    name = "Enable Wait to Attack", desc = "Wait a set time before attacking or healing" },
+            { cmd = "wait for attack time", field = "waitAttackTime", name = "Attack Delay",
+              type = "timerDropdown", values = {1, 3, 5, 10}, dependsOn = "waitAttack",
+              desc = "Seconds to wait before attacking or healing" },
         },
     },
     {
@@ -78,6 +80,7 @@ NS.STRATEGIES = {
         group  = "other",
         column = "right",
         strategies = {
+            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
             { cmd = "grind", field = "grindMobs", name = "Grind Mobs", desc = "Attack any visible target" },
         },
     },
