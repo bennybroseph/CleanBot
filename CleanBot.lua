@@ -403,11 +403,10 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
     end
 end)
 
-NS.CB_RequestInventory = function(key, botName)
+NS.CB_FetchInventory = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
-    -- Reset any previous inventory data before requesting fresh data
     entry.inventory = { items = {} }
 
     if NS.bridgeState == "present" then
@@ -417,7 +416,10 @@ NS.CB_RequestInventory = function(key, botName)
         entry.invTimeout        = 0
         SendChatMessage("items", "WHISPER", nil, botName)
     end
+end
 
+NS.CB_RequestInventory = function(key, botName)
+    NS.CB_FetchInventory(key, botName)
     NS.CB_ShowInventory(key, botName)
 end
 
