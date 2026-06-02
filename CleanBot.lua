@@ -154,8 +154,6 @@ end
 -- They are only ever called at event time (never at load time), so the forward
 -- references are fine.
 -- ============================================================
-NS.tabCounter = 0
-
 function CleanBot_BuildFrames()
     -- Static frame size — never shrinks/grows based on party state
     CleanBotFrame:SetWidth(NS.FRAME_WIDTH)

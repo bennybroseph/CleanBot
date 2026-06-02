@@ -5,15 +5,32 @@
 local NS = CleanBotNS
 
 -- ============================================================
--- Unified tab list and selection state
--- Each entry: { key, unit, name, class, tabBtn, model, ctrl }
+-- Tab slot pool and selection state
+--
+-- A "slot" is a reusable UI container (tab button + model + ctrl panel)
+-- that is bound to whichever bot occupies its position. Slots persist for
+-- the session and are rebound rather than recreated, so frame and global-
+-- name counts stay bounded no matter how many bots cycle through the party.
+--
+-- Each slot: {
+--   index, tabBtn, tabIcon, model, ctrl,    -- created once
+--   equipSlots, updateStar,                  -- model sub-parts (class-agnostic)
+--   contentByClass = { [class] = contentHandle },  -- built lazily, once per class
+--   activeContent,                           -- contentHandle for the bound class
+--   key, name, unit, class, active,          -- current binding
+-- }
+-- A contentHandle holds the per-class widget registries (roleDD, tankFrames,
+-- …) plus its container frame and selectInnerTab fn.
 -- ============================================================
-NS.tabList          = {}   -- ordered list of all active tabs
+NS.tabPool          = {}   -- all slots ever created, indexed by slot number
+NS.tabList          = {}   -- ordered active slots, in party order
 NS.selectedTabIndex = 0    -- index into tabList of the currently shown tab
 NS.selectedBotKey   = nil  -- key of selected tab; survives RefreshTabs rebuilds
 NS.lastWavedAt      = nil
 
--- Per-key registries (keyed by strlower(botName))
+-- Per-key registries (keyed by strlower(botName)). On bind these are repointed
+-- to the bound slot's active frames; CB_UpdateTabData and the bridge read them
+-- by key without needing to know about slots.
 NS.botRoleDDs        = {}
 NS.botTankFrames     = {}
 NS.botDpsFrames      = {}
@@ -27,8 +44,9 @@ NS.botClassFrames    = {}
 NS.botStarUpdaters   = {}
 NS.botEquipSlots     = {}
 
--- All per-key registries above, gathered for one-shot teardown in
--- CB_TearDownTabEntry (so adding a registry only needs the line above).
+-- All per-key registries above, gathered so a slot's key entries can be
+-- cleared in one loop when it is unbound (adding a registry only needs the
+-- line above, plus a repoint in CB_BindRegistries).
 NS.botRegistries = {
     NS.botRoleDDs, NS.botTankFrames, NS.botDpsFrames, NS.botHealFrames,
     NS.botCombatFrames, NS.botPositionFrames, NS.botTimingFrames,
@@ -59,7 +77,7 @@ end
 -- entry.nonCombat, or a classData section); nil leaves boxes unchecked.
 -- Returns (sectionFrame, checkboxes) where checkboxes is keyed by field name.
 -- ============================================================
-local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, counter, onClickFn, sourceTable)
+local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable)
     local section = CreateFrame("Frame", nil, ctrl)
     section:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -12)
     section:SetPoint("RIGHT",   ctrl,   "RIGHT",       0,   0)
@@ -67,7 +85,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
 
     local checkboxes = {}
     for i, s in ipairs(strategies) do
-        local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. counter)
+        local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
         cb:SetSize(20, 20)
         cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -(i - 1) * 26)
 
@@ -95,8 +113,8 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, key, botName, c
             local cbField = s.field
             cb:SetScript("OnClick", function(self)
                 local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
-                SendChatMessage("co " .. toggle, "WHISPER", nil, botName)
-                local e = CleanBot_PartyBots[strlower(botName)]
+                SendChatMessage("co " .. toggle, "WHISPER", nil, slot.name)
+                local e = CleanBot_PartyBots[slot.key]
                 if e and e.combat then
                     e.combat[cbField] = self:GetChecked() and true or false
                 end
@@ -112,12 +130,12 @@ end
 -- Applies a mutually-exclusive strategy selection: whispers a single
 -- "cmd +sel,-other,-other..." toggle list and mirrors the choice into
 -- dataTable (entry.combat or a classData section), if supplied.
-local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, botName, dataTable)
+local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, dataTable)
     local parts = {}
     for _, rs in ipairs(strategies) do
         parts[#parts + 1] = (rs.field == selectedField and "+" or "-") .. rs.cmd
     end
-    SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, botName)
+    SendChatMessage(cmd .. " " .. table.concat(parts, ","), "WHISPER", nil, slot.name)
     if dataTable then
         for _, rs in ipairs(strategies) do
             dataTable[rs.field] = (rs.field == selectedField)
@@ -132,7 +150,7 @@ end
 -- prevBottom=nil anchors the header to parent's TOPLEFT; otherwise to prevBottom.
 -- Returns the Set Talents button, which becomes the next prevBottom.
 -- ============================================================
-local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, gi, registry, dataField)
+local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, registry, dataField)
     local strategies  = group.strategies
     local specWhisper = group.whisper
 
@@ -144,14 +162,15 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
     end
     header:SetText(group.header)
 
-    local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. counter .. "_" .. gi,
+    local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
                                        "Show Talents", 100, 22, function()
+        local botName = slot.name
         local unit = NS.CB_FindPartyUnit(botName)
         if not unit then return end
         InspectUnit(unit)
         NS.CB_After(0.05, function()
             if Talented then
-                local entry = CleanBot_PartyBots[strlower(botName)]
+                local entry = CleanBot_PartyBots[slot.key]
                 local class = entry and entry.class or select(2, UnitClass(unit)) or "WARRIOR"
                 local template = { name = botName, class = class }
                 local numTabs = GetNumTalentTabs(true)
@@ -184,17 +203,16 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
     end)
     showBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
 
-    local setBtn = NS.CB_CreateButton(parent, "CleanBotSetTal_" .. counter .. "_" .. gi .. "s",
+    local setBtn = NS.CB_CreateButton(parent, "CleanBotSetTal_" .. tag .. "_" .. gi .. "s",
                                       "Set Talents", 100, 22)
     setBtn:SetPoint("TOPLEFT", showBtn, "BOTTOMLEFT", 0, -4)
 
-    local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. counter .. "_" .. gi, 130)
+    local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. tag .. "_" .. gi, 130)
     dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
 
-    local ddInfo = { selectedCmd = nil }
-    local entry  = CleanBot_PartyBots[strlower(botName)]
-    local cd     = entry and entry.classData and entry.classData.combat
     UIDropDownMenu_Initialize(dd, function(self)
+        local e  = CleanBot_PartyBots[slot.key]
+        local cd = e and e.classData and e.classData.combat
         for _, s in ipairs(strategies) do
             local info           = UIDropDownMenu_CreateInfo()
             info.text            = s.name
@@ -204,11 +222,10 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                ddInfo.selectedCmd = s.cmd
-                local e = CleanBot_PartyBots[strlower(botName)]
-                if e and e.classData then
+                local ee = CleanBot_PartyBots[slot.key]
+                if ee and ee.classData then
                     for _, rs in ipairs(strategies) do
-                        e.classData.combat[rs.field] = (rs.field == s.field)
+                        ee.classData.combat[rs.field] = (rs.field == s.field)
                     end
                 end
             end
@@ -216,18 +233,17 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, botName, counter, 
             UIDropDownMenu_AddButton(info)
         end
     end)
-    if cd then
+    -- Send the spec whisper for whichever strategy is currently selected in
+    -- the bound bot's data (resolved live, so rebinding the slot is safe).
+    setBtn:SetScript("OnClick", function()
+        local e  = CleanBot_PartyBots[slot.key]
+        local cd = e and e.classData and e.classData.combat
+        if not cd then return end
         for _, s in ipairs(strategies) do
             if cd[s.field] == true then
-                UIDropDownMenu_SetText(dd, s.name)
-                ddInfo.selectedCmd = s.cmd
-                break
+                SendChatMessage(specWhisper .. " " .. s.cmd, "WHISPER", nil, slot.name)
+                return
             end
-        end
-    end
-    setBtn:SetScript("OnClick", function()
-        if ddInfo.selectedCmd then
-            SendChatMessage(specWhisper .. " " .. ddInfo.selectedCmd, "WHISPER", nil, botName)
         end
     end)
 
@@ -244,8 +260,8 @@ end
 -- dataField = "combat" or "nonCombat" (key into entry.classData)
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
-local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, counter, startGi, registry)
-    local entry      = CleanBot_PartyBots[key]
+local function CB_BuildColumnGroups(col, groups, cmd, dataField, slot, tag, startGi, registry)
+    local entry      = CleanBot_PartyBots[slot.key]
     local prevBottom = nil
 
     for gi = (startGi or 1), #groups do
@@ -253,7 +269,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
 
         if group.type == "dropdown" and group.whisper then
             -- Talent/whisper group: Show Talents + Set Talents + whisper dropdown
-            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, botName, counter, gi, registry, dataField)
+            prevBottom = CB_BuildTalentGroup(col, prevBottom, group, slot, tag, gi, registry, dataField)
 
         elseif group.type == "dropdown" then
             -- Exclusive dropdown: selection sends cmd +/- for each strategy
@@ -266,11 +282,12 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
             end
             header:SetText(group.header)
 
-            local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. counter .. "_" .. gi, 160)
+            local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. tag .. "_" .. gi, 160)
             dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
 
-            local cd = entry and entry.classData and entry.classData[dataField]
             UIDropDownMenu_Initialize(dd, function(self)
+                local e  = CleanBot_PartyBots[slot.key]
+                local cd = e and e.classData and e.classData[dataField]
                 for _, s in ipairs(strategies) do
                     local info           = UIDropDownMenu_CreateInfo()
                     info.text            = s.name
@@ -280,19 +297,14 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
                     info.tooltipOnButton = 1
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
-                        local e = CleanBot_PartyBots[strlower(botName)]
-                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, botName,
-                            e and e.classData and e.classData[dataField])
+                        local ee = CleanBot_PartyBots[slot.key]
+                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot,
+                            ee and ee.classData and ee.classData[dataField])
                     end
                     info.checked = cd and (cd[s.field] == true)
                     UIDropDownMenu_AddButton(info)
                 end
             end)
-            if cd then
-                for _, s in ipairs(strategies) do
-                    if cd[s.field] == true then UIDropDownMenu_SetText(dd, s.name); break end
-                end
-            end
             if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
 
             if registry then
@@ -313,11 +325,11 @@ local function CB_BuildColumnGroups(col, groups, cmd, dataField, key, botName, c
             end
             header:SetText(group.header)
 
-            local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, key, botName, counter,
+            local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
                     local toggle = (checked and "+" or "-") .. s.cmd
-                    SendChatMessage(cmd .. " " .. toggle, "WHISPER", nil, botName)
-                    local e = CleanBot_PartyBots[strlower(botName)]
+                    SendChatMessage(cmd .. " " .. toggle, "WHISPER", nil, slot.name)
+                    local e = CleanBot_PartyBots[slot.key]
                     if e and e.classData then e.classData[dataField][s.field] = checked end
                 end,
                 entry and entry.classData and entry.classData[dataField])
@@ -333,22 +345,21 @@ end
 -- ============================================================
 -- Class tab content builder
 -- ============================================================
-local function CB_BuildClassTabContent(classContent, class, key, botName, counter)
+local function CB_BuildClassTabContent(classContent, class, slot, tag)
     local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
 
     if not cs or (not cs.combat and not cs.nonCombat) then
         local label = classContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         label:SetPoint("TOPLEFT", classContent, "TOPLEFT", 12, -12)
         label:SetText("No class-specific options.")
-        NS.botClassFrames[key] = {}
-        return
+        return {}
     end
 
     -- Spec group: full-width above both columns (first combat group with a whisper field)
     local specGroup     = cs.combat and cs.combat[1] and cs.combat[1].whisper and cs.combat[1] or nil
     local combatStartGi = specGroup and 2 or 1
     local classRegistry = {}
-    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, botName, counter, 1, classRegistry, "combat") or nil
+    local colTopAnchor  = specGroup and CB_BuildTalentGroup(classContent, nil, specGroup, slot, tag, 1, classRegistry, "combat") or nil
 
     local colDivider = CreateFrame("Frame", nil, classContent)
     colDivider:SetHeight(1)
@@ -367,40 +378,45 @@ local function CB_BuildClassTabContent(classContent, class, key, botName, counte
     rightCol:SetPoint("TOPLEFT",     colDivider,   "TOP",         4,  0)
     rightCol:SetPoint("BOTTOMRIGHT", classContent, "BOTTOMRIGHT", 0,  0)
 
-    if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", "combat",    key, botName, counter, combatStartGi, classRegistry) end
-    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", "nonCombat", key, botName, counter, 1,            classRegistry) end
+    if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", "combat",    slot, tag, combatStartGi, classRegistry) end
+    if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", "nonCombat", slot, tag, 1,            classRegistry) end
 
-    NS.botClassFrames[key] = classRegistry
+    return classRegistry
 end
 
 -- ============================================================
 -- CB_BuildBotContent
--- Builds the inner tab bar and all combat/non-combat/class
--- content for one bot inside the provided ctrl frame.
+-- Builds the inner tab bar and all combat/non-combat/class content for one
+-- class into `container` (a child of the slot's ctrl). Event handlers resolve
+-- the bound bot live via `slot`, so the built content can be rebound to any
+-- bot of the same class. Returns a content handle holding the widget
+-- registries; the caller repoints the per-key registries to it on bind.
 -- ============================================================
-local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
-    local innerTabBar = CreateFrame("Frame", nil, ctrl)
-    innerTabBar:SetPoint("TOPLEFT",  ctrl, "TOPLEFT",  0, 0)
-    innerTabBar:SetPoint("TOPRIGHT", ctrl, "TOPRIGHT", 0, 0)
+local function CB_BuildBotContent(container, slot, class, tag)
+    local entry = CleanBot_PartyBots[slot.key]
+
+    local innerTabBar = CreateFrame("Frame", nil, container)
+    innerTabBar:SetPoint("TOPLEFT",  container, "TOPLEFT",  0, 0)
+    innerTabBar:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
     innerTabBar:SetHeight(NS.BOT_BAR_H)
 
-    local contentBg = CreateFrame("Frame", nil, ctrl)
-    contentBg:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    contentBg:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    local contentBg = CreateFrame("Frame", nil, container)
+    contentBg:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    contentBg:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
     NS.CB_ApplyInnerSkin(contentBg)
 
-    local combatContent = CreateFrame("Frame", nil, ctrl)
-    combatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    combatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    local combatContent = CreateFrame("Frame", nil, container)
+    combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    combatContent:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
 
-    local nonCombatContent = CreateFrame("Frame", nil, ctrl)
-    nonCombatContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    nonCombatContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    local nonCombatContent = CreateFrame("Frame", nil, container)
+    nonCombatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    nonCombatContent:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
     nonCombatContent:Hide()
 
-    local classContent = CreateFrame("Frame", nil, ctrl)
-    classContent:SetPoint("TOPLEFT",     ctrl, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    classContent:SetPoint("BOTTOMRIGHT", ctrl, "BOTTOMRIGHT", 0, 0)
+    local classContent = CreateFrame("Frame", nil, container)
+    classContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    classContent:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
     classContent:Hide()
 
     local innerTabBtns = {}
@@ -423,10 +439,10 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
         end
     end
 
-    local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[botClass]) or botClass
+    local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
     for j, lbl in ipairs({ "Combat", "Non-Combat", classDisplayName }) do
         local jj = j
-        local itab = NS.CB_CreateButton(innerTabBar, "CleanBotInnerTab" .. counter .. "_" .. j,
+        local itab = NS.CB_CreateButton(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
                                         lbl, NS.TAB_WIDTH, NS.TAB_HEIGHT,
                                         function() selectInnerTab(jj) end)
         itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
@@ -435,29 +451,22 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     end
     selectInnerTab(1)
 
-    NS.botInnerTabs[key] = {
-        combatPanel    = combatContent,
-        nonCombatPanel = nonCombatContent,
-        classPanel     = classContent,
-    }
-
-    CB_BuildClassTabContent(classContent, botClass, key, botName, counter)
+    local classFrames = CB_BuildClassTabContent(classContent, class, slot, tag)
 
     local ncHeader = nonCombatContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     ncHeader:SetPoint("TOPLEFT", nonCombatContent, "TOPLEFT", 12, -10)
     ncHeader:SetText("General")
 
     local ncSection, ncCheckboxes = CB_BuildStrategySection(
-        nonCombatContent, ncHeader, NS.NC_GENERAL_STRATEGIES, key, botName, counter,
+        nonCombatContent, ncHeader, NS.NC_GENERAL_STRATEGIES, slot, tag,
         function(s, checked)
             local toggle = (checked and "+" or "-") .. s.cmd
-            SendChatMessage("nc " .. toggle, "WHISPER", nil, botName)
-            local e = CleanBot_PartyBots[strlower(botName)]
+            SendChatMessage("nc " .. toggle, "WHISPER", nil, slot.name)
+            local e = CleanBot_PartyBots[slot.key]
             if e and e.nonCombat then e.nonCombat[s.field] = checked end
         end,
         entry and entry.nonCombat)
     ncSection:Show()
-    NS.botNcFrames[key] = { section = ncSection, checkboxes = ncCheckboxes }
 
     local leftCol = CreateFrame("Frame", nil, combatContent)
     leftCol:SetPoint("TOPLEFT",     combatContent, "TOPLEFT", 0,  0)
@@ -488,9 +497,10 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     multiRoleLabel:SetText("Multiple Roles Selected")
     if multipleRoles then multiRoleLabel:Show() else multiRoleLabel:Hide() end
 
-    local dd = NS.CB_CreateDropdown(leftCol, "CleanBotRoleDD" .. counter, 90)
+    local dd = NS.CB_CreateDropdown(leftCol, "CleanBotRoleDD" .. tag, 90)
     dd:SetPoint("LEFT", roleLabel, "RIGHT", 2, -2)
     UIDropDownMenu_Initialize(dd, function(self)
+        local e = CleanBot_PartyBots[slot.key]
         for _, s in ipairs(NS.ROLE_STRATEGIES) do
             local info           = UIDropDownMenu_CreateInfo()
             info.text            = s.name
@@ -500,10 +510,10 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                local e = CleanBot_PartyBots[strlower(botName)]
-                CB_ApplyExclusiveSelection(NS.ROLE_STRATEGIES, s.field, "co", botName,
-                    e and e.combat)
-                local bk = strlower(botName)
+                local ee = CleanBot_PartyBots[slot.key]
+                CB_ApplyExclusiveSelection(NS.ROLE_STRATEGIES, s.field, "co", slot,
+                    ee and ee.combat)
+                local bk = slot.key
                 local function showIf(tbl, roleField)
                     if tbl[bk] then
                         if s.field == roleField then tbl[bk].section:Show()
@@ -515,35 +525,23 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
                 showIf(NS.botHealFrames, "isHealer")
                 multiRoleLabel:Hide()
             end
-            info.checked = entry and entry.combat and (entry.combat[s.field] == true)
+            info.checked = e and e.combat and (e.combat[s.field] == true)
             UIDropDownMenu_AddButton(info)
         end
     end)
-    if entry and entry.combat then
-        for _, s in ipairs(NS.ROLE_STRATEGIES) do
-            if entry.combat[s.field] == true then
-                UIDropDownMenu_SetText(dd, s.name)
-                break
-            end
-        end
-    end
-    NS.botRoleDDs[key] = dd
 
     local ROLE_AREA_H = math.max(#NS.TANK_STRATEGIES, #NS.DPS_STRATEGIES, #NS.HEAL_STRATEGIES) * 26
 
     local combatData = entry and entry.combat
 
-    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, key, botName, counter, nil, combatData)
+    local tankSection, tankCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.TANK_STRATEGIES, slot, tag, nil, combatData)
     if not multipleRoles and activeRole == "isTank" then tankSection:Show() else tankSection:Hide() end
-    NS.botTankFrames[key] = { section = tankSection, checkboxes = tankCBs }
 
-    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, key, botName, counter, nil, combatData)
+    local dpsSection, dpsCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.DPS_STRATEGIES, slot, tag, nil, combatData)
     if not multipleRoles and activeRole == "isDPS" then dpsSection:Show() else dpsSection:Hide() end
-    NS.botDpsFrames[key] = { section = dpsSection, checkboxes = dpsCBs }
 
-    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, key, botName, counter, nil, combatData)
+    local healSection, healCBs = CB_BuildStrategySection(leftCol, roleLabel, NS.HEAL_STRATEGIES, slot, tag, nil, combatData)
     if not multipleRoles and activeRole == "isHealer" then healSection:Show() else healSection:Hide() end
-    NS.botHealFrames[key] = { section = healSection, checkboxes = healCBs }
 
     local roleAreaEnd = CreateFrame("Frame", nil, leftCol)
     roleAreaEnd:SetSize(1, 1)
@@ -553,121 +551,219 @@ local function CB_BuildBotContent(ctrl, key, botName, botClass, entry, counter)
     combatHeader:SetPoint("TOPLEFT", roleAreaEnd, "TOPLEFT", 4, -10)
     combatHeader:SetText("Combat Control")
 
-    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, key, botName, counter, nil, combatData)
+    local combatSection, combatCBs = CB_BuildStrategySection(leftCol, combatHeader, NS.COMBAT_STRATEGIES, slot, tag, nil, combatData)
     combatSection:Show()
-    NS.botCombatFrames[key] = { section = combatSection, checkboxes = combatCBs }
 
     local posHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     posHeader:SetPoint("TOPLEFT", rightCol, "TOPLEFT", 4, -10)
     posHeader:SetText("Positioning")
 
-    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, key, botName, counter, nil, combatData)
+    local posSection, posCBs = CB_BuildStrategySection(rightCol, posHeader, NS.POSITION_STRATEGIES, slot, tag, nil, combatData)
     posSection:Show()
-    NS.botPositionFrames[key] = { section = posSection, checkboxes = posCBs }
 
     local timingHeader = rightCol:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     timingHeader:SetPoint("TOPLEFT", posSection, "BOTTOMLEFT", 4, -12)
     timingHeader:SetText("Timing & Marking")
 
-    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, key, botName, counter, nil, combatData)
+    local timingSection, timingCBs = CB_BuildStrategySection(rightCol, timingHeader, NS.TIMING_STRATEGIES, slot, tag, nil, combatData)
     timingSection:Show()
-    NS.botTimingFrames[key] = { section = timingSection, checkboxes = timingCBs }
+
+    return {
+        container      = container,
+        selectInnerTab = selectInnerTab,
+        multiRoleLabel = multiRoleLabel,
+        innerTabs      = { combatPanel = combatContent, nonCombatPanel = nonCombatContent, classPanel = classContent },
+        ncFrames       = { section = ncSection,     checkboxes = ncCheckboxes },
+        roleDD         = dd,
+        tankFrames     = { section = tankSection,   checkboxes = tankCBs },
+        dpsFrames      = { section = dpsSection,     checkboxes = dpsCBs },
+        healFrames     = { section = healSection,    checkboxes = healCBs },
+        combatFrames   = { section = combatSection,  checkboxes = combatCBs },
+        positionFrames = { section = posSection,     checkboxes = posCBs },
+        timingFrames   = { section = timingSection,  checkboxes = timingCBs },
+        classFrames    = classFrames,
+    }
 end
 
 -- ============================================================
--- Tab lifecycle helpers
+-- Unified tab selection — works for any index in NS.tabList (a slot)
 -- ============================================================
-
--- Tears down all frames for one tab entry and clears its per-key registry slots.
--- Deparenting ctrl is sufficient — all content frames are children of ctrl.
-local function CB_TearDownTabEntry(info)
-    if info.tabBtn then info.tabBtn:Hide(); info.tabBtn:SetParent(nil) end
-    if info.model then info.model:Hide(); info.model:SetParent(nil) end
-    if info.ctrl then info.ctrl:Hide(); info.ctrl:SetParent(nil) end
-    local k = info.key
-    for _, reg in ipairs(NS.botRegistries) do reg[k] = nil end
-end
-
--- ============================================================
--- Unified tab selection — works for any index in NS.tabList
--- ============================================================
-local CleanBot_SelectTab  -- forward declaration (used inside CB_BuildTabEntry closures)
+local CleanBot_SelectTab  -- forward declaration (used inside slot closures)
 
 CleanBot_SelectTab = function(index)
     if not index or index < 1 or index > #NS.tabList then return end
-    local info = NS.tabList[index]
+    local slot = NS.tabList[index]
     NS.selectedTabIndex = index
-    NS.selectedBotKey   = info.key
+    NS.selectedBotKey   = slot.key
 
     for i, t in ipairs(NS.tabList) do
         local sel = (i == index)
         t.tabBtn:SetNormalFontObject(sel and GameFontHighlightSmall or GameFontNormalSmall)
         t.tabBtn:SetButtonState(sel and "PUSHED" or "NORMAL", sel)
-        if t.model then if sel then t.model:Show() else t.model:Hide() end end
-        if t.ctrl  then if sel then t.ctrl:Show()  else t.ctrl:Hide()  end end
+        if sel then t.model:Show()  else t.model:Hide()  end
+        if sel then t.ctrl:Show()   else t.ctrl:Hide()   end
     end
 
-    if info.name ~= NS.lastWavedAt then
-        NS.lastWavedAt = info.name
-        SendChatMessage("emote wave", "WHISPER", nil, info.name)
+    if slot.name ~= NS.lastWavedAt then
+        NS.lastWavedAt = slot.name
+        SendChatMessage("emote wave", "WHISPER", nil, slot.name)
     end
 end
 
+-- ============================================================
+-- Slot pool — create / acquire / bind / unbind
+--
+-- A slot's container frames (tab button, model, ctrl) and per-class content
+-- are created at most once each and reused across bots. Binding a slot to a
+-- bot repoints the per-key registries to the slot's active frames so the
+-- existing key-based sync paths (CB_UpdateTabData, the bridge) keep working.
+-- ============================================================
 
--- ============================================================
--- CB_BuildTabEntry — builds all frames for one tab slot.
--- info = { key, unit, name, class }
--- index = position in NS.tabList (governs tab button X offset).
--- Stores tabBtn, model, ctrl back onto info.
--- ============================================================
-local function CB_BuildTabEntry(info, index)
-    NS.tabCounter = NS.tabCounter + 1
-    local counter = NS.tabCounter
+-- Build the container frames for a new pool slot (once per slot index).
+local function CB_CreateSlot(index)
     local contentW, contentH, modelH, eqColW, ctrlLeft = CB_GetGeometry()
+    local slot = { index = index, contentByClass = {}, active = false }
 
     -- ── Tab button ────────────────────────────────────────────
-    info._tabIdx = index
-    local tab = NS.CB_CreateButton(NS.botTabBar, "CleanBotCharTab" .. counter,
-                                   "  " .. info.name, NS.TAB_WIDTH, NS.TAB_HEIGHT,
-                                   function() CleanBot_SelectTab(info._tabIdx) end)
-    tab:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (index - 1) * (NS.TAB_WIDTH + 2), 0)
+    local tab = NS.CB_CreateButton(NS.botTabBar, "CleanBotCharTab" .. index,
+                                   "", NS.TAB_WIDTH, NS.TAB_HEIGHT,
+                                   function() CleanBot_SelectTab(slot._tabIdx) end)
     tab:SetNormalFontObject(GameFontNormalSmall)
-
     local icon = tab:CreateTexture(nil, "OVERLAY")
     icon:SetSize(14, 14)
     icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
     icon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
-    local coords = NS.CLASS_ICON_COORDS[info.class] or NS.CLASS_ICON_COORDS["WARRIOR"]
-    icon:SetTexCoord(unpack(coords))
+    tab:Hide()
+    slot.tabBtn  = tab
+    slot.tabIcon = icon
 
-    info.tabBtn = tab
-
-    -- ── Model ─────────────────────────────────────────────────
-    local model = NS.CB_CreateModel(NS.partyContent, contentW, modelH, info.unit, info.key, counter)
+    -- ── Model (also builds star + equip slots, all class-agnostic) ──
+    local model = NS.CB_CreateModel(slot, NS.partyContent, contentW, modelH)
     model:ClearAllPoints()
     model:SetPoint("TOPLEFT", NS.partyContent, "TOPLEFT", eqColW, 0)
-    info.model = model
+    model:Hide()
+    slot.model = model
 
-    -- ── Ctrl panel ────────────────────────────────────────────
-    local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. counter, NS.partyContent)
+    -- ── Ctrl container (holds the per-class content frames) ────
+    local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. index, NS.partyContent)
     ctrl:SetPoint("TOPLEFT",     NS.partyContent, "TOPLEFT",     ctrlLeft, -NS.PAD)
     ctrl:SetPoint("BOTTOMRIGHT", NS.partyContent, "BOTTOMRIGHT", -NS.PAD,   NS.PAD)
     ctrl:Hide()
-    info.ctrl = ctrl
+    slot.ctrl = ctrl
 
-    local entry = CleanBot_PartyBots[info.key]
-    CB_BuildBotContent(ctrl, info.key, info.name, info.class, entry, counter)
+    return slot
 end
 
--- Updates a tab button's position and stored index after a list reshuffle.
-local function CB_RepositionTabButton(info, index)
-    info._tabIdx = index
-    info.tabBtn:ClearAllPoints()
-    info.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (index - 1) * (NS.TAB_WIDTH + 2), 0)
+-- Returns a free slot from the pool, growing the pool if all are in use.
+local function CB_AcquireSlot()
+    for _, slot in ipairs(NS.tabPool) do
+        if not slot.active then return slot end
+    end
+    local slot = CB_CreateSlot(#NS.tabPool + 1)
+    NS.tabPool[#NS.tabPool + 1] = slot
+    return slot
+end
+
+-- Builds (once) and returns the content handle for a class in this slot.
+local function CB_EnsureContent(slot, class)
+    local content = slot.contentByClass[class]
+    if content then return content end
+    local container = CreateFrame("Frame", nil, slot.ctrl)
+    container:SetAllPoints(slot.ctrl)
+    content = CB_BuildBotContent(container, slot, class, slot.index .. "_" .. class)
+    slot.contentByClass[class] = content
+    return content
+end
+
+-- Repoints all per-key registries at the slot's active frames.
+local function CB_BindRegistries(slot)
+    local k = slot.key
+    local c = slot.activeContent
+    NS.botStarUpdaters[k]   = slot.updateStar
+    NS.botEquipSlots[k]     = slot.equipSlots
+    NS.botRoleDDs[k]        = c.roleDD
+    NS.botTankFrames[k]     = c.tankFrames
+    NS.botDpsFrames[k]      = c.dpsFrames
+    NS.botHealFrames[k]     = c.healFrames
+    NS.botCombatFrames[k]   = c.combatFrames
+    NS.botPositionFrames[k] = c.positionFrames
+    NS.botTimingFrames[k]   = c.timingFrames
+    NS.botInnerTabs[k]      = c.innerTabs
+    NS.botNcFrames[k]       = c.ncFrames
+    NS.botClassFrames[k]    = c.classFrames
+end
+
+-- Shows/hides the "Multiple Roles Selected" label from current data
+-- (CB_UpdateTabData syncs everything else but not this informational label).
+local function CB_RefreshMultiRole(slot)
+    local c = slot.activeContent
+    if not c or not c.multiRoleLabel then return end
+    local entry = CleanBot_PartyBots[slot.key]
+    local count = 0
+    if entry and entry.combat then
+        for _, s in ipairs(NS.ROLE_STRATEGIES) do
+            if entry.combat[s.field] == true then count = count + 1 end
+        end
+    end
+    if count > 1 then c.multiRoleLabel:Show() else c.multiRoleLabel:Hide() end
+end
+
+-- Frees a slot: clears its key registries and hides its frames. The container
+-- frames and per-class content persist on the slot for the next bind.
+local function CB_UnbindSlot(slot)
+    if slot.key then
+        for _, reg in ipairs(NS.botRegistries) do reg[slot.key] = nil end
+    end
+    slot.active        = false
+    slot.key           = nil
+    slot.name          = nil
+    slot.unit          = nil
+    slot.class         = nil
+    slot.activeContent = nil
+    slot.tabBtn:Hide()
+    slot.model:Hide()
+    slot.ctrl:Hide()
+end
+
+-- Binds a slot to a bot: rebinds the model, swaps in the class content,
+-- repoints registries, and syncs all widget state from the bot's data.
+local function CB_BindSlot(slot, info)
+    if slot.key and slot.key ~= info.key then
+        for _, reg in ipairs(NS.botRegistries) do reg[slot.key] = nil end
+    end
+
+    slot.key    = info.key
+    slot.name   = info.name
+    slot.unit   = info.unit
+    slot.class  = info.class
+    slot.active = true
+
+    -- Model + tab button identity
+    slot.model:SetUnit(info.unit)
+    slot.tabBtn:SetText("  " .. info.name)
+    slot.tabIcon:SetTexCoord(unpack(NS.CLASS_ICON_COORDS[info.class] or NS.CLASS_ICON_COORDS["WARRIOR"]))
+    slot.tabBtn:Show()
+
+    -- Activate this class's content, hide the slot's other class contents
+    local content = CB_EnsureContent(slot, info.class)
+    for _, c in pairs(slot.contentByClass) do
+        if c == content then c.container:Show() else c.container:Hide() end
+    end
+    slot.activeContent = content
+    content.selectInnerTab(1)
+
+    CB_BindRegistries(slot)
+
+    -- Sync everything from data
+    if slot.updateStar then slot.updateStar() end
+    if NS.CB_RefreshEquipSlots then NS.CB_RefreshEquipSlots(slot.key, slot.unit) end
+    NS.CB_UpdateTabData(info.key)
+    CB_RefreshMultiRole(slot)
 end
 
 -- ============================================================
--- RefreshTabs — diff-based: only adds/removes/repositions what changed.
+-- RefreshTabs — assigns desired party bots to pooled slots,
+-- binding/rebinding/freeing only what changed.
 -- ============================================================
 NS.CleanBot_RefreshTabs = function()
     -- ── 1. Compute desired tab list ────────────────────────────
@@ -698,61 +794,70 @@ NS.CleanBot_RefreshTabs = function()
         NS.partyEmptyLabel:SetText(#desired == 0 and "No bots found in party." or "")
     end
 
-    -- ── 2. Build lookups ───────────────────────────────────────
-    local currentByKey = {}
-    for _, info in ipairs(NS.tabList) do currentByKey[info.key] = info end
-
-    local newTabList  = {}
-    local newEntries  = {}
+    -- ── 2. Free slots whose bot left the desired list ──────────
     local desiredByKey = {}
-    for i, d in ipairs(desired) do
-        desiredByKey[d.key] = true
-        local existing = currentByKey[d.key]
-        if existing then
-            -- Keep existing tab; update unit if it shifted party slots
-            if existing.unit ~= d.unit then
-                existing.unit = d.unit
-                if existing.model then existing.model:SetUnit(d.unit) end
-            end
-            newTabList[i] = existing
+    for _, d in ipairs(desired) do desiredByKey[d.key] = true end
+    local slotByKey = {}
+    for _, slot in ipairs(NS.tabList) do
+        if desiredByKey[slot.key] then
+            slotByKey[slot.key] = slot
         else
-            newTabList[i] = d
-            newEntries[#newEntries + 1] = { info = d, index = i }
+            CB_UnbindSlot(slot)
         end
     end
 
-    -- ── 3. Tear down tabs no longer in the desired list ────────
-    for _, info in ipairs(NS.tabList) do
-        if not desiredByKey[info.key] then CB_TearDownTabEntry(info) end
+    -- ── 3. Assign desired bots to slots (reuse, rebind, or acquire) ──
+    local newTabList = {}
+    local newlyBound = {}
+    for i, d in ipairs(desired) do
+        local slot = slotByKey[d.key]
+        if slot then
+            -- Same bot kept its slot; update unit / class if they shifted
+            if slot.unit ~= d.unit then
+                slot.unit = d.unit
+                slot.model:SetUnit(d.unit)
+            end
+            if slot.class ~= d.class then
+                CB_BindSlot(slot, d)
+                newlyBound[#newlyBound + 1] = d
+            end
+        else
+            slot = CB_AcquireSlot()
+            CB_BindSlot(slot, d)
+            newlyBound[#newlyBound + 1] = d
+        end
+        newTabList[i] = slot
     end
     NS.tabList = newTabList
 
-    -- ── 4. Build frames for new entries ───────────────────────
-    for _, e in ipairs(newEntries) do CB_BuildTabEntry(e.info, e.index) end
+    -- ── 4. Reposition tab buttons by display order ─────────────
+    for i, slot in ipairs(NS.tabList) do
+        slot._tabIdx = i
+        slot.tabBtn:ClearAllPoints()
+        slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
+    end
 
-    -- ── 5. Reposition all tab buttons ─────────────────────────
-    for i, info in ipairs(NS.tabList) do CB_RepositionTabButton(info, i) end
-
-    -- ── 6. Equip refresh for new entries only ─────────────────
-    if NS.CB_QueueEquipRefresh and #newEntries > 0 then
+    -- ── 5. Equip refresh for newly-bound bots only ────────────
+    if NS.CB_QueueEquipRefresh and #newlyBound > 0 then
         local toInspect = {}
-        for _, e in ipairs(newEntries) do
-            if e.info.unit and UnitExists(e.info.unit) then
-                table.insert(toInspect, e.info)
+        for _, d in ipairs(newlyBound) do
+            if d.unit and UnitExists(d.unit) then
+                table.insert(toInspect, { key = d.key, unit = d.unit })
             end
         end
         NS.CB_QueueEquipRefresh(toInspect)
     end
 
-    -- ── 7. Restore or establish selection ─────────────────────
-    if #NS.tabList == 0 then return end
+    -- ── 6. Restore or establish selection ─────────────────────
+    if #NS.tabList == 0 then NS.selectedTabIndex = 0; return end
     local restoreIdx = nil
     if NS.selectedBotKey then
-        for i, info in ipairs(NS.tabList) do
-            if info.key == NS.selectedBotKey then restoreIdx = i; break end
+        for i, slot in ipairs(NS.tabList) do
+            if slot.key == NS.selectedBotKey then restoreIdx = i; break end
         end
     end
-    CleanBot_SelectTab(restoreIdx or NS.selectedTabIndex or 1)
+    NS.selectedTabIndex = 0   -- force SelectTab to re-apply (slots may have rebound)
+    CleanBot_SelectTab(restoreIdx or 1)
 end
 
 -- ============================================================

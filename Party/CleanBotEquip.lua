@@ -15,8 +15,8 @@
 --   GetInventoryItemTexture(unit, slotId)   — item icon
 --   GameTooltip:SetInventoryItem(unit, slotId) — full rich tooltip
 --
--- Slot buttons are stored in NS.botEquipSlots[key][slotId] for
--- later use (refresh, click actions, etc.).
+-- Slot buttons are stored in slot.equipSlots[slotId]; on bind the per-key
+-- registry NS.botEquipSlots[key] is repointed there for refresh/drag lookups.
 -- ============================================================
 local NS = CleanBotNS
 
@@ -69,7 +69,7 @@ local function CB_ShowEquipMenu(btn)
         info.text         = "Unequip"
         info.notCheckable = true
         info.func         = function()
-            local botName = UnitName(btn.unit)
+            local botName = btn.slot.name
             if not botName then return end
             SendChatMessage("ue " .. btn.itemLink, "WHISPER", nil, botName)
         end
@@ -97,8 +97,8 @@ local function CB_ShowEquipMenu(btn)
     ToggleDropDownMenu(1, nil, equipMenu, btn, 0, 0)
 end
 
-NS.CB_CreateEquipSlots = function(model, key, counter, unit)
-    NS.botEquipSlots[key] = {}
+NS.CB_CreateEquipSlots = function(slot, model)
+    slot.equipSlots = {}
 
     local modelW = model:GetWidth()
     local modelH = model:GetHeight()
@@ -110,28 +110,29 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
     local gapX     = g.gapX
     local gapYBot  = g.gapYBot
 
-    for _, slot in ipairs(NS.EQUIP_SLOTS) do
-        local btn = CreateFrame("Button", "CleanBotEquip_" .. counter .. "_" .. slot.id, model)
+    for _, eqdef in ipairs(NS.EQUIP_SLOTS) do
+        local btn = CreateFrame("Button", "CleanBotEquip_" .. slot.index .. "_" .. eqdef.id, model)
         btn:SetSize(slotSize, slotSize)
+        btn.slot = slot
 
         -- ── Position ──────────────────────────────────────────
-        local yOff = -((slot.order - 1) * step)
+        local yOff = -((eqdef.order - 1) * step)
 
-        if slot.side == "left" then
+        if eqdef.side == "left" then
             btn:SetPoint("TOPRIGHT", model, "TOPLEFT", -gapX, yOff)
-        elseif slot.side == "right" then
+        elseif eqdef.side == "right" then
             btn:SetPoint("TOPLEFT", model, "TOPRIGHT", gapX, yOff)
         else  -- "bottom" — three weapon slots centred below the model
             local totalW = 3 * slotSize + 2 * gapX
             local xOff   = math.floor((modelW - totalW) / 2)
-                         + (slot.order - 1) * (slotSize + gapX)
+                         + (eqdef.order - 1) * (slotSize + gapX)
             btn:SetPoint("TOPLEFT", model, "BOTTOMLEFT", xOff, -gapYBot)
         end
 
         -- ── Empty-slot background (shown when nothing equipped) ──
         local bg = btn:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetTexture(slot.tex)
+        bg:SetTexture(eqdef.tex)
         btn.bg = bg
 
         -- ── Item icon (shown when something is equipped) ──────
@@ -140,22 +141,13 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
         icon:Hide()
         btn.icon = icon
 
-        -- ── Populate icon from equipped item ──────────────────
-        local itemTex = GetInventoryItemTexture(unit, slot.id)
-        if itemTex then
-            icon:SetTexture(itemTex)
-            icon:Show()
-        end
-
         -- ── Interaction textures ──────────────────────────────
         btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
         -- ── Tooltip ───────────────────────────────────────────
-        -- Store on button so the tooltip script can close over them cleanly
-        btn.unit   = unit
-        btn.slotId = slot.id
-        btn.slotName = slot.name
+        btn.slotId   = eqdef.id
+        btn.slotName = eqdef.name
 
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:SetScript("OnClick", function(self, mouseBtn)
@@ -175,16 +167,14 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        NS.botEquipSlots[key][slot.id] = btn
+        slot.equipSlots[eqdef.id] = btn
     end
 
     -- ── Bag icon — opens the inventory frame ──────────────────
-    local bagBtn = CreateFrame("Button", "CleanBotBagBtn_" .. counter, model)
+    local bagBtn = CreateFrame("Button", "CleanBotBagBtn_" .. slot.index, model)
     bagBtn:SetSize(slotSize, slotSize)
-    local wristBtn   = NS.botEquipSlots[key][9]
-    local mainHndBtn = NS.botEquipSlots[key][16]
-    bagBtn:SetPoint("LEFT",  wristBtn,   "LEFT",  0, 0)
-    bagBtn:SetPoint("TOP", mainHndBtn, "TOP", 0, 0)
+    bagBtn:SetPoint("LEFT", slot.equipSlots[9],  "LEFT", 0, 0)
+    bagBtn:SetPoint("TOP",  slot.equipSlots[16], "TOP",  0, 0)
 
     local bagIcon = bagBtn:CreateTexture(nil, "ARTWORK")
     bagIcon:SetAllPoints()
@@ -193,8 +183,10 @@ NS.CB_CreateEquipSlots = function(model, key, counter, unit)
     bagBtn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
     bagBtn:SetScript("OnClick", function()
+        local key     = slot.key
+        if not key then return end
         local entry   = CleanBot_PartyBots[key]
-        local botName = entry and entry.name or key
+        local botName = entry and entry.name or slot.name or key
         if NS.botInventoryFrames[key] and NS.botInventoryFrames[key]:IsShown() then
             NS.botInventoryFrames[key]:Hide()
         else
