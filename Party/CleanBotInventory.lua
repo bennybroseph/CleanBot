@@ -28,6 +28,17 @@ local function ParseItemLine(raw)
 end
 NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handler
 
+-- ── Equip an item, then refetch the bot's inventory ──────────────────────
+-- Whispers the equip command and, after a short delay so the server can
+-- apply the change, re-queries inventory. Shared by the right-click menu
+-- and drag-and-drop paths.
+local function CB_EquipItem(key, botName, link)
+    local itemId     = strmatch(link, "item:(%d+)")
+    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
+    SendChatMessage("e " .. (apiLink or link), "WHISPER", nil, botName)
+    NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
+end
+
 -- ── Inventory cell right-click context menu ──────────────────────────────
 local invMenu = CreateFrame("Frame", "CleanBotInvMenu", UIParent, "UIDropDownMenuTemplate")
 
@@ -41,20 +52,7 @@ local function CB_ShowInvMenu(cell, key)
         info.func         = function()
             local entry = CleanBot_PartyBots[key]
             if not entry then return end
-            local itemId = strmatch(cell.itemLink, "item:(%d+)")
-            local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
-            SendChatMessage("e " .. (apiLink or cell.itemLink), "WHISPER", nil, entry.name)
-            local dragKey  = key
-            local botName  = entry.name
-            local elapsed  = 0
-            local t = CreateFrame("Frame")
-            t:SetScript("OnUpdate", function(self, dt)
-                elapsed = elapsed + dt
-                if elapsed >= 1.5 then
-                    self:SetScript("OnUpdate", nil)
-                    NS.CB_FetchInventory(dragKey, botName)
-                end
-            end)
+            CB_EquipItem(key, entry.name, cell.itemLink)
         end
         UIDropDownMenu_AddButton(info)
 
@@ -72,81 +70,57 @@ local function CB_StopDrag()
     if NS.dragging.hoverBtn then NS.dragging.hoverBtn:UnlockHighlight() end
     local dropBtn = NS.dragging.dropBtn
     if dropBtn then
-        local dragKey  = NS.dragging.key
-        local dragLink = NS.dragging.link
-        local entry    = CleanBot_PartyBots[dragKey]
+        local entry = CleanBot_PartyBots[NS.dragging.key]
         if entry then
-            local itemId = strmatch(dragLink, "item:(%d+)")
-            local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
-            SendChatMessage("e " .. (apiLink or dragLink), "WHISPER", nil, entry.name)
-            -- Delay so the server has time to process the equip before we re-query.
-            local elapsed = 0
-            local t = CreateFrame("Frame")
-            t:SetScript("OnUpdate", function(self, dt)
-                elapsed = elapsed + dt
-                if elapsed >= 1.5 then
-                    self:SetScript("OnUpdate", nil)
-                    NS.CB_FetchInventory(dragKey, entry.name)
-                end
-            end)
+            CB_EquipItem(NS.dragging.key, entry.name, NS.dragging.link)
         end
     end
     if NS.dragging.sourceCell and NS.dragging.sourceCell.icon then
         NS.dragging.sourceCell.icon:SetDesaturated(false)
     end
     NS.dragging = nil
-    if NS.dragCapture then NS.dragCapture:Hide() end
+    NS.CB_EndCapture()
     ResetCursor()
 end
 NS.CB_StopDrag = CB_StopDrag
 
--- ── Drag capture frame ───────────────────────────────────────────────────
--- Full-screen FULLSCREEN_DIALOG frame shown for the duration of a drag.
--- Absorbs all mouse events so no other frame receives OnEnter/OnLeave,
--- preventing WoW from resetting the cursor.  SetCursor is called once on
--- drag start; the capture frame keeps it alive by starving the reset path.
-local function CB_GetDragCapture()
-    if NS.dragCapture then return NS.dragCapture end
+-- ── Drag tracking ────────────────────────────────────────────────────────
+-- Runs while the shared capture frame (NS.CB_BeginCapture) is active during
+-- an item drag: highlights whichever equip slot the cursor is over and
+-- records it as the drop target.
+local function CB_DragOnUpdate()
+    if not NS.dragging then return end
+    local scale = UIParent:GetEffectiveScale()
+    local mx, my = GetCursorPosition()
+    mx, my = mx / scale, my / scale
 
-    local cap = CreateFrame("Frame", "CleanBotDragCapture", UIParent)
-    cap:SetAllPoints(UIParent)
-    cap:SetFrameStrata("FULLSCREEN_DIALOG")
-    cap:EnableMouse(true)
-    cap:Hide()
-
-    cap:SetScript("OnUpdate", function()
-        if not NS.dragging then return end
-        local scale = UIParent:GetEffectiveScale()
-        local mx, my = GetCursorPosition()
-        mx, my = mx / scale, my / scale
-
-        local slots = NS.botEquipSlots and NS.botEquipSlots[NS.dragging.key]
-        local foundBtn = nil
-        if slots then
-            for _, btn in pairs(slots) do
-                if btn:IsVisible() then
-                    local l, r, b, t = btn:GetLeft(), btn:GetRight(), btn:GetBottom(), btn:GetTop()
-                    if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
-                        foundBtn = btn; break
-                    end
+    local slots = NS.botEquipSlots and NS.botEquipSlots[NS.dragging.key]
+    local foundBtn = nil
+    if slots then
+        for _, btn in pairs(slots) do
+            if btn:IsVisible() then
+                local l, r, b, t = btn:GetLeft(), btn:GetRight(), btn:GetBottom(), btn:GetTop()
+                if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
+                    foundBtn = btn; break
                 end
             end
         end
+    end
 
-        if foundBtn ~= NS.dragging.hoverBtn then
-            if NS.dragging.hoverBtn then NS.dragging.hoverBtn:UnlockHighlight() end
-            if foundBtn then foundBtn:LockHighlight() end
-            NS.dragging.hoverBtn = foundBtn
-        end
-        NS.dragging.dropBtn = foundBtn
-    end)
+    if foundBtn ~= NS.dragging.hoverBtn then
+        if NS.dragging.hoverBtn then NS.dragging.hoverBtn:UnlockHighlight() end
+        if foundBtn then foundBtn:LockHighlight() end
+        NS.dragging.hoverBtn = foundBtn
+    end
+    NS.dragging.dropBtn = foundBtn
+end
 
-    cap:SetScript("OnMouseUp", function(self, btn)
+-- Begins an item drag: shows the shared capture frame wired to track the
+-- drop target and finish on left-button release.
+local function CB_BeginItemDrag()
+    NS.CB_BeginCapture(CB_DragOnUpdate, function(btn)
         if btn == "LeftButton" then CB_StopDrag() end
     end)
-
-    NS.dragCapture = cap
-    return cap
 end
 
 -- ── Build or fetch the inventory frame for one bot ───────────────────────
@@ -253,7 +227,7 @@ NS.CB_RenderInventory = function(key)
                 self.icon:SetDesaturated(true)
                 GameTooltip:Hide()
                 SetCursor(iconPath)
-                CB_GetDragCapture():Show()
+                CB_BeginItemDrag()
             end)
 
             cell:SetScript("OnMouseUp", function(self, btn)
