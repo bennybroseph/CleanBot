@@ -90,3 +90,67 @@ NS.CB_CreateCheckBox = function(parent, name)
     if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
     return cb
 end
+
+-- InputBoxTemplate edit box. w/h are optional.
+NS.CB_CreateEditBox = function(parent, name, w, h)
+    local box = CreateFrame("EditBox", name, parent, "InputBoxTemplate")
+    if w and h then box:SetSize(w, h) end
+    if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
+    return box
+end
+
+-- OptionsSliderTemplate slider.
+-- name is required — the template creates named children (<name>Text, <name>Low, <name>High)
+-- which are stored on the returned slider as .textLabel, .lowLabel, .highLabel.
+-- lowText/highText label the ends; defaultVal seeds the initial position and display.
+-- Caller sets OnValueChanged after creation; the initial SetValue fires before that.
+NS.CB_CreateSlider = function(parent, name, minVal, maxVal, defaultVal, lowText, highText)
+    local s = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
+    s:SetMinMaxValues(minVal, maxVal)
+    s:SetValueStep(1)
+    s.textLabel = _G[name .. "Text"]
+    s.lowLabel  = _G[name .. "Low"]
+    s.highLabel = _G[name .. "High"]
+    if s.lowLabel  then s.lowLabel:SetText(lowText  or tostring(minVal)) end
+    if s.highLabel then s.highLabel:SetText(highText or tostring(maxVal)) end
+    s:SetValue(defaultVal or minVal)
+    if NS.ElvUI_S then NS.ElvUI_S:HandleSliderFrame(s) end
+    return s
+end
+
+-- Small colored swatch button that opens the WoW ColorPickerFrame.
+-- initR/G/B seed the starting color (defaults to white). onChange(r, g, b) fires
+-- on both confirm and cancel so the caller always sees the current value.
+-- The returned button has a .swatch texture that reflects the active color.
+NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
+    local r, g, b = initR or 1, initG or 1, initB or 1
+
+    local btn = CreateFrame("Button", name, parent)
+    btn:SetSize(20, 20)
+
+    local swatch = btn:CreateTexture(nil, "BACKGROUND")
+    swatch:SetAllPoints()
+    swatch:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    swatch:SetVertexColor(r, g, b)
+    btn.swatch = swatch
+
+    btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    btn:SetScript("OnClick", function()
+        local prevR, prevG, prevB = r, g, b
+        ColorPickerFrame.func = function()
+            r, g, b = ColorPickerFrame:GetColorRGB()
+            swatch:SetVertexColor(r, g, b)
+            if onChange then onChange(r, g, b) end
+        end
+        ColorPickerFrame.cancelFunc = function()
+            r, g, b = prevR, prevG, prevB
+            swatch:SetVertexColor(r, g, b)
+            if onChange then onChange(r, g, b) end
+        end
+        ColorPickerFrame:SetColorRGB(r, g, b)
+        ShowUIPanel(ColorPickerFrame)
+    end)
+
+    return btn
+end

@@ -98,12 +98,6 @@ NS.CleanBot_BuildManageContent = function()
             NS.CB_Print("Target is already in your party.")
             return
         end
-        local isKnownBot = CleanBot_PartyBots[strlower(target)] ~= nil
-        if not isKnownBot and not NS.ASSUME_ALL_PARTY_ARE_BOTS then
-            NS.CB_Print("Cannot verify '" .. target ..
-                  "' is a bot. Enable 'Assume all party members are bots' in Settings.")
-            return
-        end
         InviteUnit(target)
     end)
 

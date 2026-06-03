@@ -4,26 +4,58 @@
 local NS = CleanBotNS
 
 NS.CleanBot_BuildSettingsContent = function()
-    local cb = NS.CB_CreateCheckBox(NS.settingsPanel, "CleanBotAssumeBotsCheck")
-    cb:SetPoint("TOPLEFT", NS.settingsPanel, "TOPLEFT", NS.PAD, -NS.PAD)
-    cb:SetChecked(NS.ASSUME_ALL_PARTY_ARE_BOTS)
-    cb:SetScript("OnClick", function(self)
-        NS.ASSUME_ALL_PARTY_ARE_BOTS = self:GetChecked() and true or false
-    end)
+    -- Pending values — hold uncommitted user input until Apply is pressed.
+    local pendingScale        = 100
+    local pendingTransparency = 100
+    local pendingAccentR, pendingAccentG, pendingAccentB = 1, 1, 1
 
-    local label = NS.settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    label:SetText("Treat All Players as Bots")
+    local panel      = NS.settingsPanel
+    local pad        = NS.PAD
+    local labelGap   = NS.LABEL_GAP
+    local sectionGap = NS.SECTION_GAP
 
-    cb:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Treat All Players as Bots", 1, 1, 1)
-        GameTooltip:AddLine(
-            "Treat every party member as a bot regardless of whether the " ..
-            "MultiBot bridge has confirmed them. Enable this when the bridge " ..
-            "module is not installed on the server or is otherwise malfunctioning.",
-            0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+    -- ── Scale ──────────────────────────────────────────────────
+    local scaleLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    scaleLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", pad, -pad)
+    scaleLabel:SetText("Scale")
+
+    local scaleSlider = NS.CB_CreateSlider(panel, "CleanBotScaleSlider", 50, 150, 100, "50%", "150%")
+    scaleSlider:SetWidth(180)
+    scaleSlider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -labelGap)
+    scaleSlider:SetScript("OnValueChanged", function(self, val)
+        pendingScale = math.floor(val + 0.5)
+        self.textLabel:SetText(pendingScale .. "%")
     end)
-    cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    scaleSlider.textLabel:SetText("100%")
+
+    -- ── Transparency ───────────────────────────────────────────
+    local transLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    transLabel:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", 0, -sectionGap)
+    transLabel:SetText("Transparency")
+
+    local transSlider = NS.CB_CreateSlider(panel, "CleanBotTransSlider", 0, 100, 100, "0%", "100%")
+    transSlider:SetWidth(180)
+    transSlider:SetPoint("TOPLEFT", transLabel, "BOTTOMLEFT", 0, -labelGap)
+    transSlider:SetScript("OnValueChanged", function(self, val)
+        pendingTransparency = math.floor(val + 0.5)
+        self.textLabel:SetText(pendingTransparency .. "%")
+    end)
+    transSlider.textLabel:SetText("100%")
+
+    -- ── Accent Color ───────────────────────────────────────────
+    local accentLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    accentLabel:SetPoint("TOPLEFT", transSlider, "BOTTOMLEFT", 0, -sectionGap)
+    accentLabel:SetText("Accent Color")
+
+    local colorSwatch = NS.CB_CreateColorSwatch(panel, "CleanBotAccentSwatch", 1, 1, 1,
+        function(r, g, b)
+            pendingAccentR, pendingAccentG, pendingAccentB = r, g, b
+        end)
+    colorSwatch:SetPoint("TOPLEFT", accentLabel, "BOTTOMLEFT", 0, -labelGap)
+
+    -- ── Apply ──────────────────────────────────────────────────
+    local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
+        -- TODO: apply pendingScale, pendingTransparency, pendingAccentR/G/B
+    end)
+    applyBtn:SetPoint("TOPLEFT", colorSwatch, "BOTTOMLEFT", 0, -sectionGap)
 end

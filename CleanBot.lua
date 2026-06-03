@@ -79,8 +79,6 @@ end
 -- ============================================================
 -- Config + bot detection cache
 -- ============================================================
-NS.ASSUME_ALL_PARTY_ARE_BOTS = false
-
 CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 
 -- ============================================================
@@ -95,6 +93,8 @@ NS.FOOTER_H          = 36
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 NS.PAD               = 6
+NS.LABEL_GAP         = 4    -- label to its associated control
+NS.SECTION_GAP       = 14   -- last control of one group to the label of the next
 -- Vertical space reserved below the model for the weapon-slot row.
 -- The model height = contentH - EQUIP_WEAPON_PAD, weapon slots sit in that gap.
 NS.EQUIP_WEAPON_PAD  = 60
