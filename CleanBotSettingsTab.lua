@@ -12,20 +12,26 @@ NS.CleanBot_BuildSettingsContent = function()
     local BTN_ROW_H = PAD + 22 + PAD
 
     -- ── ScrollFrame ────────────────────────────────────────────
-    -- Fills the panel above the button row. The scroll child holds all settings
-    -- content; the 20px right inset leaves room for the scrollbar.
+    -- The EditBox interaction issues we investigated were caused by HandleEditBox,
+    -- not the ScrollFrame or its template. UIPanelScrollFrameTemplate is safe to
+    -- use and gives us the auto-created scrollbar and proper content clipping.
     local sf = CreateFrame("ScrollFrame", "CleanBotSettingsScroll", panel, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0,   0)
     sf:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -20, BTN_ROW_H)
 
     local child = CreateFrame("Frame", "CleanBotSettingsScrollChild", sf)
-    child:SetWidth(NS.FRAME_WIDTH - 28)  -- frame width - content insets (8) - scrollbar area (20)
-    child:SetHeight(100)
+    child:SetWidth(NS.FRAME_WIDTH - 28)
+    child:SetHeight(700)
     sf:SetScrollChild(child)
 
-    -- Manually pin the scrollbar flush against the panel's inner border.
-    -- 2px inset on all sides clears the backdrop edge (insets=3, edgeSize=12)
-    -- and keeps it within the visible content area.
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local max     = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
+    end)
+
+    -- Pin the scrollbar flush against the panel's inner border.
     local scrollBar = CleanBotSettingsScrollScrollBar
     scrollBar:ClearAllPoints()
     scrollBar:SetPoint("TOPRIGHT",    panel, "TOPRIGHT",    0, -19)

@@ -312,11 +312,4 @@ NS.CleanBot_BuildManageContent = function()
         selectedUnlinkAccount = nil
         selectedAltAccount    = nil
     end)
-
-    -- ── DEBUG: dummy slider to isolate EditBox rendering bug ─────
-    -- Remove once the Settings tab EditBox issue is confirmed/fixed.
-    local debugSlider = NS.CB_CreateSlider(NS.managePanel, "CleanBotDebugSlider", "Debug Slider",
-        0, 100, 50, "0", "100", function(v) NS.CB_Print("Debug slider: " .. v) end)
-    debugSlider:SetWidth(200)
-    NS.CB_AnchorBelow(debugSlider, unlinkAltBtn)
 end

@@ -116,6 +116,40 @@ NS.CB_CreateCheckBox = function(parent, name)
     return cb
 end
 
+-- Applies an ElvUI-matching skin to an EditBox using SetBackdrop directly,
+-- bypassing HandleEditBox / SetTemplate. HandleEditBox creates iborder/oborder
+-- child frames via SetTemplate; inside a ScrollFrame those children land at a
+-- frame level that obscures the EditBox's own text layer, making text invisible
+-- and blocking cursor interaction. SetBackdrop on the EditBox itself avoids that.
+-- Falls back to a no-op when ElvUI is absent (InputBoxTemplate provides its own look).
+NS.CB_SkinEditBoxSafe = function(box)
+    if not NS.ElvUI_S then return end
+    local E   = NS.ElvUI_E
+    -- Use ElvUI's own blank texture when available so the fill is pure white and
+    -- can be tinted accurately; fall back to a reliable Blizzard solid texture.
+    local tex = (E and E.media and E.media.blank) or "Interface\\ChatFrame\\ChatFrameBackground"
+    local bc  = (E and E.db and E.db.general and E.db.general.bordercolor) or {}
+    -- Hide only Texture regions to remove InputBoxTemplate's default art.
+    -- GetRegions() returns Textures and FontStrings but never child Frames, so this
+    -- is safe for input handling. We filter to Texture only so the EditBox's text
+    -- FontString stays visible. StripTextures is avoided entirely — ElvUI's version
+    -- also iterates child frames and hides something InputBoxTemplate needs for focus.
+    for _, region in pairs({box:GetRegions()}) do
+        if region:GetObjectType() == "Texture" then
+            region:Hide()
+        end
+    end
+    box:SetBackdrop({
+        bgFile   = tex,
+        edgeFile = tex,
+        tile     = false,
+        edgeSize = 1,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    box:SetBackdropColor(0.06, 0.06, 0.06, 1)
+    box:SetBackdropBorderColor(bc.r or 0.3, bc.g or 0.3, bc.b or 0.3, 1)
+end
+
 -- InputBoxTemplate edit box. w/h are optional.
 NS.CB_CreateEditBox = function(parent, name, w, h)
     local box = CreateFrame("EditBox", name, parent, "InputBoxTemplate")
@@ -179,7 +213,11 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     if highLabel then highLabel:SetText(highText or tostring(softMax)) end
 
     -- EditBox sits centred between the low/high labels, directly below the slider bar.
-    local box = NS.CB_CreateEditBox(wrapper, name .. "EditBox", 70, 18)
+    -- Created directly (not via CB_CreateEditBox) so we can apply CB_SkinEditBoxSafe
+    -- instead of HandleEditBox — see CB_SkinEditBoxSafe for the full explanation.
+    local box = CreateFrame("EditBox", name .. "EditBox", wrapper, "InputBoxTemplate")
+    box:SetSize(70, 18)
+    NS.CB_SkinEditBoxSafe(box)
     box:SetPoint("TOP", s, "BOTTOM", 0, -2)
     box:SetAutoFocus(false)
     box:SetJustifyH("CENTER")
@@ -241,6 +279,16 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper.marginBottom = NS.MARGIN.slider.bottom
     return wrapper
 end
+
+-- Clears keyboard focus from any focused EditBox (e.g. a slider EditBox) when
+-- the user clicks in the 3D world or on the CleanBot frame's own background.
+-- Without this, EditBoxes hold focus indefinitely until Escape is pressed.
+local function CB_ClearKeyboardFocus()
+    local focused = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+    if focused then focused:ClearFocus() end
+end
+WorldFrame:HookScript("OnMouseDown",    CB_ClearKeyboardFocus)
+CleanBotFrame:HookScript("OnMouseDown", CB_ClearKeyboardFocus)
 
 -- Small colored swatch button that opens the WoW ColorPickerFrame.
 -- initR/G/B seed the starting color (defaults to white). onChange(r, g, b) fires
