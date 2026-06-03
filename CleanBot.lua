@@ -96,23 +96,25 @@ NS.PAD               = 6
 -- Per-element margins — each widget declares the space it needs above and below.
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
-    label    = { top = 6, bottom = 2 },
-    button   = { top = 2, bottom = 2 },
-    slider   = { top = 2, bottom = 4 },
-    dropdown = { top = 2, bottom = 2 },
-    checkbox = { top = 1, bottom = 1 },
-    swatch   = { top = 2, bottom = 2 },
-    editBox  = { top = 2, bottom = 2 },
+    header   = { top = 10, bottom = 4, left = 0, right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
+    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
+    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
 -- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
 NS.MARGIN = {
-    label    = { top = 6, bottom = 2 },
-    button   = { top = 2, bottom = 2 },
-    slider   = { top = 2, bottom = 4 },
-    dropdown = { top = 2, bottom = 2 },
-    checkbox = { top = 1, bottom = 1 },
-    swatch   = { top = 2, bottom = 2 },
-    editBox  = { top = 2, bottom = 2 },
+    header   = { top = 10, bottom = 4, left = 0, right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
+    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
+    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
 -- Vertical space reserved below the model for the weapon-slot row.
 -- The model height = contentH - EQUIP_WEAPON_PAD, weapon slots sit in that gap.
@@ -264,6 +266,8 @@ initFrame:SetScript("OnEvent", function(self, event)
             if type(saved) == "table" then
                 if type(saved.top)    == "number" then NS.MARGIN[k].top    = saved.top    end
                 if type(saved.bottom) == "number" then NS.MARGIN[k].bottom = saved.bottom end
+                if type(saved.left)   == "number" then NS.MARGIN[k].left   = saved.left   end
+                if type(saved.right)  == "number" then NS.MARGIN[k].right  = saved.right  end
             end
         end
 

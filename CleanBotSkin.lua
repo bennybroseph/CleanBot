@@ -65,8 +65,9 @@ end
 -- xOffset shifts the horizontal anchor (defaults to 0).
 -- ============================================================
 NS.CB_AnchorBelow = function(widget, above, xOffset)
-    local gap = (above.marginBottom or 0) + (widget.marginTop or 0)
-    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", xOffset or 0, -gap)
+    local gap    = (above.marginBottom or 0) + (widget.marginTop or 0)
+    local xShift = (xOffset or 0) + (widget.marginLeft or 0)
+    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", xShift, -gap)
 end
 
 -- ============================================================
@@ -81,7 +82,22 @@ NS.CB_CreateLabel = function(parent, text, fontObj)
     if text then lbl:SetText(text) end
     lbl.marginTop    = NS.MARGIN.label.top
     lbl.marginBottom = NS.MARGIN.label.bottom
+    lbl.marginLeft   = NS.MARGIN.label.left
+    lbl.marginRight  = NS.MARGIN.label.right
     return lbl
+end
+
+-- FontString section header. Larger than a label (GameFontNormalLarge) with
+-- wider top/bottom margins so it reads as a visual section break.
+-- fontObj can override the font object if desired.
+NS.CB_CreateHeader = function(parent, text, fontObj)
+    local hdr = parent:CreateFontString(nil, "OVERLAY", fontObj or "GameFontNormalLarge")
+    if text then hdr:SetText(text) end
+    hdr.marginTop    = NS.MARGIN.header.top
+    hdr.marginBottom = NS.MARGIN.header.bottom
+    hdr.marginLeft   = NS.MARGIN.header.left
+    hdr.marginRight  = NS.MARGIN.header.right
+    return hdr
 end
 
 -- UIPanelButtonTemplate button. w/h, text and onClick are optional.
@@ -93,6 +109,8 @@ NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
     if NS.ElvUI_S then NS.ElvUI_S:HandleButton(btn) end
     btn.marginTop    = NS.MARGIN.button.top
     btn.marginBottom = NS.MARGIN.button.bottom
+    btn.marginLeft   = NS.MARGIN.button.left
+    btn.marginRight  = NS.MARGIN.button.right
     return btn
 end
 
@@ -104,6 +122,8 @@ NS.CB_CreateDropdown = function(parent, name, width)
     if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, width) end
     dd.marginTop    = NS.MARGIN.dropdown.top
     dd.marginBottom = NS.MARGIN.dropdown.bottom
+    dd.marginLeft   = NS.MARGIN.dropdown.left
+    dd.marginRight  = NS.MARGIN.dropdown.right
     return dd
 end
 
@@ -113,6 +133,8 @@ NS.CB_CreateCheckBox = function(parent, name)
     if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
     cb.marginTop    = NS.MARGIN.checkbox.top
     cb.marginBottom = NS.MARGIN.checkbox.bottom
+    cb.marginLeft   = NS.MARGIN.checkbox.left
+    cb.marginRight  = NS.MARGIN.checkbox.right
     return cb
 end
 
@@ -154,9 +176,11 @@ end
 NS.CB_CreateEditBox = function(parent, name, w, h)
     local box = CreateFrame("EditBox", name, parent, "InputBoxTemplate")
     if w and h then box:SetSize(w, h) end
-    if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
+    NS.CB_SkinEditBoxSafe(box)
     box.marginTop    = NS.MARGIN.editBox.top
     box.marginBottom = NS.MARGIN.editBox.bottom
+    box.marginLeft   = NS.MARGIN.editBox.left
+    box.marginRight  = NS.MARGIN.editBox.right
     return box
 end
 
@@ -277,6 +301,8 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper:SetHeight(titleH + 37)
     wrapper.marginTop    = title and NS.MARGIN.label.top or NS.MARGIN.slider.top
     wrapper.marginBottom = NS.MARGIN.slider.bottom
+    wrapper.marginLeft   = NS.MARGIN.slider.left
+    wrapper.marginRight  = NS.MARGIN.slider.right
     return wrapper
 end
 
@@ -290,15 +316,20 @@ end
 WorldFrame:HookScript("OnMouseDown",    CB_ClearKeyboardFocus)
 CleanBotFrame:HookScript("OnMouseDown", CB_ClearKeyboardFocus)
 
--- Small colored swatch button that opens the WoW ColorPickerFrame.
--- initR/G/B seed the starting color (defaults to white). onChange(r, g, b) fires
--- on both confirm and cancel so the caller always sees the current value.
--- The returned button has a .swatch texture that reflects the active color.
-NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
+-- Wrapper containing a 20×20 colored swatch button on the left and an optional
+-- text label to its right, aligned to the same vertical centre.
+-- Clicking the swatch opens the WoW ColorPickerFrame; onChange(r, g, b) fires
+-- on both confirm and cancel. initR/G/B seed the starting color (default white).
+-- The wrapper exposes :setColor(r, g, b) and a .swatch texture reference.
+NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onChange)
     local r, g, b = initR or 1, initG or 1, initB or 1
 
-    local btn = CreateFrame("Button", name, parent)
+    local wrapper = CreateFrame("Frame", nil, parent)
+    wrapper:SetSize(160, 20)
+
+    local btn = CreateFrame("Button", name, wrapper)
     btn:SetSize(20, 20)
+    btn:SetPoint("LEFT", wrapper, "LEFT", 0, 0)
 
     local swatch = btn:CreateTexture(nil, "BACKGROUND")
     swatch:SetAllPoints()
@@ -308,11 +339,12 @@ NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
 
     btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
-    -- Updates the displayed color and the internal upvalues so the color picker
-    -- opens with the correct starting color the next time OnClick fires.
-    btn.setColor = function(self, nr, ng, nb)
-        r, g, b = nr, ng, nb
-        swatch:SetVertexColor(r, g, b)
+    if text then
+        local lbl = wrapper:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        lbl:SetText(text)
+        -- "LEFT" is the middle-left anchor point, so this centres the label
+        -- vertically with the swatch button without extra math.
+        lbl:SetPoint("LEFT", btn, "RIGHT", 4, 0)
     end
 
     btn:SetScript("OnClick", function()
@@ -331,7 +363,15 @@ NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
         ShowUIPanel(ColorPickerFrame)
     end)
 
-    btn.marginTop    = NS.MARGIN.swatch.top
-    btn.marginBottom = NS.MARGIN.swatch.bottom
-    return btn
+    wrapper.swatch   = swatch
+    wrapper.setColor = function(self, nr, ng, nb)
+        r, g, b = nr, ng, nb
+        swatch:SetVertexColor(r, g, b)
+    end
+
+    wrapper.marginTop    = NS.MARGIN.swatch.top
+    wrapper.marginBottom = NS.MARGIN.swatch.bottom
+    wrapper.marginLeft   = NS.MARGIN.swatch.left
+    wrapper.marginRight  = NS.MARGIN.swatch.right
+    return wrapper
 end
