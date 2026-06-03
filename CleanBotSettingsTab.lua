@@ -22,6 +22,8 @@ local overlayVisible = true
 local function applyDebugOverlay(parent, widget)
     local mTop    = widget.marginTop    or 0
     local mBottom = widget.marginBottom or 0
+    local mLeft   = widget.marginLeft   or 0
+    local mRight  = widget.marginRight  or 0
     local level   = parent:GetFrameLevel() + 20
 
     local function makeOverlay(r, g, b)
@@ -49,6 +51,20 @@ local function applyDebugOverlay(parent, widget)
         bot:SetPoint("TOPRIGHT", widget, "BOTTOMRIGHT", 0, 0)
         bot:SetHeight(math.abs(mBottom))
     end
+
+    if mLeft ~= 0 then
+        local left = mLeft > 0 and makeOverlay(0, 1, 0) or makeOverlay(1, 0, 0)
+        left:SetPoint("TOPRIGHT",    widget, "TOPLEFT",    0, 0)
+        left:SetPoint("BOTTOMRIGHT", widget, "BOTTOMLEFT", 0, 0)
+        left:SetWidth(math.abs(mLeft))
+    end
+
+    if mRight ~= 0 then
+        local right = mRight > 0 and makeOverlay(0, 1, 0) or makeOverlay(1, 0, 0)
+        right:SetPoint("TOPLEFT",    widget, "TOPRIGHT",    0, 0)
+        right:SetPoint("BOTTOMLEFT", widget, "BOTTOMRIGHT", 0, 0)
+        right:SetWidth(math.abs(mRight))
+    end
 end
 
 local sampleContent  = nil
@@ -68,7 +84,7 @@ local function buildSampleContent(body)
     sampleContent = content
 
     local header = NS.CB_CreateHeader(content, "Lorem Ipsum")
-    header:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    header:SetPoint("TOPLEFT", content, "TOPLEFT", header.marginLeft or 0, 0)
     applyDebugOverlay(content, header)
 
     local lbl = NS.CB_CreateLabel(content, "Lorem Ipsum")
@@ -341,8 +357,14 @@ NS.CleanBot_BuildSettingsContent = function()
 
     local marginSliderRefs = {}
 
-    local prevRow = sampleBtn
-    for _, mtype in ipairs(MARGIN_TYPES) do
+    local SEP_W   = NS.FRAME_WIDTH - 28 - PAD * 2  -- separator spans the content area
+
+    local sampleSep = NS.CB_CreateSeparator(layoutChild)
+    NS.CB_AnchorBelow(sampleSep, sampleBtn)
+    sampleSep:SetWidth(SEP_W)
+
+    local prevRow = sampleSep
+    for i, mtype in ipairs(MARGIN_TYPES) do
         local key = mtype.key
 
         -- Top/Bot sub-row — carries the type name label on the left.
@@ -391,6 +413,12 @@ NS.CleanBot_BuildSettingsContent = function()
 
         marginSliderRefs[key] = { top = topSlider, bot = botSlider, left = leftSlider, right = rightSlider }
         prevRow = rowB
+        if i < #MARGIN_TYPES then
+            local sep = NS.CB_CreateSeparator(layoutChild)
+            NS.CB_AnchorBelow(sep, rowB)
+            sep:SetWidth(SEP_W)
+            prevRow = sep
+        end
     end
 
     -- ── Sync helper ────────────────────────────────────────────

@@ -66,7 +66,7 @@ end
 -- ============================================================
 NS.CB_AnchorBelow = function(widget, above, xOffset)
     local gap    = (above.marginBottom or 0) + (widget.marginTop or 0)
-    local xShift = (xOffset or 0) + (widget.marginLeft or 0)
+    local xShift = (xOffset or 0) + (widget.marginLeft or 0) - (above.marginLeft or 0)
     widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", xShift, -gap)
 end
 
@@ -75,6 +75,32 @@ end
 -- stamp NS.MARGIN values onto the returned frame so CB_AnchorBelow
 -- can compute gaps automatically.
 -- ============================================================
+
+-- Horizontal rule. ElvUI: 1px line using E.media.blank tinted with the border
+-- colour. Fallback: the UI-TooltipDivider-Transparent tiled texture at 8px.
+-- Width is NOT set — callers size it after anchoring with CB_AnchorBelow.
+NS.CB_CreateSeparator = function(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    local tex = f:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+
+    if NS.ElvUI_E and NS.ElvUI_E.media and NS.ElvUI_E.media.blank then
+        local bc = (NS.ElvUI_E.db and NS.ElvUI_E.db.general and NS.ElvUI_E.db.general.bordercolor) or {}
+        tex:SetTexture(NS.ElvUI_E.media.blank)
+        tex:SetVertexColor(bc.r or 0.3, bc.g or 0.3, bc.b or 0.3, 1)
+        f:SetHeight(1)
+    else
+        tex:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        tex:SetVertexColor(0.3, 0.3, 0.3, 0.8)
+        f:SetHeight(1)
+    end
+
+    f.marginTop    = 6
+    f.marginBottom = 4
+    f.marginLeft   = 0
+    f.marginRight  = 0
+    return f
+end
 
 -- FontString label. fontObj defaults to "GameFontNormal".
 NS.CB_CreateLabel = function(parent, text, fontObj)
