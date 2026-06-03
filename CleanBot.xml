@@ -35,10 +35,9 @@
         </Scripts>
 
         <Frames>
-            <Button name="$parentCloseButton" inherits="UIPanelButtonTemplate" text="Close">
-                <Size x="80" y="22"/>
+            <Button name="$parentCloseButton" inherits="UIPanelCloseButton">
                 <Anchors>
-                    <Anchor point="BOTTOM" y="10"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
                 </Anchors>
                 <Scripts>
                     <OnClick>CleanBotFrame:Hide();</OnClick>

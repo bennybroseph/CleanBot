@@ -60,10 +60,29 @@ NS.CB_ApplyInnerSkin = function(frame)
 end
 
 -- ============================================================
--- Widget factories — create a widget and apply the ElvUI skin in
--- one call. Callers still position the widget (SetPoint) and set
--- any extra state (font objects, tooltips, etc.) themselves.
+-- Layout helper — anchors widget directly below above using their
+-- combined margins as the gap (above.marginBottom + widget.marginTop).
+-- xOffset shifts the horizontal anchor (defaults to 0).
 -- ============================================================
+NS.CB_AnchorBelow = function(widget, above, xOffset)
+    local gap = (above.marginBottom or 0) + (widget.marginTop or 0)
+    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", xOffset or 0, -gap)
+end
+
+-- ============================================================
+-- Widget factories — create a widget, apply the ElvUI skin, and
+-- stamp NS.MARGIN values onto the returned frame so CB_AnchorBelow
+-- can compute gaps automatically.
+-- ============================================================
+
+-- FontString label. fontObj defaults to "GameFontNormal".
+NS.CB_CreateLabel = function(parent, text, fontObj)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", fontObj or "GameFontNormal")
+    if text then lbl:SetText(text) end
+    lbl.marginTop    = NS.MARGIN.label.top
+    lbl.marginBottom = NS.MARGIN.label.bottom
+    return lbl
+end
 
 -- UIPanelButtonTemplate button. w/h, text and onClick are optional.
 NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
@@ -72,6 +91,8 @@ NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
     if text then btn:SetText(text) end
     if onClick then btn:SetScript("OnClick", onClick) end
     if NS.ElvUI_S then NS.ElvUI_S:HandleButton(btn) end
+    btn.marginTop    = NS.MARGIN.button.top
+    btn.marginBottom = NS.MARGIN.button.bottom
     return btn
 end
 
@@ -81,6 +102,8 @@ NS.CB_CreateDropdown = function(parent, name, width)
     local dd = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
     if width then UIDropDownMenu_SetWidth(dd, width) end
     if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, width) end
+    dd.marginTop    = NS.MARGIN.dropdown.top
+    dd.marginBottom = NS.MARGIN.dropdown.bottom
     return dd
 end
 
@@ -88,6 +111,8 @@ end
 NS.CB_CreateCheckBox = function(parent, name)
     local cb = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
     if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
+    cb.marginTop    = NS.MARGIN.checkbox.top
+    cb.marginBottom = NS.MARGIN.checkbox.bottom
     return cb
 end
 
@@ -96,26 +121,125 @@ NS.CB_CreateEditBox = function(parent, name, w, h)
     local box = CreateFrame("EditBox", name, parent, "InputBoxTemplate")
     if w and h then box:SetSize(w, h) end
     if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
+    box.marginTop    = NS.MARGIN.editBox.top
+    box.marginBottom = NS.MARGIN.editBox.bottom
     return box
 end
 
--- OptionsSliderTemplate slider.
--- name is required — the template creates named children (<name>Text, <name>Low, <name>High)
--- which are stored on the returned slider as .textLabel, .lowLabel, .highLabel.
--- lowText/highText label the ends; defaultVal seeds the initial position and display.
--- Caller sets OnValueChanged after creation; the initial SetValue fires before that.
-NS.CB_CreateSlider = function(parent, name, minVal, maxVal, defaultVal, lowText, highText)
-    local s = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
-    s:SetMinMaxValues(minVal, maxVal)
+-- OptionsSliderTemplate slider paired with an optional title label and a centered EditBox.
+-- Returns a wrapper frame; callers use wrapper:SetWidth() to size it.
+-- The slider and EditBox are kept in sync: dragging updates the EditBox, and typing
+-- (confirmed with Enter or focus loss) updates the slider.
+-- onChange(v) fires whenever the committed integer value changes from either input path.
+--
+-- title:          optional label rendered above the slider bar (GameFontNormal / gold).
+-- softMin/softMax define the slider's draggable range.
+-- hardMin/hardMax define the EditBox's allowed input range (default = softMin/softMax).
+--   Typing outside [softMin,softMax] pins the thumb to the boundary while onChange
+--   still receives the full typed value.
+--
+-- Wrapper exposes :SetValue(v) / :GetValue() proxies plus sub-element refs:
+--   .label, .slider, .editBox, .lowLabel, .highLabel, .textLabel (hidden built-in).
+-- marginTop uses label.top when a title is present, slider.top otherwise.
+NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal, lowText, highText, onChange, hardMin, hardMax)
+    hardMin = hardMin or softMin
+    hardMax = hardMax or softMax
+
+    local wrapper = CreateFrame("Frame", nil, parent)
+
+    -- Optional title label spanning the full widget width.
+    local label = nil
+    if title then
+        label = wrapper:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetText(title)
+        label:SetPoint("TOPLEFT",  wrapper, "TOPLEFT",  0, 0)
+        label:SetPoint("TOPRIGHT", wrapper, "TOPRIGHT", 0, 0)
+        label:SetJustifyH("CENTER")
+        label:SetHeight(15)
+    end
+
+    -- Inner slider fills wrapper horizontally; anchored below label when present.
+    local s = CreateFrame("Slider", name, wrapper, "OptionsSliderTemplate")
+    s:SetHeight(17)
+    if label then
+        s:SetPoint("TOPLEFT",  label, "BOTTOMLEFT",  0, -2)
+        s:SetPoint("TOPRIGHT", label, "BOTTOMRIGHT", 0, -2)
+    else
+        s:SetPoint("TOPLEFT",  wrapper, "TOPLEFT",  0, 0)
+        s:SetPoint("TOPRIGHT", wrapper, "TOPRIGHT", 0, 0)
+    end
+    s:SetMinMaxValues(softMin, softMax)
     s:SetValueStep(1)
-    s.textLabel = _G[name .. "Text"]
-    s.lowLabel  = _G[name .. "Low"]
-    s.highLabel = _G[name .. "High"]
-    if s.lowLabel  then s.lowLabel:SetText(lowText  or tostring(minVal)) end
-    if s.highLabel then s.highLabel:SetText(highText or tostring(maxVal)) end
-    s:SetValue(defaultVal or minVal)
+
+    local textLabel = _G[name .. "Text"]
+    local lowLabel  = _G[name .. "Low"]
+    local highLabel = _G[name .. "High"]
+    if textLabel then textLabel:Hide() end
+    if lowLabel  then lowLabel:SetText(lowText  or tostring(softMin)) end
+    if highLabel then highLabel:SetText(highText or tostring(softMax)) end
+
+    -- EditBox sits centred between the low/high labels, directly below the slider bar.
+    local box = NS.CB_CreateEditBox(wrapper, name .. "EditBox", 70, 18)
+    box:SetPoint("TOP", s, "BOTTOM", 0, -2)
+    box:SetAutoFocus(false)
+    box:SetJustifyH("CENTER")
+
+    -- Guard against re-entrancy when applyBoxValue moves the slider thumb.
+    local updating = false
+
+    -- Sync: slider → editbox → onChange.
+    -- Skipped when applyBoxValue is already driving the update to avoid double-firing.
+    s:SetScript("OnValueChanged", function(self, val)
+        if updating then return end
+        local v = math.floor(val + 0.5)
+        box:SetText(tostring(v))
+        if onChange then onChange(v) end
+    end)
+
+    -- Sync: editbox → slider.
+    -- Hard range clamps the data value; soft range clamps the slider thumb position.
+    -- Invalid text reverts to the current slider value without firing onChange.
+    local function applyBoxValue()
+        local v = tonumber(box:GetText())
+        if v then
+            v = math.max(hardMin, math.min(hardMax, math.floor(v + 0.5)))
+            box:SetText(tostring(v))
+            local thumbPos = math.max(softMin, math.min(softMax, v))
+            updating = true
+            s:SetValue(thumbPos)
+            updating = false
+            if onChange then onChange(v) end
+        else
+            box:SetText(tostring(math.floor(s:GetValue() + 0.5)))
+        end
+    end
+    box:SetScript("OnEnterPressed", function(self) applyBoxValue(); self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self)
+        box:SetText(tostring(math.floor(s:GetValue() + 0.5)))
+        self:ClearFocus()
+    end)
+    box:SetScript("OnEditFocusLost", applyBoxValue)
+
+    s:SetValue(defaultVal or softMin)
     if NS.ElvUI_S then NS.ElvUI_S:HandleSliderFrame(s) end
-    return s
+
+    -- Proxy SetValue/GetValue so callers treat the wrapper like a slider.
+    wrapper.SetValue = function(self, v) s:SetValue(v) end
+    wrapper.GetValue = function(self) return s:GetValue() end
+
+    wrapper.label     = label
+    wrapper.slider    = s
+    wrapper.editBox   = box
+    wrapper.lowLabel  = lowLabel
+    wrapper.highLabel = highLabel
+    wrapper.textLabel = textLabel  -- hidden; kept for reference
+
+    -- Height: title (15px label + 2px gap) when present, + slider (17px) + gap (2px) + editbox (18px).
+    local titleH = title and 17 or 0
+    wrapper:SetHeight(titleH + 37)
+    wrapper.marginTop    = title and NS.MARGIN.label.top or NS.MARGIN.slider.top
+    wrapper.marginBottom = NS.MARGIN.slider.bottom
+    return wrapper
 end
 
 -- Small colored swatch button that opens the WoW ColorPickerFrame.
@@ -136,6 +260,13 @@ NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
 
     btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
+    -- Updates the displayed color and the internal upvalues so the color picker
+    -- opens with the correct starting color the next time OnClick fires.
+    btn.setColor = function(self, nr, ng, nb)
+        r, g, b = nr, ng, nb
+        swatch:SetVertexColor(r, g, b)
+    end
+
     btn:SetScript("OnClick", function()
         local prevR, prevG, prevB = r, g, b
         ColorPickerFrame.func = function()
@@ -152,5 +283,7 @@ NS.CB_CreateColorSwatch = function(parent, name, initR, initG, initB, onChange)
         ShowUIPanel(ColorPickerFrame)
     end)
 
+    btn.marginTop    = NS.MARGIN.swatch.top
+    btn.marginBottom = NS.MARGIN.swatch.bottom
     return btn
 end
