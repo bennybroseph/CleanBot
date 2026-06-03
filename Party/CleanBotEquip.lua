@@ -37,19 +37,15 @@ local function CB_GetWowheadPopup()
     NS.CB_ApplyPanelSkin(popup)
     popup:Hide()
 
-    local label = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local label = NS.CB_CreateLabel(popup, "Wowhead  (Ctrl+C to copy, then open in browser)")
     label:SetPoint("TOPLEFT", popup, "TOPLEFT", 18, -16)
-    label:SetText("Wowhead  (Ctrl+C to copy, then open in browser)")
 
-    local box = CreateFrame("EditBox", nil, popup, "InputBoxTemplate")
-    box:SetSize(344, 20)
-    box:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -6)
+    local box = NS.CB_CreateEditBox(popup, nil, 344, 20)
+    NS.CB_AnchorBelow(box, label, 4)
     box:SetAutoFocus(true)
     box:SetScript("OnEscapePressed", function(self) self:GetParent():Hide() end)
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     popup.box = box
-
-    if NS.ElvUI_S then NS.ElvUI_S:HandleEditBox(box) end
 
     local closeBtn = NS.CB_CreateButton(popup, nil, "Close", 80, 22, function() popup:Hide() end)
     closeBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 12)

@@ -79,8 +79,6 @@ end
 -- ============================================================
 -- Config + bot detection cache
 -- ============================================================
-NS.ASSUME_ALL_PARTY_ARE_BOTS = false
-
 CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 
 -- ============================================================
@@ -91,10 +89,33 @@ NS.FRAME_HEIGHT      = 560
 NS.TAB_HEIGHT        = 24
 NS.TAB_WIDTH         = 88
 NS.TITLE_H           = 28
-NS.FOOTER_H          = 36
+NS.FOOTER_H          = NS.PAD  -- close button moved to top-right X; only a border margin needed
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 NS.PAD               = 6
+-- Per-element margins — each widget declares the space it needs above and below.
+-- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
+NS.MARGIN_DEFAULTS = {
+    header   = { top = 10, bottom = 4, left = 0, right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
+    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
+    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+}
+-- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
+NS.MARGIN = {
+    header   = { top = 10, bottom = 4, left = 0, right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
+    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
+    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+}
 -- Vertical space reserved below the model for the weapon-slot row.
 -- The model height = contentH - EQUIP_WEAPON_PAD, weapon slots sit in that gap.
 NS.EQUIP_WEAPON_PAD  = 60
@@ -218,7 +239,7 @@ function CleanBot_BuildFrames()
 
     if NS.ElvUI_S then
         CleanBotFrame:StripTextures()
-        NS.ElvUI_S:HandleButton(CleanBotFrameCloseButton)
+        NS.ElvUI_S:HandleCloseButton(CleanBotFrameCloseButton)
     end
     NS.CB_ApplyPanelSkin(CleanBotFrame)
 
@@ -237,6 +258,18 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.favoriteBots) ~= "table" then CleanBot_SavedVars.favoriteBots = {} end
+
+        -- Restore saved margin values, filling in any missing keys with defaults.
+        if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
+        for k, defaults in pairs(NS.MARGIN) do
+            local saved = CleanBot_SavedVars.margins[k]
+            if type(saved) == "table" then
+                if type(saved.top)    == "number" then NS.MARGIN[k].top    = saved.top    end
+                if type(saved.bottom) == "number" then NS.MARGIN[k].bottom = saved.bottom end
+                if type(saved.left)   == "number" then NS.MARGIN[k].left   = saved.left   end
+                if type(saved.right)  == "number" then NS.MARGIN[k].right  = saved.right  end
+            end
+        end
 
         CleanBot_BuildFrames()
         self:UnregisterEvent("PLAYER_LOGIN")

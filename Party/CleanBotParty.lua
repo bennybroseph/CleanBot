@@ -69,8 +69,10 @@ end
 -- ============================================================
 local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable)
     local section = CreateFrame("Frame", nil, ctrl)
-    section:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -12)
-    section:SetPoint("RIGHT",   ctrl,   "RIGHT",       0,   0)
+    section.marginTop    = 2
+    section.marginBottom = 2
+    NS.CB_AnchorBelow(section, anchor)
+    section:SetPoint("RIGHT", ctrl, "RIGHT", 0, 0)
     section:SetHeight(#strategies * 26)
 
     local controls = {}
@@ -200,13 +202,12 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     local strategies  = group.strategies
     local specWhisper = group.whisper
 
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = NS.CB_CreateLabel(parent, group.header)
     if prevBottom then
-        header:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, -12)
+        NS.CB_AnchorBelow(header, prevBottom)
     else
-        header:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
+        header:SetPoint("TOPLEFT", parent, "TOPLEFT", NS.PAD, -NS.PAD)
     end
-    header:SetText(group.header)
 
     local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
                                        "Show Talents", 100, 22, function()
@@ -247,11 +248,11 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             end
         end)
     end)
-    showBtn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
+    NS.CB_AnchorBelow(showBtn, header)
 
     local setBtn = NS.CB_CreateButton(parent, "CleanBotSetTal_" .. tag .. "_" .. gi .. "s",
                                       "Set Talents", 100, 22)
-    setBtn:SetPoint("TOPLEFT", showBtn, "BOTTOMLEFT", 0, -4)
+    NS.CB_AnchorBelow(setBtn, showBtn)
 
     local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. tag .. "_" .. gi, 130)
     dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
@@ -317,16 +318,12 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
         elseif group.type == "roleDropdown" then
             -- Exclusive dropdown that also shows/hides per-role sub-sections.
             local strategies = group.strategies
-            local header = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            if prevBottom then
-                header:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, -12)
-            else
-                header:SetPoint("TOPLEFT", col, "TOPLEFT", 8, -10)
-            end
-            header:SetText(group.header)
+            local header = NS.CB_CreateLabel(col, group.header)
+            if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
 
-            local multiRoleLabel = col:CreateFontString(nil, "OVERLAY", "GameFontRed")
-            multiRoleLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -8)
+            local multiRoleLabel = NS.CB_CreateLabel(col, "Multiple Roles Selected", "GameFontRed")
+            NS.CB_AnchorBelow(multiRoleLabel, header, 4)
             multiRoleLabel:SetText("Multiple Roles Selected")
             multiRoleLabel:Hide()
 
@@ -392,7 +389,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             -- Spacer to hold vertical room for the tallest sub-section.
             local spacer = CreateFrame("Frame", nil, col)
             spacer:SetSize(1, 1)
-            spacer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -(12 + maxSubH))
+            spacer.marginTop    = 0
+            spacer.marginBottom = 0
+            spacer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -(NS.MARGIN.label.bottom + maxSubH))
             prevBottom = spacer
 
             if registry then
@@ -409,16 +408,12 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
         elseif group.type == "dropdown" then
             -- Exclusive dropdown: selection sends cmd +/- for each strategy
             local strategies = group.strategies
-            local header = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            if prevBottom then
-                header:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, -12)
-            else
-                header:SetPoint("TOPLEFT", col, "TOPLEFT", 8, -10)
-            end
-            header:SetText(group.header)
+            local header = NS.CB_CreateLabel(col, group.header)
+            if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. tag .. "_" .. gi, 160)
-            dd:SetPoint("TOPLEFT", header, "BOTTOMLEFT", -16, -4)
+            NS.CB_AnchorBelow(dd, header, -16)
 
             UIDropDownMenu_Initialize(dd, function(self)
                 local cd = getSource(CleanBot_PartyBots[slot.key])
@@ -445,18 +440,16 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             end
             local ddAnchor = CreateFrame("Frame", nil, col)
             ddAnchor:SetSize(1, 1)
+            ddAnchor.marginTop    = 0
+            ddAnchor.marginBottom = 0
             ddAnchor:SetPoint("TOPLEFT", dd, "TOPLEFT", 16, -28)
             prevBottom = ddAnchor
 
         else
             -- Checkbox group
-            local header = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            if prevBottom then
-                header:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, -12)
-            else
-                header:SetPoint("TOPLEFT", col, "TOPLEFT", 8, -10)
-            end
-            header:SetText(group.header)
+            local header = NS.CB_CreateLabel(col, group.header)
+            if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
 
             local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
@@ -496,8 +489,10 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
 
     local colDivider = CreateFrame("Frame", nil, classContent)
     colDivider:SetHeight(1)
+    colDivider.marginTop    = 0
+    colDivider.marginBottom = 0
     if colTopAnchor then
-        colDivider:SetPoint("TOPLEFT", colTopAnchor, "BOTTOMLEFT", 0, -12)
+        NS.CB_AnchorBelow(colDivider, colTopAnchor)
     else
         colDivider:SetPoint("TOPLEFT", classContent, "TOPLEFT", 0, 0)
     end

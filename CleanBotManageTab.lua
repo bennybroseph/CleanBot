@@ -98,12 +98,6 @@ NS.CleanBot_BuildManageContent = function()
             NS.CB_Print("Target is already in your party.")
             return
         end
-        local isKnownBot = CleanBot_PartyBots[strlower(target)] ~= nil
-        if not isKnownBot and not NS.ASSUME_ALL_PARTY_ARE_BOTS then
-            NS.CB_Print("Cannot verify '" .. target ..
-                  "' is a bot. Enable 'Assume all party members are bots' in Settings.")
-            return
-        end
         InviteUnit(target)
     end)
 
@@ -154,9 +148,8 @@ NS.CleanBot_BuildManageContent = function()
     end)
 
     -- ── Favorites section ─────────────────────────────────────
-    local favLabel = NS.managePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local favLabel = NS.CB_CreateLabel(NS.managePanel, "Favorites")
     favLabel:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT", NS.PAD, -(NS.PAD + 120))
-    favLabel:SetText("Favorites")
 
     -- Builds a dropdown populated from provider() (an array of display names).
     -- Selection is cleared on every open, then onSelect(name) fires (with nil on
@@ -211,7 +204,7 @@ NS.CleanBot_BuildManageContent = function()
             SendChatMessage(".playerbots bot add " .. name, "SAY")
         end
     end)
-    inviteAllBtn:SetPoint("TOPLEFT", favLabel, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(inviteAllBtn, favLabel)
 
     local selectedFavName = nil
     local addFavBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotAddFavoriteBtn", "Invite", 60, 24, function()
@@ -221,13 +214,13 @@ NS.CleanBot_BuildManageContent = function()
         end
         SendChatMessage(".playerbots bot add " .. selectedFavName, "SAY")
     end)
-    addFavBtn:SetPoint("TOPLEFT", inviteAllBtn, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(addFavBtn, inviteAllBtn)
     local favDD = makeListDropdown("CleanBotFavoritesDD", addFavBtn, favoritesList,
         "No favorites saved", function(name) selectedFavName = name end)
 
     local selectedDelName = nil
     local delFavBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotDeleteFavoriteBtn", "Delete", 60, 24)
-    delFavBtn:SetPoint("TOPLEFT", addFavBtn, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(delFavBtn, addFavBtn)
     local delFavDD = makeListDropdown("CleanBotFavoritesDelDD", delFavBtn, favoritesList,
         "No favorites saved", function(name) selectedDelName = name end)
     delFavBtn:SetScript("OnClick", function()
@@ -249,9 +242,8 @@ NS.CleanBot_BuildManageContent = function()
     end)
 
     -- ── Altbots section ───────────────────────────────────────
-    local altLabel = NS.managePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    altLabel:SetPoint("TOPLEFT", delFavBtn, "BOTTOMLEFT", 0, -20)
-    altLabel:SetText("Altbots")
+    local altLabel = NS.CB_CreateLabel(NS.managePanel, "Altbots")
+    NS.CB_AnchorBelow(altLabel, delFavBtn)
 
     -- Linked accounts, as stored (already an array of display names).
     local function linkedAccountsList() return NS.linkedAccounts end
@@ -260,7 +252,7 @@ NS.CleanBot_BuildManageContent = function()
     local linkAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotLinkAltBtn", "Link Account", 100, 24, function()
         StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_NAME")
     end)
-    linkAltBtn:SetPoint("TOPLEFT", altLabel, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(linkAltBtn, altLabel)
 
     -- Invite All
     local inviteAllAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotInviteAllAltBtn", "Invite All", 100, 24, function()
@@ -273,7 +265,7 @@ NS.CleanBot_BuildManageContent = function()
             SendChatMessage(".playerbots bot addaccount " .. name, "SAY")
         end
     end)
-    inviteAllAltBtn:SetPoint("TOPLEFT", linkAltBtn, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(inviteAllAltBtn, linkAltBtn)
 
     -- Invite Account + dropdown + Refresh List
     local selectedAltAccount = nil
@@ -284,7 +276,7 @@ NS.CleanBot_BuildManageContent = function()
         end
         SendChatMessage(".playerbots bot addaccount " .. selectedAltAccount, "SAY")
     end)
-    addAltBtn:SetPoint("TOPLEFT", inviteAllAltBtn, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(addAltBtn, inviteAllAltBtn)
 
     local altDD = makeListDropdown("CleanBotAltAccountDD", addAltBtn, linkedAccountsList,
         "No accounts found", function(name) selectedAltAccount = name end)
@@ -297,7 +289,7 @@ NS.CleanBot_BuildManageContent = function()
     -- Unlink Account + dropdown
     local selectedUnlinkAccount = nil
     local unlinkAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotUnlinkAltBtn", "Unlink Account", 100, 24)
-    unlinkAltBtn:SetPoint("TOPLEFT", addAltBtn, "BOTTOMLEFT", 0, -8)
+    NS.CB_AnchorBelow(unlinkAltBtn, addAltBtn)
 
     local unlinkDD = makeListDropdown("CleanBotUnlinkAccountDD", unlinkAltBtn, linkedAccountsList,
         "No accounts found", function(name) selectedUnlinkAccount = name end)
