@@ -144,6 +144,7 @@ local function showSampleLayout()
 
     if not sampleLayoutFrame then
         local f = CreateFrame("Frame", "CleanBotSampleLayoutFrame", UIParent)
+        NS.CB_RegisterRootFrame(f)
         f:SetSize(380, 520)
         f:SetPoint("TOPLEFT", CleanBotFrame, "TOPRIGHT", 4, 0)
         f:SetFrameStrata("DIALOG")
@@ -205,9 +206,11 @@ NS.CleanBot_BuildSettingsContent = function()
     local SUB_TAB_H = NS.TOP_BAR_H
 
     -- ── Pending values ─────────────────────────────────────────
-    local pendingScale        = 100
-    local pendingTransparency = 100
-    local pendingAccentR, pendingAccentG, pendingAccentB = 1, 1, 1
+    local pendingScale        = NS.scale
+    local pendingTransparency = NS.transparency
+    local pendingAccentR      = NS.accentColor.r
+    local pendingAccentG      = NS.accentColor.g
+    local pendingAccentB      = NS.accentColor.b
 
     local pendingMargins = {}
     for k, v in pairs(NS.MARGIN) do
@@ -306,18 +309,18 @@ NS.CleanBot_BuildSettingsContent = function()
 
     -- ── Scale ──────────────────────────────────────────────────
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
-        50, 150, 100, "50%", "150%", function(v) pendingScale = v end)
+        50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v end)
     scaleSlider:SetWidth(SLIDER_W)
     scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT", PAD, -PAD)
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
-        0, 100, 100, "0%", "100%", function(v) pendingTransparency = v end)
+        0, 100, pendingTransparency, "0%", "100%", function(v) pendingTransparency = v end)
     transSlider:SetWidth(SLIDER_W)
     NS.CB_AnchorBelow(transSlider, scaleSlider)
 
     -- ── Accent Color ───────────────────────────────────────────
-    local colorSwatch = NS.CB_CreateColorSwatch(themeChild, "CleanBotAccentSwatch", "Accent Color", 1, 1, 1,
+    local colorSwatch = NS.CB_CreateColorSwatch(themeChild, "CleanBotAccentSwatch", "Accent Color", NS.accentColor.r, NS.accentColor.g, NS.accentColor.b,
         function(r, g, b)
             pendingAccentR, pendingAccentG, pendingAccentB = r, g, b
         end)
@@ -488,9 +491,11 @@ NS.CleanBot_BuildSettingsContent = function()
 
     -- ── Action buttons ─────────────────────────────────────────
     local defaultsBtn = NS.CB_CreateButton(panel, "CleanBotDefaultsSettings", "Defaults", 80, 22, function()
-        pendingScale        = 100
-        pendingTransparency = 100
-        pendingAccentR, pendingAccentG, pendingAccentB = 1, 1, 1
+        pendingScale        = NS.THEME_DEFAULTS.scale
+        pendingTransparency = NS.THEME_DEFAULTS.transparency
+        pendingAccentR      = NS.THEME_DEFAULTS.accentColor.r
+        pendingAccentG      = NS.THEME_DEFAULTS.accentColor.g
+        pendingAccentB      = NS.THEME_DEFAULTS.accentColor.b
         for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
             pendingMargins[k].top    = defaults.top
             pendingMargins[k].bottom = defaults.bottom
@@ -502,9 +507,11 @@ NS.CleanBot_BuildSettingsContent = function()
     defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD)
 
     local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
-        pendingScale        = 100
-        pendingTransparency = 100
-        pendingAccentR, pendingAccentG, pendingAccentB = 1, 1, 1
+        pendingScale        = NS.scale
+        pendingTransparency = NS.transparency
+        pendingAccentR      = NS.accentColor.r
+        pendingAccentG      = NS.accentColor.g
+        pendingAccentB      = NS.accentColor.b
         local saved = CleanBot_SavedVars and CleanBot_SavedVars.margins
         for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
             local s = saved and saved[k]
@@ -525,9 +532,24 @@ NS.CleanBot_BuildSettingsContent = function()
     cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -PAD, PAD)
 
     local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
-        -- TODO: apply pendingScale to frame scale
-        -- TODO: apply pendingTransparency to frame alpha
-        -- TODO: apply pendingAccentR/G/B as accent color
+        -- Scale
+        NS.scale = pendingScale
+        NS.CB_RefreshScale(NS.scale)
+        CleanBot_SavedVars.scale = NS.scale
+
+        -- Transparency (backdrop alpha only — does not cascade to children)
+        NS.transparency = pendingTransparency
+        NS.CB_RefreshTransparency(NS.transparency)
+        CleanBot_SavedVars.transparency = NS.transparency
+
+        -- Accent Color (border colour on all skinned frames, ElvUI and non-ElvUI)
+        NS.accentColor.r = pendingAccentR
+        NS.accentColor.g = pendingAccentG
+        NS.accentColor.b = pendingAccentB
+        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB)
+        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB }
+
+        -- Margins
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
         for k, v in pairs(pendingMargins) do
             NS.MARGIN[k].top    = v.top
@@ -539,7 +561,7 @@ NS.CleanBot_BuildSettingsContent = function()
         if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
             buildSampleContent(sampleLayoutFrame._body)
         end
-        NS.CB_Print("Margin values saved. Reload the UI to see layout changes.")
+        NS.CB_Print("Settings saved. Reload the UI to apply margin changes.")
     end)
     applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT", -8, 0)
 

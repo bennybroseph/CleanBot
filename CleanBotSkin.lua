@@ -37,26 +37,84 @@ NS.PLAIN_BACKDROP = {
 -- ============================================================
 -- Skinning helpers
 -- ============================================================
-NS.CB_ApplyPanelSkin = function(frame)
+
+-- Registry of all top-level CleanBot windows (UIParent children).
+-- Each frame registered here receives SetScale on theme apply.
+-- Call NS.CB_RegisterRootFrame(f) immediately after creating any
+-- top-level CleanBot window.
+NS.CB_rootFrames = {}
+-- Registers a top-level CleanBot window and immediately applies the current
+-- scale so lazily-created frames (inventory, sample layout) get the right
+-- value even when they open after the scale was last changed.
+NS.CB_RegisterRootFrame = function(frame)
+    NS.CB_rootFrames[frame] = true
+    frame:SetScale((NS.scale or 100) / 100)
+end
+
+-- Registry of frames skinned by CB_ApplyPanelSkin / CB_ApplyInnerSkin.
+-- Stores the skin type ("panel" | "inner") so transparency refresh
+-- knows which base alpha to use. Both ElvUI and non-ElvUI frames are
+-- registered so that accent colour and transparency always apply.
+NS.CB_skinnedFrames = {}
+
+-- Re-applies accent colour to every registered skinned frame.
+NS.CB_RefreshAccentColor = function(r, g, b)
+    for frame, _ in pairs(NS.CB_skinnedFrames) do
+        frame:SetBackdropBorderColor(r, g, b, 1)
+    end
+end
+
+-- Re-applies background transparency to every registered panel frame.
+-- t is 0–100; 100 = fully opaque, 0 = fully transparent.
+-- Inner frames keep their fixed 0.4 alpha and are not affected.
+-- Each panel frame's stored brightness is used so nesting shades are preserved.
+NS.CB_RefreshTransparency = function(t)
+    local alpha = (t or 100) / 100
+    for frame, info in pairs(NS.CB_skinnedFrames) do
+        if info.skin == "panel" then
+            local b = info.brightness
+            frame:SetBackdropColor(b, b, b, alpha)
+        end
+    end
+end
+
+-- Re-applies scale to every registered root frame.
+NS.CB_RefreshScale = function(s)
+    local scale = (s or 100) / 100
+    for frame, _ in pairs(NS.CB_rootFrames) do
+        frame:SetScale(scale)
+    end
+end
+
+-- nestLevel controls fill darkness: 0 = lightest (outermost), 1 = one step darker, etc.
+-- Brightness formula: max(0, 0.10 - nestLevel * 0.05)
+--   Level 0 → 0.10,  Level 1 → 0.05,  Level 2 → 0.0
+NS.CB_ApplyPanelSkin = function(frame, nestLevel)
+    local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3 }
+    local alpha      = (NS.transparency or 100) / 100
+    local brightness = math.max(0, 0.10 - (nestLevel or 0) * 0.05)
     if NS.ElvUI_S then
         frame:StripTextures()
         frame:SetTemplate("Default")
     else
         frame:SetBackdrop(NS.PLAIN_BACKDROP)
-        frame:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-        frame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     end
+    frame:SetBackdropColor(brightness, brightness, brightness, alpha)
+    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
+    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness }
 end
 
 NS.CB_ApplyInnerSkin = function(frame)
+    local ac = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3 }
     if NS.ElvUI_S then
         frame:StripTextures()
         frame:SetTemplate("Transparent")
     else
         frame:SetBackdrop(NS.PLAIN_BACKDROP)
-        frame:SetBackdropColor(0, 0, 0, 0.4)
-        frame:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.8)
+        frame:SetBackdropColor(0, 0, 0, 0.4)  -- fixed; transparency setting only affects panel frames
     end
+    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
+    NS.CB_skinnedFrames[frame] = { skin = "inner" }
 end
 
 -- ============================================================

@@ -105,8 +105,18 @@ NS.MARGIN_DEFAULTS = {
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
--- Feature flags — mutated at login from SavedVars, and by the Settings Apply button.
-NS.botEmotes = true
+-- Canonical defaults for theme settings — read by the Defaults button.
+NS.THEME_DEFAULTS = {
+    scale       = 100,
+    transparency = 90,
+    accentColor = { r = 0.0, g = 0.0, b = 0.0 },
+}
+
+-- Feature flags and theme values — mutated at login from SavedVars, and by the Settings Apply button.
+NS.botEmotes    = true
+NS.scale        = NS.THEME_DEFAULTS.scale
+NS.transparency = NS.THEME_DEFAULTS.transparency
+NS.accentColor  = { r = NS.THEME_DEFAULTS.accentColor.r, g = NS.THEME_DEFAULTS.accentColor.g, b = NS.THEME_DEFAULTS.accentColor.b }
 
 -- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
 NS.MARGIN = {
@@ -267,6 +277,20 @@ initFrame:SetScript("OnEvent", function(self, event)
             NS.botEmotes = CleanBot_SavedVars.botEmotes
         end
 
+        -- Restore theme values.
+        if type(CleanBot_SavedVars.scale) == "number" then
+            NS.scale = CleanBot_SavedVars.scale
+        end
+        if type(CleanBot_SavedVars.transparency) == "number" then
+            NS.transparency = CleanBot_SavedVars.transparency
+        end
+        if type(CleanBot_SavedVars.accentColor) == "table" then
+            local ac = CleanBot_SavedVars.accentColor
+            if type(ac.r) == "number" then NS.accentColor.r = ac.r end
+            if type(ac.g) == "number" then NS.accentColor.g = ac.g end
+            if type(ac.b) == "number" then NS.accentColor.b = ac.b end
+        end
+
         -- Restore saved margin values, filling in any missing keys with defaults.
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
         for k, defaults in pairs(NS.MARGIN) do
@@ -279,7 +303,12 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
         end
 
+        NS.CB_RegisterRootFrame(CleanBotFrame)
         CleanBot_BuildFrames()
+        NS.CB_RefreshScale(NS.scale)
+        NS.CB_RefreshTransparency(NS.transparency)
+        -- Accent colour is baked in during CB_ApplyPanelSkin/InnerSkin calls inside
+        -- CleanBot_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

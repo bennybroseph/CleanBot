@@ -129,6 +129,7 @@ NS.CB_GetInventoryFrame = function(key, botName)
 
     local frameW = FRAME_PAD * 2 + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
     local f = CreateFrame("Frame", "CleanBotInventory_" .. key, UIParent)
+    NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
     f:SetHeight(300)   -- dynamic; resized in CB_RenderInventory
     f:SetFrameStrata("HIGH")

@@ -15,7 +15,7 @@
 
         <Layers>
             <Layer level="ARTWORK">
-                <FontString name="$parentTitle" inherits="GameFontNormal" text="Bot Manager">
+                <FontString name="$parentTitle" inherits="GameFontNormal" text="CleanBot">
                     <Anchors>
                         <Anchor point="TOP" y="-10"/>
                     </Anchors>
