@@ -105,6 +105,9 @@ NS.MARGIN_DEFAULTS = {
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
+-- Feature flags — mutated at login from SavedVars, and by the Settings Apply button.
+NS.botEmotes = true
+
 -- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
 NS.MARGIN = {
     header   = { top = 10, bottom = 4, left = 0, right = 0 },
@@ -258,6 +261,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.favoriteBots) ~= "table" then CleanBot_SavedVars.favoriteBots = {} end
+
+        -- Restore feature flags.
+        if type(CleanBot_SavedVars.botEmotes) == "boolean" then
+            NS.botEmotes = CleanBot_SavedVars.botEmotes
+        end
 
         -- Restore saved margin values, filling in any missing keys with defaults.
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end

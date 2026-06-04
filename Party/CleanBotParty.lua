@@ -76,47 +76,48 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     section:SetHeight(#strategies * 26)
 
     local controls = {}
-    local rowIndex = 0
+    local yOffset  = 0   -- accumulated y position within section
+
     for _, s in ipairs(strategies) do
-        if s.type == "timerDropdown" then
-            local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("TOPLEFT", section, "TOPLEFT", 28, -(rowIndex * 26) - 3)
-            lbl:SetText(s.name .. ":")
+        if s.type == "timerSlider" then
+            local slMin   = s.min or 0
+            local slMax   = s.max or 60
+            local initVal = sourceTable and sourceTable[s.field] or slMin
 
-            local dd = NS.CB_CreateDropdown(section, "CleanBotTimerDD_" .. s.field .. "_" .. tag, 80)
-            dd:SetPoint("LEFT", lbl, "RIGHT", -8, -1)
-
-            local strat = s
-            UIDropDownMenu_Initialize(dd, function(self)
-                local src = sourceTable
-                for _, v in ipairs(strat.values) do
-                    local info           = UIDropDownMenu_CreateInfo()
-                    info.text            = v .. " sec"
-                    info.value           = v
-                    info.notCheckable    = false
-                    info.tooltipTitle    = strat.name
-                    info.tooltipText     = strat.desc
-                    info.tooltipOnButton = 1
-                    info.func            = function()
-                        UIDropDownMenu_SetText(self, v .. " sec")
+            local dragging = false
+            local ready    = false  -- suppresses the SetValue fired during construction
+            local strat    = s
+            local sl = NS.CB_CreateSlider(section, "CleanBotTimerSL_" .. s.field .. "_" .. tag,
+                s.name, slMin, slMax, initVal, tostring(slMin), tostring(slMax),
+                function(v)
+                    -- Editbox path: ready=true, dragging=false → send immediately.
+                    -- Drag path: suppressed here; OnMouseUp sends once on release.
+                    -- Construction path: ready=false → suppressed.
+                    if ready and not dragging then
                         NS.CB_SendBotCommand(slot.name, strat.cmd .. " " .. v)
                         local e = CleanBot_PartyBots[slot.key]
                         if e and e.combat then e.combat[strat.field] = v end
                     end
-                    info.checked = src and (src[strat.field] == v)
-                    UIDropDownMenu_AddButton(info)
-                end
+                end)
+            ready = true
+            sl:SetWidth(140)
+            sl:SetPoint("TOPLEFT", section, "TOPLEFT", 0, -yOffset)
+
+            sl.slider:SetScript("OnMouseDown", function() dragging = true end)
+            sl.slider:SetScript("OnMouseUp", function()
+                dragging = false
+                local v = math.floor(sl.slider:GetValue() + 0.5)
+                NS.CB_SendBotCommand(slot.name, strat.cmd .. " " .. v)
+                local e = CleanBot_PartyBots[slot.key]
+                if e and e.combat then e.combat[strat.field] = v end
             end)
 
-            local initVal = sourceTable and sourceTable[s.field]
-            UIDropDownMenu_SetText(dd, initVal and (initVal .. " sec") or "")
-
-            controls[s.field] = dd
-            rowIndex = rowIndex + 1
+            controls[s.field] = sl
+            yOffset = yOffset + 54
         else
             local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
             cb:SetSize(20, 20)
-            cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -rowIndex * 26)
+            cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -yOffset)
 
             local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
@@ -151,22 +152,28 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             end
 
             controls[s.field] = cb
-            rowIndex = rowIndex + 1
+            yOffset = yOffset + 26
         end
     end
 
-    -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked dropdown.
+    section:SetHeight(yOffset)
+
+    -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked slider.
     for _, s in ipairs(strategies) do
-        if s.type == "timerDropdown" and s.dependsOn then
+        if s.type == "timerSlider" and s.dependsOn then
             local cb = controls[s.dependsOn]
-            local dd = controls[s.field]
-            if cb and dd then
-                if not cb:GetChecked() then UIDropDownMenu_DisableDropDown(dd) end
+            local sl = controls[s.field]
+            if cb and sl then
+                local function setSliderEnabled(enabled)
+                    sl:SetAlpha(enabled and 1 or 0.4)
+                    sl.slider:EnableMouse(enabled)
+                    sl.editBox:EnableMouse(enabled)
+                end
+                setSliderEnabled(cb:GetChecked())
                 local orig = cb:GetScript("OnClick")
                 cb:SetScript("OnClick", function(self)
                     if orig then orig(self) end
-                    if self:GetChecked() then UIDropDownMenu_EnableDropDown(dd)
-                    else UIDropDownMenu_DisableDropDown(dd) end
+                    setSliderEnabled(self:GetChecked() and true or false)
                 end)
             end
         end
@@ -625,7 +632,8 @@ end
 -- ============================================================
 local CleanBot_SelectTab  -- forward declaration (used inside slot closures)
 
-CleanBot_SelectTab = function(index)
+-- silent=true suppresses the emote wave for programmatic selections (e.g. RefreshTabs).
+CleanBot_SelectTab = function(index, silent)
     if not index or index < 1 or index > #NS.tabList then return end
     local slot = NS.tabList[index]
     NS.selectedTabIndex = index
@@ -639,10 +647,10 @@ CleanBot_SelectTab = function(index)
         if sel then t.ctrl:Show()   else t.ctrl:Hide()   end
     end
 
-    if slot.name ~= NS.lastWavedAt then
-        NS.lastWavedAt = slot.name
+    if not silent and NS.botEmotes and slot.name ~= NS.lastWavedAt then
         NS.CB_SendBotCommand(slot.name, "emote wave")
     end
+    NS.lastWavedAt = slot.name  -- always track so the first user click on the active tab doesn't re-fire
 end
 
 -- ============================================================
@@ -868,7 +876,7 @@ NS.CleanBot_RefreshTabs = function()
         end
     end
     NS.selectedTabIndex = 0   -- force SelectTab to re-apply (slots may have rebound)
-    CleanBot_SelectTab(restoreIdx or 1)
+    CleanBot_SelectTab(restoreIdx or 1, true)
 end
 
 -- ============================================================
@@ -887,12 +895,14 @@ NS.CB_UpdateTabData = function(key)
         for _, s in ipairs(stratList) do
             local ctrl = controls[s.field]
             if not ctrl then
-            elseif s.type == "timerDropdown" then
+            elseif s.type == "timerSlider" then
                 local val = source[s.field]
-                UIDropDownMenu_SetText(ctrl, val and (val .. " sec") or "")
+                ctrl:SetValue(val or s.min or 0)
                 if s.dependsOn then
-                    if source[s.dependsOn] then UIDropDownMenu_EnableDropDown(ctrl)
-                    else UIDropDownMenu_DisableDropDown(ctrl) end
+                    local enabled = source[s.dependsOn] and true or false
+                    ctrl:SetAlpha(enabled and 1 or 0.4)
+                    ctrl.slider:EnableMouse(enabled)
+                    ctrl.editBox:EnableMouse(enabled)
                 end
             else
                 ctrl:SetChecked(source[s.field] == true)

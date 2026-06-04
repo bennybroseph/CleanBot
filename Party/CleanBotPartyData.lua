@@ -70,8 +70,8 @@ NS.STRATEGIES = {
         column = "right",
         strategies = {
             { cmd = "wait for attack",      field = "waitAttack",    name = "Enable Wait to Attack", desc = "Wait a set time before attacking or healing" },
-            { cmd = "wait for attack time", field = "waitAttackTime", name = "Attack Delay",
-              type = "timerDropdown", values = {1, 3, 5, 10}, dependsOn = "waitAttack",
+            { cmd = "wait for attack time", field = "waitAttackTime", name = "Delay",
+              type = "timerSlider", min = 1, max = 10, dependsOn = "waitAttack",
               desc = "Seconds to wait before attacking or healing" },
         },
     },

@@ -230,6 +230,11 @@ NS.CleanBot_BuildSettingsContent = function()
     layoutPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
     layoutPanel:Hide()
 
+    local otherPanel = CreateFrame("Frame", "CleanBotOtherPanel", panel)
+    otherPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
+    otherPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
+    otherPanel:Hide()
+
     -- ── Sub-tab switching ──────────────────────────────────────
     local subTabs      = {}
     local activeSubTab = 0
@@ -246,12 +251,15 @@ NS.CleanBot_BuildSettingsContent = function()
                 tab:SetButtonState("NORMAL")
             end
         end
+        themePanel:Hide()
+        layoutPanel:Hide()
+        otherPanel:Hide()
         if index == 1 then
             themePanel:Show()
-            layoutPanel:Hide()
-        else
-            themePanel:Hide()
+        elseif index == 2 then
             layoutPanel:Show()
+        else
+            otherPanel:Show()
         end
     end
 
@@ -266,6 +274,12 @@ NS.CleanBot_BuildSettingsContent = function()
     layoutTab:SetPoint("LEFT", themeTab, "RIGHT", 2, 0)
     layoutTab:SetNormalFontObject(GameFontNormalSmall)
     subTabs[2] = layoutTab
+
+    local otherTab = NS.CB_CreateButton(subTabBar, "CleanBotSettingsOtherTab", "Other",
+        NS.TAB_WIDTH, NS.TAB_HEIGHT, function() selectSubTab(3) end)
+    otherTab:SetPoint("LEFT", layoutTab, "RIGHT", 2, 0)
+    otherTab:SetNormalFontObject(GameFontNormalSmall)
+    subTabs[3] = otherTab
 
     -- ── Theme tab: ScrollFrame ─────────────────────────────────
     local themeSF = CreateFrame("ScrollFrame", "CleanBotThemeScroll", themePanel, "UIPanelScrollFrameTemplate")
@@ -420,6 +434,44 @@ NS.CleanBot_BuildSettingsContent = function()
             prevRow = sep
         end
     end
+
+    -- ── Other tab: Bot Emotes ──────────────────────────────────
+    local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behaviour")
+    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT", PAD, -PAD)
+
+    local botEmotesCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotBotEmotesCB")
+    botEmotesCB:SetChecked(NS.botEmotes)
+    NS.CB_AnchorBelow(botEmotesCB, botEmotesHeader)
+
+    -- A small invisible frame over the label text catches mouse events for the tooltip.
+    local botEmotesCBLbl = otherPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    botEmotesCBLbl:SetText("Enable Bot Emotes")
+    botEmotesCBLbl:SetPoint("LEFT", botEmotesCB, "RIGHT", 2, 0)
+
+    local botEmotesCBLblHit = CreateFrame("Frame", nil, otherPanel)
+    botEmotesCBLblHit:SetPoint("LEFT",  botEmotesCBLbl, "LEFT",  0,  0)
+    botEmotesCBLblHit:SetPoint("RIGHT", botEmotesCBLbl, "RIGHT", 0,  0)
+    botEmotesCBLblHit:SetHeight(20)
+    botEmotesCBLblHit:EnableMouse(true)
+
+    -- Tooltip on hover over the checkbox or its label.
+    local EMOTE_TOOLTIP = "When enabled, switching to a bot's party tab sends an \"emote wave\" command, making them wave at you."
+    local function showEmoteTooltip(anchor)
+        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+        GameTooltip:SetText(EMOTE_TOOLTIP, nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end
+    botEmotesCB:SetScript("OnEnter",       function(self) showEmoteTooltip(self) end)
+    botEmotesCB:SetScript("OnLeave",       function()     GameTooltip:Hide()     end)
+    botEmotesCBLblHit:SetScript("OnEnter", function(self) showEmoteTooltip(self) end)
+    botEmotesCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()     end)
+
+    botEmotesCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        self:SetChecked(checked)
+        NS.botEmotes = checked
+        CleanBot_SavedVars.botEmotes = checked
+    end)
 
     -- ── Sync helper ────────────────────────────────────────────
     local function syncPendingToUI()
