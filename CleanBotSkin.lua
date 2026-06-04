@@ -25,13 +25,35 @@ NS.CB_InitElvUI = function()
 end
 
 -- ============================================================
--- Fallback backdrop (used when ElvUI is absent)
+-- Fallback backdrops (used when ElvUI is absent)
 -- ============================================================
+
+-- Thin tooltip-style border — used for inner panels and secondary windows.
 NS.PLAIN_BACKDROP = {
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 12,
     insets = { left = 3, right = 3, top = 3, bottom = 3 },
+}
+
+-- Panel backdrop using a pure-white bgFile so that SetBackdropColor(r,g,b,a) maps
+-- directly to the displayed colour. UI-DialogBox-Background is dark (~20% brightness),
+-- which means vertex-colour multiplication makes every brightness value look near-black.
+-- WHITE8X8 has full (1,1,1) pixel values so brightness = displayed colour exactly.
+NS.PANEL_BACKDROP = {
+    bgFile   = "Interface\\BUTTONS\\WHITE8X8",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 12,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 },
+}
+
+-- Ornate WoW dialog border — used only for the main CleanBotFrame so it
+-- reads as a proper WoW window rather than a generic panel.
+NS.OUTER_BACKDROP = {
+    bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 32,
+    insets = { left = 11, right = 12, top = 12, bottom = 11 },
 }
 
 -- ============================================================
@@ -51,29 +73,41 @@ NS.CB_RegisterRootFrame = function(frame)
     frame:SetScale((NS.scale or 100) / 100)
 end
 
--- Registry of frames skinned by CB_ApplyPanelSkin / CB_ApplyInnerSkin.
--- Stores the skin type ("panel" | "inner") so transparency refresh
--- knows which base alpha to use. Both ElvUI and non-ElvUI frames are
--- registered so that accent colour and transparency always apply.
+-- Registry of frames skinned by CB_ApplyPanelSkin / CB_ApplyOuterFrameSkin.
+-- Each entry stores { skin, brightness, level } so refresh functions can
+-- recompute both brightness and per-level alpha without re-calling the skin function.
 NS.CB_skinnedFrames = {}
 
+-- Non-ElvUI only: each nesting level multiplies the base alpha by this factor,
+-- making deeper frames progressively more transparent to compensate for layering.
+-- Applied exponentially: effective_alpha = base_alpha * TRANSPARENCY_FALLOFF ^ level
+local TRANSPARENCY_FALLOFF = 0.85
+
+local function CB_LevelAlpha(baseAlpha, level)
+    if NS.ElvUI_S then return baseAlpha end
+    local factor = 1
+    for _ = 1, level do factor = factor * TRANSPARENCY_FALLOFF end
+    return baseAlpha * factor
+end
+
 -- Re-applies accent colour to every registered skinned frame.
-NS.CB_RefreshAccentColor = function(r, g, b)
+-- a defaults to 1 (fully opaque) when omitted.
+NS.CB_RefreshAccentColor = function(r, g, b, a)
+    local alpha = a or 1
     for frame, _ in pairs(NS.CB_skinnedFrames) do
-        frame:SetBackdropBorderColor(r, g, b, 1)
+        frame:SetBackdropBorderColor(r, g, b, alpha)
     end
 end
 
 -- Re-applies background transparency to every registered panel frame.
 -- t is 0–100; 100 = fully opaque, 0 = fully transparent.
--- Inner frames keep their fixed 0.4 alpha and are not affected.
--- Each panel frame's stored brightness is used so nesting shades are preserved.
+-- Non-ElvUI frames additionally apply per-level exponential falloff.
 NS.CB_RefreshTransparency = function(t)
-    local alpha = (t or 100) / 100
+    local baseAlpha = (t or 100) / 100
     for frame, info in pairs(NS.CB_skinnedFrames) do
         if info.skin == "panel" then
-            local b = info.brightness
-            frame:SetBackdropColor(b, b, b, alpha)
+            frame:SetBackdropColor(info.brightness, info.brightness, info.brightness,
+                CB_LevelAlpha(baseAlpha, info.level))
         end
     end
 end
@@ -86,34 +120,60 @@ NS.CB_RefreshScale = function(s)
     end
 end
 
--- nestLevel controls fill darkness: 0 = lightest (outermost), 1 = one step darker, etc.
--- Brightness formula: max(0, 0.10 - nestLevel * 0.05)
---   Level 0 → 0.10,  Level 1 → 0.05,  Level 2 → 0.0
-NS.CB_ApplyPanelSkin = function(frame, nestLevel)
-    local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3 }
+-- Variant of CB_ApplyPanelSkin used exclusively for the main CleanBotFrame.
+-- Non-ElvUI path uses the thick ornate WoW dialog border (NS.OUTER_BACKDROP)
+-- instead of the thin tooltip border so the window reads as a native WoW dialog.
+-- ElvUI path is identical to CB_ApplyPanelSkin (SetTemplate replaces all art anyway).
+NS.CB_ApplyOuterFrameSkin = function(frame)
+    local ac         = NS.accentColor or { r = 0.0, g = 0.0, b = 0.0, a = 0 }
     local alpha      = (NS.transparency or 100) / 100
-    local brightness = math.max(0, 0.10 - (nestLevel or 0) * 0.05)
+    -- ElvUI: outermost is lightest (0.10); non-ElvUI: outermost is darkest (0.0) and
+    -- inner frames get progressively brighter, reversing the nesting direction.
+    local brightness = NS.ElvUI_S and 0.10 or 0.0
     if NS.ElvUI_S then
         frame:StripTextures()
         frame:SetTemplate("Default")
     else
-        frame:SetBackdrop(NS.PLAIN_BACKDROP)
+        frame:SetBackdrop(NS.OUTER_BACKDROP)
     end
-    frame:SetBackdropColor(brightness, brightness, brightness, alpha)
-    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
-    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness }
+    frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, 0))
+    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
+    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = 0 }
+end
+
+-- nestLevel controls fill brightness relative to the outermost frame.
+-- ElvUI:     level 0 = 0.10 (lightest), gets darker inward  — max(0, 0.10 - level * 0.05)
+-- Non-ElvUI: level 0 = 0.00 (darkest),  gets lighter inward — level * 0.15
+--   A large step is needed because SetBackdropColor is a vertex-colour multiply against
+--   the UI-DialogBox-Background texture, which is already dark. Small steps (0.05) result
+--   in visually indistinguishable near-black values at every level.
+-- Both paths store brightness in CB_skinnedFrames so CB_RefreshTransparency preserves shading.
+NS.CB_ApplyPanelSkin = function(frame, nestLevel)
+    local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
+    local alpha      = (NS.transparency or 100) / 100
+    local level      = nestLevel or 0
+    local brightness = NS.ElvUI_S and math.max(0, 0.10 - level * 0.05) or (level * 0.05)
+    if NS.ElvUI_S then
+        frame:StripTextures()
+        frame:SetTemplate("Default")
+    else
+        frame:SetBackdrop(NS.PANEL_BACKDROP)
+    end
+    frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, level))
+    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
+    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = level }
 end
 
 NS.CB_ApplyInnerSkin = function(frame)
-    local ac = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3 }
+    local ac = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
     if NS.ElvUI_S then
         frame:StripTextures()
         frame:SetTemplate("Transparent")
     else
-        frame:SetBackdrop(NS.PLAIN_BACKDROP)
+        frame:SetBackdrop(NS.PANEL_BACKDROP)
         frame:SetBackdropColor(0, 0, 0, 0.4)  -- fixed; transparency setting only affects panel frames
     end
-    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
+    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
     NS.CB_skinnedFrames[frame] = { skin = "inner" }
 end
 
@@ -220,6 +280,34 @@ NS.CB_CreateCheckBox = function(parent, name)
     cb.marginLeft   = NS.MARGIN.checkbox.left
     cb.marginRight  = NS.MARGIN.checkbox.right
     return cb
+end
+
+-- Tab button built on UIPanelButtonTemplate.
+-- PanelTabButtonTemplate does not exist in WoW 3.3.5a, so we use the standard
+-- button template and layer the active/inactive visual state on top.
+-- Exposes tab:SetActive(bool) so call sites do not need to manage font objects
+-- or button states directly.
+-- ElvUI is applied via HandleButton when available.
+NS.CB_CreateTab = function(parent, name, text, onClick)
+    local tab = CreateFrame("Button", name, parent, "UIPanelButtonTemplate")
+    tab:SetSize(NS.TAB_WIDTH, NS.TAB_HEIGHT)
+    if text    then tab:SetText(text)                   end
+    if onClick then tab:SetScript("OnClick", onClick)   end
+    if NS.ElvUI_S then NS.ElvUI_S:HandleButton(tab)     end
+
+    -- Unified active/inactive toggle.
+    tab.SetActive = function(self, active)
+        if active then
+            self:SetNormalFontObject(GameFontHighlightSmall)
+            self:SetButtonState("PUSHED", true)
+        else
+            self:SetNormalFontObject(GameFontNormalSmall)
+            self:SetButtonState("NORMAL", false)
+        end
+    end
+
+    tab:SetActive(false)  -- start inactive
+    return tab
 end
 
 -- Applies an ElvUI-matching skin to an EditBox using SetBackdrop directly,
@@ -402,11 +490,19 @@ CleanBotFrame:HookScript("OnMouseDown", CB_ClearKeyboardFocus)
 
 -- Wrapper containing a 20×20 colored swatch button on the left and an optional
 -- text label to its right, aligned to the same vertical centre.
--- Clicking the swatch opens the WoW ColorPickerFrame; onChange(r, g, b) fires
--- on both confirm and cancel. initR/G/B seed the starting color (default white).
--- The wrapper exposes :setColor(r, g, b) and a .swatch texture reference.
-NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onChange)
+-- Clicking the swatch opens the WoW ColorPickerFrame.
+--
+-- showAlpha (optional bool): when true, the picker shows an opacity slider and
+--   onChange(r, g, b, a) fires with all four channels.
+--   When false/nil, onChange(r, g, b) fires as before (backward compatible).
+-- initA (optional number 0–1): starting alpha when showAlpha is true. Defaults to 1.
+--
+-- The wrapper exposes :setColor(r, g, b [, a]) and a .swatch texture reference.
+-- WoW's ColorPickerFrame uses an inverted opacity convention: opacity 0 = fully opaque,
+-- opacity 1 = fully transparent. We convert: opacity = 1 - a on the way in/out.
+NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onChange, showAlpha, initA)
     local r, g, b = initR or 1, initG or 1, initB or 1
+    local a       = (showAlpha and initA) or 1
 
     local wrapper = CreateFrame("Frame", nil, parent)
     wrapper:SetSize(160, 20)
@@ -418,7 +514,7 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     local swatch = btn:CreateTexture(nil, "BACKGROUND")
     swatch:SetAllPoints()
     swatch:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
-    swatch:SetVertexColor(r, g, b)
+    swatch:SetVertexColor(r, g, b, a)
     btn.swatch = swatch
 
     btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
@@ -432,25 +528,56 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     end
 
     btn:SetScript("OnClick", function()
-        local prevR, prevG, prevB = r, g, b
-        ColorPickerFrame.func = function()
+        local prevR, prevG, prevB, prevA = r, g, b, a
+
+        -- Fires when the user moves the RGB sliders.
+        -- Intentionally does NOT read OpacitySliderFrame — SetColorRGB triggers this
+        -- callback immediately (before ShowUIPanel initialises the opacity slider),
+        -- so reading the slider here would clobber alpha with a stale value.
+        local function applyRGB()
             r, g, b = ColorPickerFrame:GetColorRGB()
-            swatch:SetVertexColor(r, g, b)
-            if onChange then onChange(r, g, b) end
+            swatch:SetVertexColor(r, g, b, a)
+            if onChange then
+                if showAlpha then onChange(r, g, b, a) else onChange(r, g, b) end
+            end
         end
+
+        -- Fires only when the user moves the opacity slider.
+        -- WoW opacity convention: 0 = fully opaque, 1 = fully transparent (inverted).
+        local function applyOpacity()
+            a = 1 - OpacitySliderFrame:GetValue()
+            swatch:SetVertexColor(r, g, b, a)
+            if onChange then onChange(r, g, b, a) end
+        end
+
+        ColorPickerFrame.func       = applyRGB
         ColorPickerFrame.cancelFunc = function()
-            r, g, b = prevR, prevG, prevB
-            swatch:SetVertexColor(r, g, b)
-            if onChange then onChange(r, g, b) end
+            r, g, b, a = prevR, prevG, prevB, prevA
+            swatch:SetVertexColor(r, g, b, a)
+            if onChange then
+                if showAlpha then onChange(r, g, b, a) else onChange(r, g, b) end
+            end
         end
+
         ColorPickerFrame:SetColorRGB(r, g, b)
+
+        if showAlpha then
+            ColorPickerFrame.hasOpacity  = true
+            ColorPickerFrame.opacity     = 1 - a  -- convert alpha → WoW opacity
+            ColorPickerFrame.opacityFunc = applyOpacity
+        else
+            ColorPickerFrame.hasOpacity  = false
+            ColorPickerFrame.opacityFunc = nil
+        end
+
         ShowUIPanel(ColorPickerFrame)
     end)
 
     wrapper.swatch   = swatch
-    wrapper.setColor = function(self, nr, ng, nb)
+    wrapper.setColor = function(self, nr, ng, nb, na)
         r, g, b = nr, ng, nb
-        swatch:SetVertexColor(r, g, b)
+        if showAlpha and na ~= nil then a = na end
+        swatch:SetVertexColor(r, g, b, a)
     end
 
     wrapper.marginTop    = NS.MARGIN.swatch.top

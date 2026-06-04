@@ -8,7 +8,6 @@ NS.botInventoryFrames = NS.botInventoryFrames or {}
 local CELL_SIZE   = 37
 local COLS        = 10
 local CELL_PAD    = 3
-local FRAME_PAD   = 14
 local HEADER_H    = 28
 local FOOTER_H    = 24
 
@@ -127,23 +126,24 @@ end
 NS.CB_GetInventoryFrame = function(key, botName)
     if NS.botInventoryFrames[key] then return NS.botInventoryFrames[key] end
 
-    local frameW = FRAME_PAD * 2 + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
+    local frameW = NS.PADDING.frame.left + NS.PADDING.frame.right + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
     local f = CreateFrame("Frame", "CleanBotInventory_" .. key, UIParent)
     NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
-    f:SetHeight(300)   -- dynamic; resized in CB_RenderInventory
+    f:SetHeight(NS.FRAME_HEIGHT)
     f:SetFrameStrata("HIGH")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop",  f.StopMovingOrSizing)
-    NS.CB_ApplyPanelSkin(f)
+    if NS.ElvUI_S then f:StripTextures() end
+    NS.CB_ApplyOuterFrameSkin(f)
     f:Hide()
 
     -- Title
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", f, "TOP", 0, -10)
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", f, "TOP", 0, -8)
     title:SetText(botName .. "'s Inventory")
     f.title = title
 
@@ -155,7 +155,7 @@ NS.CB_GetInventoryFrame = function(key, botName)
 
     -- Slot counter label (bridge path only)
     local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FRAME_PAD, 8)
+    slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", NS.PADDING.frame.left, 8)
     slotLabel:Hide()
     f.slotLabel = slotLabel
 
@@ -184,7 +184,7 @@ NS.CB_RenderInventory = function(key)
     -- ── Resize frame to fit grid ──────────────────────────────
     local rows    = math.max(1, math.ceil(cellCount / COLS))
     local gridH   = rows * CELL_SIZE + (rows - 1) * CELL_PAD
-    local frameH  = HEADER_H + FRAME_PAD + gridH + FRAME_PAD + FOOTER_H
+    local frameH  = HEADER_H + NS.PADDING.frame.top + gridH + NS.PADDING.frame.bottom + FOOTER_H
     f:SetHeight(frameH)
 
     -- ── Hide surplus cells from a previous render ─────────────
@@ -249,8 +249,8 @@ NS.CB_RenderInventory = function(key)
         -- Position
         local col = (i - 1) % COLS
         local row = math.floor((i - 1) / COLS)
-        local xOff = FRAME_PAD + col * (CELL_SIZE + CELL_PAD)
-        local yOff = -(HEADER_H + FRAME_PAD + row * (CELL_SIZE + CELL_PAD))
+        local xOff = NS.PADDING.frame.left + col * (CELL_SIZE + CELL_PAD)
+        local yOff = -(HEADER_H + NS.PADDING.frame.top + row * (CELL_SIZE + CELL_PAD))
         cell:ClearAllPoints()
         cell:SetPoint("TOPLEFT", f, "TOPLEFT", xOff, yOff)
 

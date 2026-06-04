@@ -70,8 +70,8 @@ StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_KEY"] = {
 }
 
 NS.CleanBot_BuildManageContent = function()
-    local COL1_X = NS.PAD
-    local COL2_X = NS.PAD + 130
+    local COL1_X = NS.PADDING.panel.left
+    local COL2_X = NS.PADDING.panel.left + 130
 
     local function makeBtn(label, xOffset, yOffset, onClick)
         local safeName = label:gsub("%s+", "")
@@ -91,7 +91,7 @@ NS.CleanBot_BuildManageContent = function()
     end
 
     -- Column 1: party invite/uninvite
-    makeBtn("Invite Target", COL1_X, -NS.PAD, function()
+    makeBtn("Invite Target", COL1_X, -NS.PADDING.panel.top, function()
         local target = requireValidPlayerTarget()
         if not target then return end
         if UnitIsUnit("target", "player") or UnitInParty("target") then
@@ -101,7 +101,7 @@ NS.CleanBot_BuildManageContent = function()
         InviteUnit(target)
     end)
 
-    makeBtn("Uninvite Target", COL1_X, -(NS.PAD + 30), function()
+    makeBtn("Uninvite Target", COL1_X, -(NS.PADDING.panel.top + 30), function()
         local target = requireValidPlayerTarget()
         if not target then return end
         if not UnitInParty("target") then
@@ -115,7 +115,7 @@ NS.CleanBot_BuildManageContent = function()
         UninviteUnit(target)
     end)
 
-    makeBtn("Uninvite All", COL1_X, -(NS.PAD + 70), function()
+    makeBtn("Uninvite All", COL1_X, -(NS.PADDING.panel.top + 70), function()
         local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
         local removed = 0
         for i = 1, numMembers do
@@ -131,25 +131,25 @@ NS.CleanBot_BuildManageContent = function()
     end)
 
     -- Column 2: bot login/logout
-    makeBtn("Login Target", COL2_X, -NS.PAD, function()
+    makeBtn("Login Target", COL2_X, -NS.PADDING.panel.top, function()
         local target = requireValidPlayerTarget()
         if not target then return end
         SendChatMessage(".playerbots bot add " .. target, "SAY")
     end)
 
-    makeBtn("Logout Target", COL2_X, -(NS.PAD + 30), function()
+    makeBtn("Logout Target", COL2_X, -(NS.PADDING.panel.top + 30), function()
         local target = requireValidPlayerTarget()
         if not target then return end
         SendChatMessage(".playerbots bot remove " .. target, "SAY")
     end)
 
-    makeBtn("Logout All", COL2_X, -(NS.PAD + 70), function()
+    makeBtn("Logout All", COL2_X, -(NS.PADDING.panel.top + 70), function()
         SendChatMessage(".playerbots bot remove *", "SAY")
     end)
 
     -- ── Favorites section ─────────────────────────────────────
     local favLabel = NS.CB_CreateLabel(NS.managePanel, "Favorites")
-    favLabel:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT", NS.PAD, -(NS.PAD + 120))
+    favLabel:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT", NS.PADDING.panel.left, -(NS.PADDING.panel.top + 120))
 
     -- Builds a dropdown populated from provider() (an array of display names).
     -- Selection is cleared on every open, then onSelect(name) fires (with nil on
