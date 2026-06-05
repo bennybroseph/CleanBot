@@ -84,12 +84,13 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH       = 680
+NS.FRAME_WIDTH       = 850
 NS.FRAME_HEIGHT      = 560
 NS.TAB_WIDTH         = 88
 NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
+NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
 NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border margin needed
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
