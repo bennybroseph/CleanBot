@@ -282,8 +282,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- This must happen before SavedVars are applied so that the Defaults button in
         -- Settings shows the correct value, and so that NS.accentColor starts at the
         -- right value when no saved data exists yet.
-        local defaultAccentColor = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        local defaultAccentColor  = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        local defaultTransparency = NS.ElvUI_S and 75 or 90
         NS.THEME_DEFAULTS.accentColor   = defaultAccentColor
+        NS.THEME_DEFAULTS.transparency  = defaultTransparency
+        NS.transparency                 = defaultTransparency
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
