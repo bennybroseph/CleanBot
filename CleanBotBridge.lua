@@ -229,7 +229,9 @@ NS.CB_FetchInventory = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
-    entry.inventory = { items = {} }
+    -- Preserve existing inventory while the fresh fetch is in flight so the
+    -- frame can display stale-but-correct data instead of going blank.
+    entry.inventory = entry.inventory or { items = {} }
 
     if NS.bridgeState == "present" then
         SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", "PARTY")
@@ -419,6 +421,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     combat    = (existing and existing.combat)    or NS.CB_DefaultCombat(),
                     nonCombat = (existing and existing.nonCombat) or NS.CB_DefaultNonCombat(),
                     classData = (existing and existing.classData) or NS.CB_DefaultClassData(classKey),
+                    inventory = existing and existing.inventory,
+                    money     = existing and existing.money,
                 }
             end
             if CleanBotFrame:IsShown() then
