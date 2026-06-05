@@ -86,49 +86,59 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- ============================================================
 NS.FRAME_WIDTH       = 680
 NS.FRAME_HEIGHT      = 560
-NS.TAB_HEIGHT        = 24
 NS.TAB_WIDTH         = 88
+NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
-NS.FOOTER_H          = NS.PAD  -- close button moved to top-right X; only a border margin needed
+NS.PAD               = 6
+NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border margin needed
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
-NS.PAD               = 6
+-- Per-frame padding — space between a frame's border and the content inside it (CSS padding).
+-- panel:   main panels and column containers (managePanel, partyPanel, ctrl, left/right columns)
+-- section: strategy section frames (the bordered checkbox groups in the party tab)
+NS.PADDING_DEFAULTS = {
+    frame   = { top = 4, bottom = 4, left = 16, right = 16 },
+    panel   = { top = 6, bottom = 6, left = 6,  right = 6 },
+    section = { top = 4, bottom = 4, left = 4,  right = 4 },
+}
+-- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
+NS.PADDING = {}
+for k, v in pairs(NS.PADDING_DEFAULTS) do
+    NS.PADDING[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+end
 -- Per-element margins — each widget declares the space it needs above and below.
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
     header   = { top = 10, bottom = 4, left = 0, right = 0 },
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
+    slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
     dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
-    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
+    checkbox = { top = 1,  bottom = 1, left = 4, right = 0 },
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
 -- Canonical defaults for theme settings — read by the Defaults button.
+-- accentColor.a is set to the skin-appropriate value at PLAYER_LOGIN (after ElvUI detection):
+--   0 (fully transparent) for plain Blizzard UI — no visible border tint by default.
+--   1 (fully opaque)      for ElvUI             — matches ElvUI's solid border style.
 NS.THEME_DEFAULTS = {
-    scale       = 100,
+    scale        = 100,
     transparency = 90,
-    accentColor = { r = 0.0, g = 0.0, b = 0.0 },
+    accentColor  = { r = 0.0, g = 0.0, b = 0.0, a = 0 },
 }
 
 -- Feature flags and theme values — mutated at login from SavedVars, and by the Settings Apply button.
 NS.botEmotes    = true
 NS.scale        = NS.THEME_DEFAULTS.scale
 NS.transparency = NS.THEME_DEFAULTS.transparency
-NS.accentColor  = { r = NS.THEME_DEFAULTS.accentColor.r, g = NS.THEME_DEFAULTS.accentColor.g, b = NS.THEME_DEFAULTS.accentColor.b }
+NS.accentColor  = { r = NS.THEME_DEFAULTS.accentColor.r, g = NS.THEME_DEFAULTS.accentColor.g, b = NS.THEME_DEFAULTS.accentColor.b, a = NS.THEME_DEFAULTS.accentColor.a }
 
 -- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
-NS.MARGIN = {
-    header   = { top = 10, bottom = 4, left = 0, right = 0 },
-    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
-    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    slider   = { top = 2,  bottom = 4, left = 0, right = 0 },
-    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
-    checkbox = { top = 1,  bottom = 1, left = 0, right = 0 },
-    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
-}
+NS.MARGIN = {}
+for k, v in pairs(NS.MARGIN_DEFAULTS) do
+    NS.MARGIN[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+end
 -- Vertical space reserved below the model for the weapon-slot row.
 -- The model height = contentH - EQUIP_WEAPON_PAD, weapon slots sit in that gap.
 NS.EQUIP_WEAPON_PAD  = 60
@@ -141,7 +151,7 @@ NS.contentFrame  = nil
 NS.partyPanel    = nil
 NS.botTabBar     = nil
 NS.partyContent  = nil
-NS.managePanel   = nil
+NS.managePanel     = nil
 NS.settingsPanel = nil
 
 -- ============================================================
@@ -155,16 +165,10 @@ NS.CleanBot_SelectTopTab = function(index)
     NS.activeTopTabIndex = index
 
     for i, tab in ipairs(NS.topTabs) do
-        if i == index then
-            tab:SetNormalFontObject(GameFontHighlightSmall)
-            tab:SetButtonState("PUSHED", true)
-        else
-            tab:SetNormalFontObject(GameFontNormalSmall)
-            tab:SetButtonState("NORMAL")
-        end
+        tab:SetActive(i == index)
     end
 
-    if NS.managePanel   then if index == 1 then NS.managePanel:Show()   else NS.managePanel:Hide()   end end
+    if NS.managePanel     then if index == 1 then NS.managePanel:Show()     else NS.managePanel:Hide()     end end
     if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
 
@@ -202,23 +206,23 @@ function CleanBot_BuildFrames()
     local tabLabels = { "Manage", "Party", "Settings" }
     for i, label in ipairs(tabLabels) do
         local idx = i
-        local tab = NS.CB_CreateButton(NS.topTabBar, "CleanBotTopTab" .. i, label,
-                                       NS.TAB_WIDTH, NS.TAB_HEIGHT,
-                                       function() NS.CleanBot_SelectTopTab(idx) end)
+        local tab = NS.CB_CreateTab(NS.topTabBar, "CleanBotTopTab" .. i, label,
+                                    function() NS.CleanBot_SelectTopTab(idx) end)
+        tab:SetWidth(NS.TAB_WIDTH)
         tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
-        tab:SetNormalFontObject(GameFontNormalSmall)
         NS.topTabs[i] = tab
     end
 
     -- ── Content frame ──────────────────────────────────────────
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
-    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",     4, -(NS.TITLE_H + NS.TOP_BAR_H))
-    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -4, NS.FOOTER_H)
-    NS.CB_ApplyInnerSkin(NS.contentFrame)
+    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      NS.PADDING.frame.left, -(NS.TITLE_H + NS.TOP_BAR_H))
+    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
+    NS.CB_ApplyPanelSkin(NS.contentFrame, 0)
 
     -- ── Party panel ────────────────────────────────────────────
     NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
     NS.partyPanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyPanelSkin(NS.partyPanel, 1)
 
     NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
     NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
@@ -241,12 +245,14 @@ function CleanBot_BuildFrames()
     -- ── Manage panel ───────────────────────────────────────────
     NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
     NS.managePanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyPanelSkin(NS.managePanel, 1)
     NS.managePanel:Hide()
     NS.CleanBot_BuildManageContent()
 
     -- ── Settings panel ─────────────────────────────────────────
     NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
     NS.settingsPanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyPanelSkin(NS.settingsPanel, 1)
     NS.settingsPanel:Hide()
     NS.CleanBot_BuildSettingsContent()
 
@@ -254,7 +260,11 @@ function CleanBot_BuildFrames()
         CleanBotFrame:StripTextures()
         NS.ElvUI_S:HandleCloseButton(CleanBotFrameCloseButton)
     end
-    NS.CB_ApplyPanelSkin(CleanBotFrame)
+    NS.CB_ApplyOuterFrameSkin(CleanBotFrame)
+    -- Hide the XML-defined ARTWORK FontString — CB_ApplyTitleBar creates its own
+    -- OVERLAY replacement so it renders above the ornament texture.
+    CleanBotFrameTitle:Hide()
+    NS.CB_ApplyTitleBar(CleanBotFrame, "CleanBot")
 
     NS.CleanBot_SelectTopTab(1)
 end
@@ -267,6 +277,13 @@ initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         NS.CB_InitElvUI()
+
+        -- Set the skin-appropriate default accent alpha now that ElvUI detection has run.
+        -- This must happen before SavedVars are applied so that the Defaults button in
+        -- Settings shows the correct value, and so that NS.accentColor starts at the
+        -- right value when no saved data exists yet.
+        local defaultAccentColor = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        NS.THEME_DEFAULTS.accentColor   = defaultAccentColor
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
@@ -289,6 +306,7 @@ initFrame:SetScript("OnEvent", function(self, event)
             if type(ac.r) == "number" then NS.accentColor.r = ac.r end
             if type(ac.g) == "number" then NS.accentColor.g = ac.g end
             if type(ac.b) == "number" then NS.accentColor.b = ac.b end
+            if type(ac.a) == "number" then NS.accentColor.a = ac.a end
         end
 
         -- Restore saved margin values, filling in any missing keys with defaults.
@@ -300,6 +318,18 @@ initFrame:SetScript("OnEvent", function(self, event)
                 if type(saved.bottom) == "number" then NS.MARGIN[k].bottom = saved.bottom end
                 if type(saved.left)   == "number" then NS.MARGIN[k].left   = saved.left   end
                 if type(saved.right)  == "number" then NS.MARGIN[k].right  = saved.right  end
+            end
+        end
+
+        -- Restore saved padding values, filling in any missing keys with defaults.
+        if type(CleanBot_SavedVars.padding) ~= "table" then CleanBot_SavedVars.padding = {} end
+        for k, defaults in pairs(NS.PADDING) do
+            local saved = CleanBot_SavedVars.padding[k]
+            if type(saved) == "table" then
+                if type(saved.top)    == "number" then NS.PADDING[k].top    = saved.top    end
+                if type(saved.bottom) == "number" then NS.PADDING[k].bottom = saved.bottom end
+                if type(saved.left)   == "number" then NS.PADDING[k].left   = saved.left   end
+                if type(saved.right)  == "number" then NS.PADDING[k].right  = saved.right  end
             end
         end
 

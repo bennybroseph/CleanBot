@@ -70,13 +70,7 @@ function CleanBot_ShowDebugKnownBots()
         f:SetScript("OnDragStop",  f.StopMovingOrSizing)
         f:SetFrameStrata("DIALOG")
 
-        if NS.ElvUI_S then
-            f:SetTemplate("Default")
-        else
-            f:SetBackdrop(NS.PLAIN_BACKDROP)
-            f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-            f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-        end
+        NS.CB_ApplyPanelSkin(f)
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOP", f, "TOP", 0, -8)

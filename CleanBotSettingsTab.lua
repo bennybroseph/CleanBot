@@ -67,51 +67,59 @@ local function applyDebugOverlay(parent, widget)
     end
 end
 
-local sampleContent  = nil
+local sampleSection  = nil
 local sampleGenCount = 0
 
--- Tears down the previous widget set and rebuilds inside 'body'.
-local function buildSampleContent(body)
-    if sampleContent then sampleContent:Hide() end
+-- Tears down the previous section and rebuilds inside 'panel'.
+-- The section demonstrates section padding; widgets inside it demonstrate margins.
+local function buildSampleContent(panel)
+    if sampleSection then sampleSection:Hide() end
     overlayFrames  = {}
     sampleGenCount = sampleGenCount + 1
-    local gen     = sampleGenCount
-    local PAD     = NS.PAD
+    local gen = sampleGenCount
 
-    local content = CreateFrame("Frame", nil, body)
-    content:SetPoint("TOPLEFT",     body, "TOPLEFT",     PAD, -PAD)
-    content:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -PAD, PAD)
-    sampleContent = content
+    -- Section sits inside the panel, inset by panel padding.
+    -- Leaves room at the bottom for the persistent "Show Overlays" checkbox row.
+    local OVERLAY_ROW_H = NS.PADDING.panel.bottom + 20 + NS.PADDING.panel.bottom
+    local section = CreateFrame("Frame", nil, panel)
+    section:SetPoint("TOPLEFT",     panel, "TOPLEFT",     NS.PADDING.panel.left,  -NS.PADDING.panel.top)
+    section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, OVERLAY_ROW_H)
+    NS.CB_ApplyPanelSkin(section, 3)
+    sampleSection = section
 
-    local header = NS.CB_CreateHeader(content, "Lorem Ipsum")
-    header:SetPoint("TOPLEFT", content, "TOPLEFT", header.marginLeft or 0, 0)
-    applyDebugOverlay(content, header)
+    -- First widget: section padding + the widget's own marginTop are both applied
+    -- explicitly so the header's top margin is visible when tuning in Settings.
+    local header = NS.CB_CreateHeader(section, "Lorem Ipsum")
+    header:SetPoint("TOPLEFT", section, "TOPLEFT",
+        NS.PADDING.section.left + (header.marginLeft or 0),
+        -(NS.PADDING.section.top + header.marginTop))
+    applyDebugOverlay(section, header)
 
-    local lbl = NS.CB_CreateLabel(content, "Lorem Ipsum")
+    local lbl = NS.CB_CreateLabel(section, "Lorem Ipsum")
     NS.CB_AnchorBelow(lbl, header)
-    applyDebugOverlay(content, lbl)
+    applyDebugOverlay(section, lbl)
 
-    local btn = NS.CB_CreateButton(content, nil, "Lorem Ipsum", 120, 22)
+    local btn = NS.CB_CreateButton(section, nil, "Lorem Ipsum", 120, 22)
     NS.CB_AnchorBelow(btn, lbl)
-    applyDebugOverlay(content, btn)
+    applyDebugOverlay(section, btn)
 
-    local chk = NS.CB_CreateCheckBox(content, nil)
+    local chk = NS.CB_CreateCheckBox(section, nil)
     NS.CB_AnchorBelow(chk, btn)
-    applyDebugOverlay(content, chk)
-    local chkLbl = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    applyDebugOverlay(section, chk)
+    local chkLbl = section:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     chkLbl:SetText("Lorem Ipsum")
     chkLbl:SetPoint("LEFT", chk, "RIGHT", 2, 0)
     chkLbl.marginTop    = 0
     chkLbl.marginBottom = 0
-    applyDebugOverlay(content, chkLbl)
+    applyDebugOverlay(section, chkLbl)
 
-    local eb = NS.CB_CreateEditBox(content, nil, 180, 20)
+    local eb = NS.CB_CreateEditBox(section, nil, 180, 20)
     NS.CB_AnchorBelow(eb, chk)
     eb:SetText("Lorem Ipsum")
     eb:SetAutoFocus(false)
-    applyDebugOverlay(content, eb)
+    applyDebugOverlay(section, eb)
 
-    local dd = NS.CB_CreateDropdown(content, "CleanBotSampleDropdown" .. gen, 150)
+    local dd = NS.CB_CreateDropdown(section, "CleanBotSampleDropdown" .. gen, 150)
     NS.CB_AnchorBelow(dd, eb)
     UIDropDownMenu_Initialize(dd, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -121,31 +129,27 @@ local function buildSampleContent(body)
         UIDropDownMenu_AddButton(info)
     end)
     UIDropDownMenu_SetText(dd, "Lorem Ipsum")
-    applyDebugOverlay(content, dd)
+    applyDebugOverlay(section, dd)
 
-    local sl = NS.CB_CreateSlider(content, "CleanBotSampleSlider" .. gen,
+    local sl = NS.CB_CreateSlider(section, "CleanBotSampleSlider" .. gen,
         "Lorem Ipsum", 0, 100, 50, "0", "100", nil)
     sl:SetWidth(200)
     NS.CB_AnchorBelow(sl, dd)
-    applyDebugOverlay(content, sl)
+    applyDebugOverlay(section, sl)
 
-    local sw = NS.CB_CreateColorSwatch(content, nil, "Lorem Ipsum", 1, 0.5, 0)
+    local sw = NS.CB_CreateColorSwatch(section, nil, "Lorem Ipsum", 1, 0.5, 0)
     NS.CB_AnchorBelow(sw, sl)
-    applyDebugOverlay(content, sw)
+    applyDebugOverlay(section, sw)
 end
 
 -- Opens the singleton Sample Layout window, creating it on first call.
 local sampleLayoutFrame = nil
 
 local function showSampleLayout()
-    local PAD       = NS.PAD
-    local BTN_ROW_H = PAD + 22 + PAD
-    local TITLE_H   = NS.TOP_BAR_H
-
     if not sampleLayoutFrame then
         local f = CreateFrame("Frame", "CleanBotSampleLayoutFrame", UIParent)
         NS.CB_RegisterRootFrame(f)
-        f:SetSize(380, 520)
+        f:SetSize(380, NS.FRAME_HEIGHT)
         f:SetPoint("TOPLEFT", CleanBotFrame, "TOPRIGHT", 4, 0)
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
@@ -153,26 +157,27 @@ local function showSampleLayout()
         f:RegisterForDrag("LeftButton")
         f:SetScript("OnDragStart", f.StartMoving)
         f:SetScript("OnDragStop",  f.StopMovingOrSizing)
-        NS.CB_ApplyPanelSkin(f)
-
-        local titleLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        titleLbl:SetText("Sample Layout")
-        titleLbl:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD)
+        if NS.ElvUI_S then f:StripTextures() end
+        NS.CB_ApplyOuterFrameSkin(f)
+        NS.CB_ApplyTitleBar(f, "Sample Layout")
 
         local closeBtn = CreateFrame("Button", "CleanBotSampleLayoutClose", f, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
         closeBtn:SetScript("OnClick", function() f:Hide() end)
         if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
-        local body = CreateFrame("Frame", nil, f)
-        body:SetPoint("TOPLEFT",     f, "TOPLEFT",     0, -TITLE_H)
-        body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-        f._body = body
+        -- Panel — level 1, mirrors managePanel/partyPanel inside CleanBotFrame.
+        local panel = CreateFrame("Frame", "CleanBotSamplePanel", f)
+        panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      NS.PADDING.frame.left, -NS.TITLE_H)
+        panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
+        NS.CB_ApplyPanelSkin(panel, 1)
+        f._panel = panel
 
-        local overlayCB = NS.CB_CreateCheckBox(f, "CleanBotSampleLayoutOverlayCB")
+        -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
+        local overlayCB = NS.CB_CreateCheckBox(panel, "CleanBotSampleLayoutOverlayCB")
         overlayCB:SetChecked(overlayVisible)
-        overlayCB:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", PAD, PAD)
-        local overlayCBLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", NS.PADDING.panel.left, NS.PADDING.panel.bottom)
+        local overlayCBLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         overlayCBLbl:SetText("Show Overlays")
         overlayCBLbl:SetPoint("LEFT", overlayCB, "RIGHT", 2, 0)
         overlayCB:SetScript("OnClick", function(self)
@@ -189,7 +194,7 @@ local function showSampleLayout()
 
     sampleLayoutFrame:ClearAllPoints()
     sampleLayoutFrame:SetPoint("TOPLEFT", CleanBotFrame, "TOPRIGHT", 4, 0)
-    buildSampleContent(sampleLayoutFrame._body)
+    buildSampleContent(sampleLayoutFrame._panel)
     sampleLayoutFrame:Show()
 end
 
@@ -199,10 +204,9 @@ end
 
 NS.CleanBot_BuildSettingsContent = function()
     local panel    = NS.settingsPanel
-    local PAD      = NS.PAD
     local SLIDER_W = 200
 
-    local BTN_ROW_H = PAD + 22 + PAD
+    local BTN_ROW_H = NS.PADDING.panel.top + 22 + NS.PADDING.panel.bottom
     local SUB_TAB_H = NS.TOP_BAR_H
 
     -- ── Pending values ─────────────────────────────────────────
@@ -211,10 +215,16 @@ NS.CleanBot_BuildSettingsContent = function()
     local pendingAccentR      = NS.accentColor.r
     local pendingAccentG      = NS.accentColor.g
     local pendingAccentB      = NS.accentColor.b
+    local pendingAccentA      = NS.accentColor.a
 
     local pendingMargins = {}
     for k, v in pairs(NS.MARGIN) do
         pendingMargins[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+    end
+
+    local pendingPadding = {}
+    for k, v in pairs(NS.PADDING) do
+        pendingPadding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
     end
 
     -- ── Sub-tab bar ────────────────────────────────────────────
@@ -227,15 +237,18 @@ NS.CleanBot_BuildSettingsContent = function()
     local themePanel = CreateFrame("Frame", "CleanBotThemePanel", panel)
     themePanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     themePanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
+    NS.CB_ApplyPanelSkin(themePanel, 2)
 
     local layoutPanel = CreateFrame("Frame", "CleanBotLayoutPanel", panel)
     layoutPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     layoutPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
+    NS.CB_ApplyPanelSkin(layoutPanel, 2)
     layoutPanel:Hide()
 
     local otherPanel = CreateFrame("Frame", "CleanBotOtherPanel", panel)
     otherPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     otherPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
+    NS.CB_ApplyPanelSkin(otherPanel, 2)
     otherPanel:Hide()
 
     -- ── Sub-tab switching ──────────────────────────────────────
@@ -246,13 +259,7 @@ NS.CleanBot_BuildSettingsContent = function()
         if activeSubTab == index then return end
         activeSubTab = index
         for i, tab in ipairs(subTabs) do
-            if i == index then
-                tab:SetNormalFontObject(GameFontHighlightSmall)
-                tab:SetButtonState("PUSHED", true)
-            else
-                tab:SetNormalFontObject(GameFontNormalSmall)
-                tab:SetButtonState("NORMAL")
-            end
+            tab:SetActive(i == index)
         end
         themePanel:Hide()
         layoutPanel:Hide()
@@ -266,22 +273,22 @@ NS.CleanBot_BuildSettingsContent = function()
         end
     end
 
-    local themeTab = NS.CB_CreateButton(subTabBar, "CleanBotSettingsThemeTab", "Theme",
-        NS.TAB_WIDTH, NS.TAB_HEIGHT, function() selectSubTab(1) end)
-    themeTab:SetPoint("LEFT", subTabBar, "LEFT", PAD, 0)
-    themeTab:SetNormalFontObject(GameFontNormalSmall)
+    local themeTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsThemeTab", "Theme",
+        function() selectSubTab(1) end)
+    themeTab:SetWidth(NS.TAB_WIDTH)
+    themeTab:SetPoint("LEFT", subTabBar, "LEFT", NS.PADDING.panel.left, 0)
     subTabs[1] = themeTab
 
-    local layoutTab = NS.CB_CreateButton(subTabBar, "CleanBotSettingsLayoutTab", "Layout",
-        NS.TAB_WIDTH, NS.TAB_HEIGHT, function() selectSubTab(2) end)
+    local layoutTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsLayoutTab", "Layout",
+        function() selectSubTab(2) end)
+    layoutTab:SetWidth(NS.TAB_WIDTH)
     layoutTab:SetPoint("LEFT", themeTab, "RIGHT", 2, 0)
-    layoutTab:SetNormalFontObject(GameFontNormalSmall)
     subTabs[2] = layoutTab
 
-    local otherTab = NS.CB_CreateButton(subTabBar, "CleanBotSettingsOtherTab", "Other",
-        NS.TAB_WIDTH, NS.TAB_HEIGHT, function() selectSubTab(3) end)
+    local otherTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsOtherTab", "Other",
+        function() selectSubTab(3) end)
+    otherTab:SetWidth(NS.TAB_WIDTH)
     otherTab:SetPoint("LEFT", layoutTab, "RIGHT", 2, 0)
-    otherTab:SetNormalFontObject(GameFontNormalSmall)
     subTabs[3] = otherTab
 
     -- ── Theme tab: ScrollFrame ─────────────────────────────────
@@ -311,7 +318,7 @@ NS.CleanBot_BuildSettingsContent = function()
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
         50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v end)
     scaleSlider:SetWidth(SLIDER_W)
-    scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT", PAD, -PAD)
+    scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
@@ -320,10 +327,12 @@ NS.CleanBot_BuildSettingsContent = function()
     NS.CB_AnchorBelow(transSlider, scaleSlider)
 
     -- ── Accent Color ───────────────────────────────────────────
-    local colorSwatch = NS.CB_CreateColorSwatch(themeChild, "CleanBotAccentSwatch", "Accent Color", NS.accentColor.r, NS.accentColor.g, NS.accentColor.b,
-        function(r, g, b)
-            pendingAccentR, pendingAccentG, pendingAccentB = r, g, b
-        end)
+    local colorSwatch = NS.CB_CreateColorSwatch(themeChild, "CleanBotAccentSwatch", "Accent Color",
+        NS.accentColor.r, NS.accentColor.g, NS.accentColor.b,
+        function(r, g, b, a)
+            pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA = r, g, b, a
+        end,
+        true, NS.accentColor.a)
     NS.CB_AnchorBelow(colorSwatch, transSlider)
 
     -- ── Layout tab: ScrollFrame ────────────────────────────────
@@ -333,7 +342,7 @@ NS.CleanBot_BuildSettingsContent = function()
 
     local layoutChild = CreateFrame("Frame", "CleanBotLayoutScrollChild", layoutSF)
     layoutChild:SetWidth(NS.FRAME_WIDTH - 28)
-    layoutChild:SetHeight(900)
+    layoutChild:SetHeight(1200)
     layoutSF:SetScrollChild(layoutChild)
 
     layoutSF:EnableMouseWheel(true)
@@ -349,14 +358,10 @@ NS.CleanBot_BuildSettingsContent = function()
     layoutScrollBar:SetPoint("BOTTOMRIGHT", layoutPanel, "BOTTOMRIGHT", 0,  19)
     if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(layoutScrollBar) end
 
-    -- ── Margins ────────────────────────────────────────────────
-    local marginsHeader = NS.CB_CreateHeader(layoutChild, "Margins")
-    marginsHeader:SetPoint("TOPLEFT", layoutChild, "TOPLEFT", PAD, -PAD)
-
     -- ── Show Sample Layout ─────────────────────────────────────
     local sampleBtn = NS.CB_CreateButton(layoutChild, "CleanBotShowSampleLayout",
         "Show Sample Layout", 140, 22, showSampleLayout)
-    NS.CB_AnchorBelow(sampleBtn, marginsHeader)
+    sampleBtn:SetPoint("TOPLEFT", layoutChild, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
 
     local COL_TYPE_W = 80
     local COL_GAP    = 10
@@ -372,15 +377,91 @@ NS.CleanBot_BuildSettingsContent = function()
         { key = "editBox",  display = "Edit Box" },
     }
 
-    local marginSliderRefs = {}
+    local PADDING_TYPES = {
+        { key = "frame",   display = "Frame"   },
+        { key = "panel",   display = "Panel"   },
+        { key = "section", display = "Section" },
+    }
 
-    local SEP_W   = NS.FRAME_WIDTH - 28 - PAD * 2  -- separator spans the content area
+    local marginSliderRefs  = {}
+    local paddingSliderRefs = {}
 
-    local sampleSep = NS.CB_CreateSeparator(layoutChild)
-    NS.CB_AnchorBelow(sampleSep, sampleBtn)
-    sampleSep:SetWidth(SEP_W)
+    local SEP_W = NS.FRAME_WIDTH - 28 - NS.PADDING.panel.left - NS.PADDING.panel.right
 
-    local prevRow = sampleSep
+    -- ── Padding ────────────────────────────────────────────────
+    local paddingHeader = NS.CB_CreateHeader(layoutChild, "Padding")
+    NS.CB_AnchorBelow(paddingHeader, sampleBtn)
+
+    local paddingSep = NS.CB_CreateSeparator(layoutChild)
+    NS.CB_AnchorBelow(paddingSep, paddingHeader)
+    paddingSep:SetWidth(SEP_W)
+
+    local prevRow = paddingSep
+    for i, ptype in ipairs(PADDING_TYPES) do
+        local key = ptype.key
+
+        local rowA = CreateFrame("Frame", nil, layoutChild)
+        rowA:SetSize(1, 54)
+        rowA.marginTop    = NS.MARGIN.label.top
+        rowA.marginBottom = 0
+        NS.CB_AnchorBelow(rowA, prevRow)
+
+        local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        nameLabel:SetText(ptype.display)
+        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left, 0)
+        nameLabel:SetWidth(COL_TYPE_W)
+        nameLabel:SetJustifyH("LEFT")
+
+        local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Top",
+            "Top", 0, 20, NS.PADDING[key].top, "0", "20",
+            function(v) pendingPadding[key].top = v end)
+        topSlider:SetWidth(SLIDER_W)
+        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+
+        local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
+            "Bot", 0, 20, NS.PADDING[key].bottom, "0", "20",
+            function(v) pendingPadding[key].bottom = v end)
+        botSlider:SetWidth(SLIDER_W)
+        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+
+        local rowB = CreateFrame("Frame", nil, layoutChild)
+        rowB:SetSize(1, 54)
+        rowB.marginTop    = 0
+        rowB.marginBottom = NS.MARGIN.slider.bottom
+        NS.CB_AnchorBelow(rowB, rowA)
+
+        local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Left",
+            "Left", 0, 20, NS.PADDING[key].left, "0", "20",
+            function(v) pendingPadding[key].left = v end)
+        leftSlider:SetWidth(SLIDER_W)
+        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+
+        local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
+            "Right", 0, 20, NS.PADDING[key].right, "0", "20",
+            function(v) pendingPadding[key].right = v end)
+        rightSlider:SetWidth(SLIDER_W)
+        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+
+        paddingSliderRefs[key] = { top = topSlider, bot = botSlider, left = leftSlider, right = rightSlider }
+        prevRow = rowB
+        if i < #PADDING_TYPES then
+            local sep = NS.CB_CreateSeparator(layoutChild)
+            NS.CB_AnchorBelow(sep, rowB)
+            sep:SetWidth(SEP_W)
+            prevRow = sep
+        end
+    end
+
+    -- ── Margins ────────────────────────────────────────────────
+    local marginsHeader = NS.CB_CreateHeader(layoutChild, "Margins")
+    marginsHeader.marginTop = NS.MARGIN.header.top + 8
+    NS.CB_AnchorBelow(marginsHeader, prevRow)
+
+    local marginsSep = NS.CB_CreateSeparator(layoutChild)
+    NS.CB_AnchorBelow(marginsSep, marginsHeader)
+    marginsSep:SetWidth(SEP_W)
+
+    prevRow = marginsSep
     for i, mtype in ipairs(MARGIN_TYPES) do
         local key = mtype.key
 
@@ -393,7 +474,7 @@ NS.CleanBot_BuildSettingsContent = function()
 
         local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         nameLabel:SetText(mtype.display)
-        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", PAD, 0)
+        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left, 0)
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
@@ -401,13 +482,13 @@ NS.CleanBot_BuildSettingsContent = function()
             "Top", -12, 12, NS.MARGIN[key].top, "-12", "12",
             function(v) pendingMargins[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
-        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", PAD + COL_TYPE_W + COL_GAP, 0)
+        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
             "Bot", -12, 12, NS.MARGIN[key].bottom, "-12", "12",
             function(v) pendingMargins[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
-        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", PAD + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         -- Left/Right sub-row — flush below Top/Bot, no extra gap between them.
         local rowB = CreateFrame("Frame", nil, layoutChild)
@@ -420,13 +501,13 @@ NS.CleanBot_BuildSettingsContent = function()
             "Left", -12, 12, NS.MARGIN[key].left, "-12", "12",
             function(v) pendingMargins[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
-        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", PAD + COL_TYPE_W + COL_GAP, 0)
+        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
             "Right", -12, 12, NS.MARGIN[key].right, "-12", "12",
             function(v) pendingMargins[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
-        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", PAD + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         marginSliderRefs[key] = { top = topSlider, bot = botSlider, left = leftSlider, right = rightSlider }
         prevRow = rowB
@@ -440,7 +521,7 @@ NS.CleanBot_BuildSettingsContent = function()
 
     -- ── Other tab: Bot Emotes ──────────────────────────────────
     local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behaviour")
-    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT", PAD, -PAD)
+    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
 
     local botEmotesCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotBotEmotesCB")
     botEmotesCB:SetChecked(NS.botEmotes)
@@ -480,12 +561,18 @@ NS.CleanBot_BuildSettingsContent = function()
     local function syncPendingToUI()
         scaleSlider:SetValue(pendingScale)
         transSlider:SetValue(pendingTransparency)
-        colorSwatch:setColor(pendingAccentR, pendingAccentG, pendingAccentB)
+        colorSwatch:setColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
         for key, refs in pairs(marginSliderRefs) do
             refs.top:SetValue(pendingMargins[key].top)
             refs.bot:SetValue(pendingMargins[key].bottom)
             refs.left:SetValue(pendingMargins[key].left)
             refs.right:SetValue(pendingMargins[key].right)
+        end
+        for key, refs in pairs(paddingSliderRefs) do
+            refs.top:SetValue(pendingPadding[key].top)
+            refs.bot:SetValue(pendingPadding[key].bottom)
+            refs.left:SetValue(pendingPadding[key].left)
+            refs.right:SetValue(pendingPadding[key].right)
         end
     end
 
@@ -496,15 +583,22 @@ NS.CleanBot_BuildSettingsContent = function()
         pendingAccentR      = NS.THEME_DEFAULTS.accentColor.r
         pendingAccentG      = NS.THEME_DEFAULTS.accentColor.g
         pendingAccentB      = NS.THEME_DEFAULTS.accentColor.b
+        pendingAccentA      = NS.THEME_DEFAULTS.accentColor.a
         for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
             pendingMargins[k].top    = defaults.top
             pendingMargins[k].bottom = defaults.bottom
             pendingMargins[k].left   = defaults.left
             pendingMargins[k].right  = defaults.right
         end
+        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
+            pendingPadding[k].top    = defaults.top
+            pendingPadding[k].bottom = defaults.bottom
+            pendingPadding[k].left   = defaults.left
+            pendingPadding[k].right  = defaults.right
+        end
         syncPendingToUI()
     end)
-    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD)
+    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", NS.PADDING.panel.left, NS.PADDING.panel.bottom)
 
     local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
         pendingScale        = NS.scale
@@ -512,9 +606,10 @@ NS.CleanBot_BuildSettingsContent = function()
         pendingAccentR      = NS.accentColor.r
         pendingAccentG      = NS.accentColor.g
         pendingAccentB      = NS.accentColor.b
-        local saved = CleanBot_SavedVars and CleanBot_SavedVars.margins
+        pendingAccentA      = NS.accentColor.a
+        local savedMargins  = CleanBot_SavedVars and CleanBot_SavedVars.margins
         for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
-            local s = saved and saved[k]
+            local s = savedMargins and savedMargins[k]
             if type(s) == "table" then
                 pendingMargins[k].top    = type(s.top)    == "number" and s.top    or defaults.top
                 pendingMargins[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
@@ -527,9 +622,24 @@ NS.CleanBot_BuildSettingsContent = function()
                 pendingMargins[k].right  = defaults.right
             end
         end
+        local savedPadding = CleanBot_SavedVars and CleanBot_SavedVars.padding
+        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
+            local s = savedPadding and savedPadding[k]
+            if type(s) == "table" then
+                pendingPadding[k].top    = type(s.top)    == "number" and s.top    or defaults.top
+                pendingPadding[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
+                pendingPadding[k].left   = type(s.left)   == "number" and s.left   or defaults.left
+                pendingPadding[k].right  = type(s.right)  == "number" and s.right  or defaults.right
+            else
+                pendingPadding[k].top    = defaults.top
+                pendingPadding[k].bottom = defaults.bottom
+                pendingPadding[k].left   = defaults.left
+                pendingPadding[k].right  = defaults.right
+            end
+        end
         syncPendingToUI()
     end)
-    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -PAD, PAD)
+    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, NS.PADDING.panel.bottom)
 
     local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
         -- Scale
@@ -546,8 +656,9 @@ NS.CleanBot_BuildSettingsContent = function()
         NS.accentColor.r = pendingAccentR
         NS.accentColor.g = pendingAccentG
         NS.accentColor.b = pendingAccentB
-        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB)
-        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB }
+        NS.accentColor.a = pendingAccentA
+        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
+        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
 
         -- Margins
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
@@ -558,10 +669,21 @@ NS.CleanBot_BuildSettingsContent = function()
             NS.MARGIN[k].right  = v.right
             CleanBot_SavedVars.margins[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
         end
-        if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
-            buildSampleContent(sampleLayoutFrame._body)
+
+        -- Padding
+        if type(CleanBot_SavedVars.padding) ~= "table" then CleanBot_SavedVars.padding = {} end
+        for k, v in pairs(pendingPadding) do
+            NS.PADDING[k].top    = v.top
+            NS.PADDING[k].bottom = v.bottom
+            NS.PADDING[k].left   = v.left
+            NS.PADDING[k].right  = v.right
+            CleanBot_SavedVars.padding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
         end
-        NS.CB_Print("Settings saved. Reload the UI to apply margin changes.")
+
+        if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
+            buildSampleContent(sampleLayoutFrame._panel)
+        end
+        NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
     end)
     applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT", -8, 0)
 

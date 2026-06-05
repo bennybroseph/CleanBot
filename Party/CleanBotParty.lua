@@ -73,10 +73,11 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     section.marginBottom = 2
     NS.CB_AnchorBelow(section, anchor)
     section:SetPoint("RIGHT", ctrl, "RIGHT", 0, 0)
-    section:SetHeight(#strategies * 26)
+    section:SetHeight(#strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom))
+    NS.CB_ApplyPanelSkin(section, 3)
 
     local controls = {}
-    local yOffset  = 0   -- accumulated y position within section
+    local yOffset  = NS.PADDING.section.top
 
     for _, s in ipairs(strategies) do
         if s.type == "timerSlider" then
@@ -101,7 +102,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                 end)
             ready = true
             sl:SetWidth(140)
-            sl:SetPoint("TOPLEFT", section, "TOPLEFT", 0, -yOffset)
+            sl:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left + NS.MARGIN.slider.left, -yOffset)
 
             sl.slider:SetScript("OnMouseDown", function() dragging = true end)
             sl.slider:SetScript("OnMouseUp", function()
@@ -113,11 +114,11 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             end)
 
             controls[s.field] = sl
-            yOffset = yOffset + 54
+            yOffset = yOffset + NS.MARGIN.slider.top + 54 + NS.MARGIN.slider.bottom
         else
             local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
             cb:SetSize(20, 20)
-            cb:SetPoint("TOPLEFT", section, "TOPLEFT", 4, -yOffset)
+            cb:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left + NS.MARGIN.checkbox.left, -yOffset)
 
             local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
@@ -152,11 +153,11 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             end
 
             controls[s.field] = cb
-            yOffset = yOffset + 26
+            yOffset = yOffset + NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom
         end
     end
 
-    section:SetHeight(yOffset)
+    section:SetHeight(yOffset + NS.PADDING.section.bottom)
 
     -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked slider.
     for _, s in ipairs(strategies) do
@@ -213,7 +214,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     if prevBottom then
         NS.CB_AnchorBelow(header, prevBottom)
     else
-        header:SetPoint("TOPLEFT", parent, "TOPLEFT", NS.PAD, -NS.PAD)
+        header:SetPoint("TOPLEFT", parent, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
     end
 
     local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
@@ -327,22 +328,28 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local strategies = group.strategies
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
-
-            local multiRoleLabel = NS.CB_CreateLabel(col, "Multiple Roles Selected", "GameFontRed")
-            NS.CB_AnchorBelow(multiRoleLabel, header, 4)
-            multiRoleLabel:SetText("Multiple Roles Selected")
-            multiRoleLabel:Hide()
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotRoleDD_" .. tag, 90)
-            dd:SetPoint("LEFT", header, "RIGHT", 2, -2)
+            NS.CB_AnchorBelow(dd, header, -16)
 
-            -- Build all sub-sections anchored to the same point; only one shows at a time.
+            -- Anchor point for sub-sections: just below the dropdown frame.
+            local ddAnchor = CreateFrame("Frame", nil, col)
+            ddAnchor:SetSize(1, 1)
+            ddAnchor.marginTop    = 0
+            ddAnchor.marginBottom = 0
+            ddAnchor:SetPoint("TOPLEFT", dd, "TOPLEFT", 16, -28)
+
+            local multiRoleLabel = NS.CB_CreateLabel(col, "Multiple Roles Selected", "GameFontRed")
+            multiRoleLabel:SetPoint("TOPLEFT", ddAnchor, "TOPLEFT", 0, 0)
+            multiRoleLabel:Hide()
+
+            -- Build all sub-sections anchored to ddAnchor; only one shows at a time.
             local subSections = {}
             local maxSubH     = 0
             local initSrc     = getSource(entry) or {}
             for _, sg in ipairs(group.subGroups) do
-                local sec, cbs = CB_BuildStrategySection(col, header, sg.strategies, slot, tag,
+                local sec, cbs = CB_BuildStrategySection(col, ddAnchor, sg.strategies, slot, tag,
                     function(s, checked)
                         local toggle = (checked and "+" or "-") .. s.cmd
                         NS.CB_SendBotCommand(slot.name, cmd .. " " .. toggle)
@@ -352,7 +359,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     initSrc)
                 sec:Hide()
                 subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sg.strategies }
-                maxSubH = math.max(maxSubH, #sg.strategies * 26)
+                maxSubH = math.max(maxSubH, #sg.strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom))
             end
 
             -- Show the correct sub-section based on initial data.
@@ -393,12 +400,12 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 end
             end)
 
-            -- Spacer to hold vertical room for the tallest sub-section.
+            -- Spacer to hold vertical room for the dropdown + tallest sub-section.
             local spacer = CreateFrame("Frame", nil, col)
             spacer:SetSize(1, 1)
             spacer.marginTop    = 0
             spacer.marginBottom = 0
-            spacer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -(NS.MARGIN.label.bottom + maxSubH))
+            spacer:SetPoint("TOPLEFT", ddAnchor, "TOPLEFT", 0, -maxSubH)
             prevBottom = spacer
 
             if registry then
@@ -417,7 +424,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local strategies = group.strategies
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. tag .. "_" .. gi, 160)
             NS.CB_AnchorBelow(dd, header, -16)
@@ -456,7 +463,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             -- Checkbox group
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PAD, -NS.PAD) end
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
 
             local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
@@ -562,7 +569,7 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local contentBg = CreateFrame("Frame", nil, container)
     contentBg:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
     contentBg:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
-    NS.CB_ApplyInnerSkin(contentBg)
+    NS.CB_ApplyPanelSkin(contentBg, 2)
 
     local combatContent = CreateFrame("Frame", nil, container)
     combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -581,13 +588,7 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local innerTabBtns = {}
     local function selectInnerTab(idx)
         for j, t in ipairs(innerTabBtns) do
-            if j == idx then
-                t:SetNormalFontObject(GameFontHighlightSmall)
-                t:SetButtonState("PUSHED", true)
-            else
-                t:SetNormalFontObject(GameFontNormalSmall)
-                t:SetButtonState("NORMAL")
-            end
+            t:SetActive(j == idx)
         end
         if idx == 1 then
             combatContent:Show(); nonCombatContent:Hide(); classContent:Hide()
@@ -601,11 +602,9 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
     for j, lbl in ipairs({ "Combat", "Non-Combat", classDisplayName }) do
         local jj = j
-        local itab = NS.CB_CreateButton(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
-                                        lbl, NS.TAB_WIDTH, NS.TAB_HEIGHT,
-                                        function() selectInnerTab(jj) end)
+        local itab = NS.CB_CreateTab(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
+                                     lbl, function() selectInnerTab(jj) end)
         itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + 2), 0)
-        itab:SetNormalFontObject(GameFontNormalSmall)
         innerTabBtns[j] = itab
     end
     selectInnerTab(1)
@@ -641,8 +640,7 @@ CleanBot_SelectTab = function(index, silent)
 
     for i, t in ipairs(NS.tabList) do
         local sel = (i == index)
-        t.tabBtn:SetNormalFontObject(sel and GameFontHighlightSmall or GameFontNormalSmall)
-        t.tabBtn:SetButtonState(sel and "PUSHED" or "NORMAL", sel)
+        t.tabBtn:SetActive(sel)
         if sel then t.model:Show()  else t.model:Hide()  end
         if sel then t.ctrl:Show()   else t.ctrl:Hide()   end
     end
@@ -668,10 +666,9 @@ local function CB_CreateSlot(index)
     local slot = { index = index, contentByClass = {}, active = false }
 
     -- ── Tab button ────────────────────────────────────────────
-    local tab = NS.CB_CreateButton(NS.botTabBar, "CleanBotCharTab" .. index,
-                                   "", NS.TAB_WIDTH, NS.TAB_HEIGHT,
-                                   function() CleanBot_SelectTab(slot._tabIdx) end)
-    tab:SetNormalFontObject(GameFontNormalSmall)
+    local tab = NS.CB_CreateTab(NS.botTabBar, "CleanBotCharTab" .. index,
+                                "", function() CleanBot_SelectTab(slot._tabIdx) end)
+    tab:SetWidth(NS.TAB_WIDTH)
     local icon = tab:CreateTexture(nil, "OVERLAY")
     icon:SetSize(14, 14)
     icon:SetPoint("LEFT", tab, "LEFT", 4, 0)
@@ -689,8 +686,8 @@ local function CB_CreateSlot(index)
 
     -- ── Ctrl container (holds the per-class content frames) ────
     local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. index, NS.partyContent)
-    ctrl:SetPoint("TOPLEFT",     NS.partyContent, "TOPLEFT",     ctrlLeft, -NS.PAD)
-    ctrl:SetPoint("BOTTOMRIGHT", NS.partyContent, "BOTTOMRIGHT", -NS.PAD,   NS.PAD)
+    ctrl:SetPoint("TOPLEFT",     NS.partyContent, "TOPLEFT",     ctrlLeft,                  -NS.PADDING.panel.top)
+    ctrl:SetPoint("BOTTOMRIGHT", NS.partyContent, "BOTTOMRIGHT", -NS.PADDING.panel.right,    NS.PADDING.panel.bottom)
     ctrl:Hide()
     slot.ctrl = ctrl
 
