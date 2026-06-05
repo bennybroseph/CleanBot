@@ -97,7 +97,7 @@ NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- panel:   main panels and column containers (managePanel, partyPanel, ctrl, left/right columns)
 -- section: strategy section frames (the bordered checkbox groups in the party tab)
 NS.PADDING_DEFAULTS = {
-    frame   = { top = 4, bottom = 4, left = 16, right = 16 },
+    frame   = { top = 32, bottom = 4, left = 16, right = 16 },
     panel   = { top = 6, bottom = 6, left = 6,  right = 6 },
     section = { top = 4, bottom = 4, left = 4,  right = 4 },
 }

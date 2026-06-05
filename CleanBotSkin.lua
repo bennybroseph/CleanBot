@@ -153,6 +153,188 @@ NS.CB_ApplyTitleBar = function(frame, titleText)
     lbl:SetJustifyH("CENTER")
 end
 
+-- Places a centred title label for a ContainerFrame-style window (Blizz path only).
+-- Reusable for any frame built with CB_ApplyContainerFrameSkin.
+-- CONTAINER_TITLE_Y controls how far below the top edge the label sits.
+local CONTAINER_TITLE_OFFSET = 2
+NS.CB_ApplyContainerTitleLabel = function(frame, text)
+    local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetText(text or "")
+    lbl:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2) - CONTAINER_TITLE_OFFSET)
+    lbl:SetJustifyH("CENTER")
+end
+
+-- Applies the inventory window title bar label.
+-- Blizz: plain centred label via CB_ApplyContainerTitleLabel.
+-- ElvUI: class-coloured badge with bag icon and centred label.
+NS.CB_ApplyInventoryTitleBar = function(frame, botName, class)
+    if NS.ElvUI_S then
+        local BADGE_SIZE = 50
+        local BADGE_X    = 34
+        local BADGE_Y    = 4
+        local ICON_INSET = 5
+        local cc = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class])
+                or { r = 0.5, g = 0.5, b = 0.5 }
+
+        local badge = CreateFrame("Frame", nil, frame)
+        badge:SetSize(BADGE_SIZE, BADGE_SIZE)
+        badge:SetPoint("CENTER", frame, "TOPLEFT", BADGE_X, BADGE_Y)
+        badge:SetTemplate("Default")
+        badge:SetBackdropColor(cc.r * 0.4, cc.g * 0.4, cc.b * 0.4, 1)
+
+        local icon = badge:CreateTexture(nil, "ARTWORK")
+        icon:SetPoint("TOPLEFT",     badge, "TOPLEFT",      ICON_INSET, -ICON_INSET)
+        icon:SetPoint("BOTTOMRIGHT", badge, "BOTTOMRIGHT", -ICON_INSET,  ICON_INSET)
+        icon:SetTexture("Interface\\ContainerFrame\\UI-BackpackBackground")
+        icon:SetTexCoord(0.27734375, 0.43359375, 0.01953125, 0.17578125)
+
+        local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        lbl:SetText(botName .. "'s Inventory")
+        lbl:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2))
+        lbl:SetJustifyH("CENTER")
+        return
+    end
+
+    NS.CB_ApplyContainerTitleLabel(frame, botName .. "'s Inventory")
+end
+
+-- Applies the Blizzard ContainerFrame-style backdrop to a frame.
+-- Uses UI-BackpackBackground as the tiling background and the ornate dialog
+-- border, matching the visual style of WoW's own bag frames.
+-- Unlike CB_ApplyOuterFrameSkin, this does NOT register for accent-colour or
+-- transparency refresh — the ContainerFrame look is fixed art, not theme-driven.
+-- Assembles the ContainerFrame-style visual for the inventory frame from
+-- sliced pieces of UI-BackpackBackground. Call once when the frame is created.
+-- Edges and fill are added in CB_UpdateInventoryBackground once the frame
+-- is sized by CB_RenderInventory.
+--
+-- Border measurements derived from ContainerFrame1 (192×240, texture 256×256,
+-- scale X=192/256=0.75, scale Y=240/256=0.9375):
+--   Left  : 23px screen → ~31px texture  → U  = 31/256  ≈ 0.12109
+--   Right : 12px screen →  16px texture  → U  = 240/256 = 0.93750 (start of right border)
+--   Top   : 51px screen → ~54px texture  → V  = 54/256  ≈ 0.21094
+--   Bottom: 32px screen → ~34px texture  → V  = 222/256 ≈ 0.86719 (start of bottom border)
+NS.CB_ApplyContainerFrameSkin = function(frame)
+    local TEX    = "Interface\\ContainerFrame\\UI-BackpackBackground"
+    local TILE_W = 40   -- one item cell: CELL_SIZE(37) + CELL_PAD(3)
+    local TILE_H = 40
+    local COLS   = 10
+
+    local BL_X1, BL_X2 = 65,  122
+    local BR_X1, BR_X2 = 204, 256
+
+    local FILL_X1, FILL_X2 = 122, 162  -- x crop for center and top/bottom edge fill tiles; tune as needed
+    local FILL_Y1, FILL_Y2 = 92,  132  -- y crop for center and side fill tiles; tune as needed
+
+    -- Corners and edges are static (BORDER layer so they always render above dynamic fill tiles).
+    local function makeCorner(anchor, x1, y1, x2, y2)
+        local t = frame:CreateTexture(nil, "BORDER")
+        t:SetSize(x2 - x1, y2 - y1)
+        t:SetPoint(anchor, frame, anchor, 0, 0)
+        t:SetTexture(TEX)
+        t:SetTexCoord(x1/256, x2/256, y1/256, y2/256)
+        return x2 - x1, y2 - y1
+    end
+
+    local function makeEdge(anchor, x1, y1, x2, y2, startX)
+        local tileH = y2 - y1
+        for i = 0, COLS - 3 do
+            local t = frame:CreateTexture(nil, "BORDER")
+            t:SetSize(TILE_W, tileH)
+            t:SetPoint(anchor, frame, anchor, startX + i * TILE_W, 0)
+            t:SetTexture(TEX)
+            t:SetTexCoord(x1/256, x2/256, y1/256, y2/256)
+        end
+    end
+
+    local tlW, tlH = makeCorner("TOPLEFT",      BL_X1,   0, BL_X2,  49)
+    local blW      = makeCorner("BOTTOMLEFT",   BL_X1, 213, BL_X2, 240)
+    makeCorner("TOPRIGHT",    BR_X1,   0, BR_X2,  49)
+    makeCorner("BOTTOMRIGHT", BR_X1, 213, BR_X2, 240)
+
+    makeEdge("TOPLEFT",    FILL_X1,   0, FILL_X2,  49, tlW)
+    makeEdge("BOTTOMLEFT", FILL_X1, 213, FILL_X2, 240, blW)
+
+    -- Store params needed by CB_UpdateContainerTiles.
+    frame._skinParams = {
+        tex    = TEX,
+        tileW  = TILE_W, tileH  = TILE_H,
+        centerCols = COLS - 2,
+        tlW    = tlW,   tlH    = tlH,
+        lx1    = BL_X1, lx2    = BL_X2,
+        rx1    = BR_X1, rx2    = BR_X2,
+        fx1    = FILL_X1, fx2  = FILL_X2,
+        fy1    = FILL_Y1, fy2  = FILL_Y2,
+    }
+    frame._sideLeftPool  = {}
+    frame._sideRightPool = {}
+    frame._centerPool    = {}
+end
+
+-- Updates the dynamic side and center fill tiles to match the current row count.
+-- Call from CB_RenderInventory after the row count is known.
+NS.CB_UpdateContainerTiles = function(frame, rows)
+    local p = frame._skinParams
+    if not p then return end
+
+    local function ensureAndUpdate(pool, needed, createFn, updateFn)
+        while #pool < needed do
+            pool[#pool + 1] = createFn()
+        end
+        for i, t in ipairs(pool) do
+            if i <= needed then updateFn(t, i) ; t:Show()
+            else t:Hide() end
+        end
+    end
+
+    local lW = p.lx2 - p.lx1
+    local rW = p.rx2 - p.rx1
+
+    ensureAndUpdate(frame._sideLeftPool, rows,
+        function()
+            local t = frame:CreateTexture(nil, "BACKGROUND")
+            t:SetTexture(p.tex)
+            t:SetTexCoord(p.lx1/256, p.lx2/256, p.fy1/256, p.fy2/256)
+            return t
+        end,
+        function(t, i)
+            t:SetSize(lW, p.tileH)
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -(p.tlH + (i - 1) * p.tileH))
+        end)
+
+    ensureAndUpdate(frame._sideRightPool, rows,
+        function()
+            local t = frame:CreateTexture(nil, "BACKGROUND")
+            t:SetTexture(p.tex)
+            t:SetTexCoord(p.rx1/256, p.rx2/256, p.fy1/256, p.fy2/256)
+            return t
+        end,
+        function(t, i)
+            t:SetSize(rW, p.tileH)
+            t:ClearAllPoints()
+            t:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -(p.tlH + (i - 1) * p.tileH))
+        end)
+
+    local centerNeeded = rows * p.centerCols
+    ensureAndUpdate(frame._centerPool, centerNeeded,
+        function()
+            local t = frame:CreateTexture(nil, "BACKGROUND")
+            t:SetTexture(p.tex)
+            t:SetTexCoord(p.fx1/256, p.fx2/256, p.fy1/256, p.fy2/256)
+            return t
+        end,
+        function(t, i)
+            local col = (i - 1) % p.centerCols
+            local row = math.floor((i - 1) / p.centerCols)
+            t:SetSize(p.tileW, p.tileH)
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", frame, "TOPLEFT",
+                p.tlW + col * p.tileW,
+                -(p.tlH + row * p.tileH))
+        end)
+end
+
 -- Variant of CB_ApplyPanelSkin used exclusively for the main CleanBotFrame.
 -- Non-ElvUI path uses the thick ornate WoW dialog border (NS.OUTER_BACKDROP)
 -- instead of the thin tooltip border so the window reads as a native WoW dialog.

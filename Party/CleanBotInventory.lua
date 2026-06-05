@@ -5,11 +5,11 @@ local NS = CleanBotNS
 
 NS.botInventoryFrames = NS.botInventoryFrames or {}
 
-local CELL_SIZE   = 37
-local COLS        = 10
-local CELL_PAD    = 3
-local HEADER_H    = 28
-local FOOTER_H    = 24
+local CELL_SIZE        = 37
+local COLS             = 10
+local CELL_PAD         = 3
+local FOOTER_H         = 24
+local BLIZZ_CELL_PAD = { top = 16, bottom = 0, left = 3, right = 0 }   -- extra cell padding on the Blizz path
 
 -- ── URL decode (bridge sends UrlEncodeField output) ───────────────────────
 local function UrlDecode(s)
@@ -137,9 +137,14 @@ NS.CB_GetInventoryFrame = function(key, botName)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop",  f.StopMovingOrSizing)
-    if NS.ElvUI_S then f:StripTextures() end
-    NS.CB_ApplyOuterFrameSkin(f)
-    NS.CB_ApplyTitleBar(f, botName .. "'s Inventory")
+    if NS.ElvUI_S then
+        f:StripTextures()
+        NS.CB_ApplyOuterFrameSkin(f)
+    else
+        NS.CB_ApplyContainerFrameSkin(f)
+    end
+    local class = (CleanBot_PartyBots[key] and CleanBot_PartyBots[key].class) or "WARRIOR"
+    NS.CB_ApplyInventoryTitleBar(f, botName, class)
     f:Hide()
 
     -- Close button
@@ -149,8 +154,14 @@ NS.CB_GetInventoryFrame = function(key, botName)
     if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
     -- Slot counter label (bridge path only)
+    local SLOT_LABEL_BLIZZ = { x = NS.PADDING.frame.left + 5, y = 13 }
     local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", NS.PADDING.frame.left, 8)
+    slotLabel:SetTextColor(1, 1, 1)
+    if NS.ElvUI_S then
+        slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", NS.PADDING.frame.left, 8)
+    else
+        slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", SLOT_LABEL_BLIZZ.x, SLOT_LABEL_BLIZZ.y)
+    end
     slotLabel:Hide()
     f.slotLabel = slotLabel
 
@@ -177,10 +188,12 @@ NS.CB_RenderInventory = function(key)
     local cellCount = bagTotal or #items      -- how many cells to draw
 
     -- ── Resize frame to fit grid ──────────────────────────────
+    local blizzPad = NS.ElvUI_S and { top = 0, bottom = 0, left = 0, right = 0 } or BLIZZ_CELL_PAD
     local rows    = math.max(1, math.ceil(cellCount / COLS))
     local gridH   = rows * CELL_SIZE + (rows - 1) * CELL_PAD
-    local frameH  = HEADER_H + NS.PADDING.frame.top + gridH + NS.PADDING.frame.bottom + FOOTER_H
+    local frameH  = NS.PADDING.frame.top + blizzPad.top + gridH + NS.PADDING.frame.bottom + FOOTER_H
     f:SetHeight(frameH)
+    if not NS.ElvUI_S then NS.CB_UpdateContainerTiles(f, rows) end
 
     -- ── Hide surplus cells from a previous render ─────────────
     for _, cell in ipairs(f.cells) do cell:Hide() end
@@ -192,11 +205,13 @@ NS.CB_RenderInventory = function(key)
             cell = CreateFrame("Button", nil, f)
             cell:SetSize(CELL_SIZE, CELL_SIZE)
 
-            local bg = cell:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetTexture("Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
-            bg:SetVertexColor(0.3, 0.3, 0.3, 0.8)
-            cell.bg = bg
+            if NS.ElvUI_S then
+                local bg = cell:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                bg:SetTexture("Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
+                bg:SetVertexColor(0.3, 0.3, 0.3, 0.8)
+                cell.bg = bg
+            end
 
             local icon = cell:CreateTexture(nil, "ARTWORK")
             icon:SetAllPoints()
@@ -244,8 +259,8 @@ NS.CB_RenderInventory = function(key)
         -- Position
         local col = (i - 1) % COLS
         local row = math.floor((i - 1) / COLS)
-        local xOff = NS.PADDING.frame.left + col * (CELL_SIZE + CELL_PAD)
-        local yOff = -(HEADER_H + NS.PADDING.frame.top + row * (CELL_SIZE + CELL_PAD))
+        local xOff = NS.PADDING.frame.left + blizzPad.left + col * (CELL_SIZE + CELL_PAD)
+        local yOff = -(NS.PADDING.frame.top + blizzPad.top + row * (CELL_SIZE + CELL_PAD))
         cell:ClearAllPoints()
         cell:SetPoint("TOPLEFT", f, "TOPLEFT", xOff, yOff)
 

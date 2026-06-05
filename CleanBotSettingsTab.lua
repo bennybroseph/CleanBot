@@ -412,14 +412,15 @@ NS.CleanBot_BuildSettingsContent = function()
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
+        local P_MIN, P_MAX = 0, 40
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Top",
-            "Top", 0, 20, NS.PADDING[key].top, "0", "20",
+            "Top", P_MIN, P_MAX, NS.PADDING[key].top, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
-            "Bot", 0, 20, NS.PADDING[key].bottom, "0", "20",
+            "Bot", P_MIN, P_MAX, NS.PADDING[key].bottom, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -431,13 +432,13 @@ NS.CleanBot_BuildSettingsContent = function()
         NS.CB_AnchorBelow(rowB, rowA)
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Left",
-            "Left", 0, 20, NS.PADDING[key].left, "0", "20",
+            "Left", P_MIN, P_MAX, NS.PADDING[key].left, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
-            "Right", 0, 20, NS.PADDING[key].right, "0", "20",
+            "Right", P_MIN, P_MAX, NS.PADDING[key].right, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -478,14 +479,15 @@ NS.CleanBot_BuildSettingsContent = function()
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
+        local M_RANGE = 20
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Top",
-            "Top", -12, 12, NS.MARGIN[key].top, "-12", "12",
+            "Top", -M_RANGE, M_RANGE, NS.MARGIN[key].top, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
-            "Bot", -12, 12, NS.MARGIN[key].bottom, "-12", "12",
+            "Bot", -M_RANGE, M_RANGE, NS.MARGIN[key].bottom, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -498,13 +500,13 @@ NS.CleanBot_BuildSettingsContent = function()
         NS.CB_AnchorBelow(rowB, rowA)
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Left",
-            "Left", -12, 12, NS.MARGIN[key].left, "-12", "12",
+            "Left", -M_RANGE, M_RANGE, NS.MARGIN[key].left, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
-            "Right", -12, 12, NS.MARGIN[key].right, "-12", "12",
+            "Right", -M_RANGE, M_RANGE, NS.MARGIN[key].right, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
