@@ -91,7 +91,7 @@ NS.CB_CreateModel = function(slot, parent, contentW, contentH)
 
     -- ── Refresh Equipment button ──────────────────────────────
     local refreshBtn = NS.CB_CreateButton(model, "CleanBotRefreshEquip" .. slot.index,
-                                          "Refresh Equipment", 110, 22, function()
+                                          "Refresh Equipment", 130, 22, function()
         if NS.CB_QueueEquipRefresh and slot.key then
             NS.CB_QueueEquipRefresh({{ key = slot.key, unit = slot.unit }})
         end

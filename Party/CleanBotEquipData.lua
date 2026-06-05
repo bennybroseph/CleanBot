@@ -33,10 +33,10 @@ NS.EQUIP_SLOTS = {
     { id=1,  name="Head",      side="left",   order=1, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Head"          },
     { id=2,  name="Neck",      side="left",   order=2, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Neck"          },
     { id=3,  name="Shoulder",  side="left",   order=3, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Shoulder"      },
-    { id=15, name="Back",      side="left",   order=4, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest"         },
+    { id=15, name="Back",      side="left",   order=4, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Back"          },
     { id=5,  name="Chest",     side="left",   order=5, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest"         },
-    { id=4,  name="Shirt",     side="left",   order=6, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest"         },
-    { id=19, name="Tabard",    side="left",   order=7, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest"         },
+    { id=4,  name="Shirt",     side="left",   order=6, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Shirt"         },
+    { id=19, name="Tabard",    side="left",   order=7, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Tabard"        },
     { id=9,  name="Wrist",     side="left",   order=8, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Wrists"        },
     -- ── Right column (top → bottom) ───────────────────────────
     { id=10, name="Hands",     side="right",  order=1, tex="Interface\\PaperDoll\\UI-PaperDoll-Slot-Hands"         },
