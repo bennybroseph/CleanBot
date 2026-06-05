@@ -139,13 +139,8 @@ NS.CB_GetInventoryFrame = function(key, botName)
     f:SetScript("OnDragStop",  f.StopMovingOrSizing)
     if NS.ElvUI_S then f:StripTextures() end
     NS.CB_ApplyOuterFrameSkin(f)
+    NS.CB_ApplyTitleBar(f, botName .. "'s Inventory")
     f:Hide()
-
-    -- Title
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", f, "TOP", 0, -8)
-    title:SetText(botName .. "'s Inventory")
-    f.title = title
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")

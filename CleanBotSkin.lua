@@ -120,6 +120,39 @@ NS.CB_RefreshScale = function(s)
     end
 end
 
+-- Adds the classic Blizzard dialog header ornament behind the frame title.
+-- Non-ElvUI only — ElvUI's SetTemplate already provides its own title treatment.
+-- Must be called AFTER CB_ApplyOuterFrameSkin (i.e. after any StripTextures call).
+-- The 256×64 header texture is centred at the top of the frame and elevated by 12px
+-- so it overlaps the border, matching the standard Blizzard dialog layout.
+-- Applies the title bar ornament and creates the title FontString for an outer frame.
+-- titleText is the string to display (e.g. "CleanBot", "Sample Layout").
+--
+-- Non-ElvUI: adds the Blizzard dialog header ornament (OVERLAY texture) and a
+--   compact GameFontNormal label nudged to sit in the ornament's visual band.
+-- ElvUI: skips the ornament (SetTemplate handles the chrome) and uses the larger
+--   GameFontNormalLarge centred in the title area, matching ElvUI frame conventions.
+NS.CB_ApplyTitleBar = function(frame, titleText)
+    if NS.ElvUI_S then
+        local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        lbl:SetText(titleText or "")
+        lbl:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2))
+        lbl:SetJustifyH("CENTER")
+        return
+    end
+    -- Ornament texture in OVERLAY — FontStrings render above Textures within the
+    -- same draw layer, so the label below will appear on top of the ornament.
+    local tex = frame:CreateTexture(nil, "OVERLAY")
+    tex:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
+    tex:SetWidth(256)
+    tex:SetHeight(64)
+    tex:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2))
+    local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetText(titleText or "")
+    lbl:SetPoint("CENTER", frame, "TOP", 0, -2)
+    lbl:SetJustifyH("CENTER")
+end
+
 -- Variant of CB_ApplyPanelSkin used exclusively for the main CleanBotFrame.
 -- Non-ElvUI path uses the thick ornate WoW dialog border (NS.OUTER_BACKDROP)
 -- instead of the thin tooltip border so the window reads as a native WoW dialog.

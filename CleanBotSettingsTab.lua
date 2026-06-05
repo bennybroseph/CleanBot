@@ -159,10 +159,7 @@ local function showSampleLayout()
         f:SetScript("OnDragStop",  f.StopMovingOrSizing)
         if NS.ElvUI_S then f:StripTextures() end
         NS.CB_ApplyOuterFrameSkin(f)
-
-        local titleLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        titleLbl:SetText("Sample Layout")
-        titleLbl:SetPoint("TOP", f, "TOP", 0, -8)
+        NS.CB_ApplyTitleBar(f, "Sample Layout")
 
         local closeBtn = CreateFrame("Button", "CleanBotSampleLayoutClose", f, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)

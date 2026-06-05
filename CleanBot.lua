@@ -261,6 +261,10 @@ function CleanBot_BuildFrames()
         NS.ElvUI_S:HandleCloseButton(CleanBotFrameCloseButton)
     end
     NS.CB_ApplyOuterFrameSkin(CleanBotFrame)
+    -- Hide the XML-defined ARTWORK FontString — CB_ApplyTitleBar creates its own
+    -- OVERLAY replacement so it renders above the ornament texture.
+    CleanBotFrameTitle:Hide()
+    NS.CB_ApplyTitleBar(CleanBotFrame, "CleanBot")
 
     NS.CleanBot_SelectTopTab(1)
 end
