@@ -114,8 +114,8 @@ NS.MARGIN_DEFAULTS = {
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
     slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
-    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
-    checkbox = { top = 1,  bottom = 1, left = 4, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = -12, right = 0 },
+    checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
@@ -205,12 +205,18 @@ function CleanBot_BuildFrames()
     NS.topTabBar:SetHeight(NS.TOP_BAR_H)
 
     local tabLabels = { "Manage", "Party", "Settings" }
+    local prevTopTab = nil
     for i, label in ipairs(tabLabels) do
         local idx = i
         local tab = NS.CB_CreateTab(NS.topTabBar, "CleanBotTopTab" .. i, label,
                                     function() NS.CleanBot_SelectTopTab(idx) end)
         tab:SetWidth(NS.TAB_WIDTH)
-        tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
+        if prevTopTab then
+            NS.CB_AnchorAhead(tab, prevTopTab)
+        else
+            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PADDING.frame.left + (tab.marginLeft or 0), 0)
+        end
+        prevTopTab  = tab
         NS.topTabs[i] = tab
     end
 

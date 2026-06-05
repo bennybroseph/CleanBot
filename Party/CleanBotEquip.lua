@@ -41,7 +41,7 @@ local function CB_GetWowheadPopup()
     label:SetPoint("TOPLEFT", popup, "TOPLEFT", 18, -16)
 
     local box = NS.CB_CreateEditBox(popup, nil, 344, 20)
-    NS.CB_AnchorBelow(box, label, 4)
+    NS.CB_AnchorBelow(box, label)
     box:SetAutoFocus(true)
     box:SetScript("OnEscapePressed", function(self) self:GetParent():Hide() end)
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)

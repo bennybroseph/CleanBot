@@ -56,7 +56,7 @@ local function CB_GetGeometry()
     local modelH   = contentH - NS.EQUIP_WEAPON_PAD
     local modelW   = math.floor(contentW / 3)
     local g        = NS.CB_SlotGeometry(modelW, modelH)
-    local ctrlLeft = g.colW + modelW + g.colW + NS.PAD
+    local ctrlLeft = NS.PADDING.panel.left + g.colW + modelW + g.colW + NS.PAD
     return contentW, contentH, modelH, g.colW, ctrlLeft
 end
 
@@ -212,7 +212,9 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     if prevBottom then
         NS.CB_AnchorBelow(header, prevBottom)
     else
-        header:SetPoint("TOPLEFT", parent, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
+        header:SetPoint("TOPLEFT", parent, "TOPLEFT",
+            NS.PADDING.panel.left  + (header.marginLeft or 0),
+            -(NS.PADDING.panel.top + (header.marginTop  or 0)))
     end
 
     local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
@@ -261,7 +263,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     NS.CB_AnchorBelow(setBtn, showBtn)
 
     local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. tag .. "_" .. gi, 130)
-    dd:SetPoint("LEFT", setBtn, "RIGHT", -10, 0)
+    NS.CB_AnchorAhead(dd, setBtn)
 
     UIDropDownMenu_Initialize(dd, function(self)
         local e  = CleanBot_PartyBots[slot.key]
@@ -326,7 +328,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local strategies = group.strategies
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
+                NS.PADDING.panel.left  + (header.marginLeft or 0),
+                -(NS.PADDING.panel.top + (header.marginTop  or 0))) end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotRoleDD_" .. tag, 90)
             NS.CB_AnchorBelow(dd, header)
@@ -425,7 +429,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local strategies = group.strategies
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
+                NS.PADDING.panel.left  + (header.marginLeft or 0),
+                -(NS.PADDING.panel.top + (header.marginTop  or 0))) end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotClassDD_" .. cmd .. tag .. "_" .. gi, 160)
             NS.CB_AnchorBelow(dd, header)
@@ -459,7 +465,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             -- Checkbox group
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top) end
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
+                NS.PADDING.panel.left  + (header.marginLeft or 0),
+                -(NS.PADDING.panel.top + (header.marginTop  or 0))) end
 
             local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
@@ -486,7 +494,9 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
 
     if not cs or (not cs.combat and not cs.nonCombat) then
         local label = classContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", classContent, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
+        label:SetPoint("TOPLEFT", classContent, "TOPLEFT",
+            NS.PADDING.panel.left  + (label.marginLeft or 0),
+            -(NS.PADDING.panel.top + (label.marginTop  or 0)))
         label:SetText("No class-specific options.")
         return {}
     end
@@ -600,7 +610,11 @@ local function CB_BuildBotContent(container, slot, class, tag)
         local jj = j
         local itab = NS.CB_CreateTab(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
                                      lbl, function() selectInnerTab(jj) end)
-        itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PAD + (j - 1) * (NS.TAB_WIDTH + NS.COLUMN_GAP), 0)
+        if j == 1 then
+            itab:SetPoint("LEFT", innerTabBar, "LEFT", NS.PADDING.panel.left + (itab.marginLeft or 0), 0)
+        else
+            NS.CB_AnchorAhead(itab, innerTabBtns[j - 1])
+        end
         innerTabBtns[j] = itab
     end
     selectInnerTab(1)
@@ -676,7 +690,7 @@ local function CB_CreateSlot(index)
     -- ── Model (also builds star + equip slots, all class-agnostic) ──
     local model = NS.CB_CreateModel(slot, NS.partyContent, contentW, modelH)
     model:ClearAllPoints()
-    model:SetPoint("TOPLEFT", NS.partyContent, "TOPLEFT", eqColW, 0)
+    model:SetPoint("TOPLEFT", NS.partyContent, "TOPLEFT", NS.PADDING.panel.left + eqColW, 0)
     model:Hide()
     slot.model = model
 
@@ -843,10 +857,16 @@ NS.CleanBot_RefreshTabs = function()
     NS.tabList = newTabList
 
     -- ── 4. Reposition tab buttons by display order ─────────────
+    local prevTabBtn = nil
     for i, slot in ipairs(NS.tabList) do
         slot._tabIdx = i
         slot.tabBtn:ClearAllPoints()
-        slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
+        if prevTabBtn then
+            NS.CB_AnchorAhead(slot.tabBtn, prevTabBtn)
+        else
+            slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left + (slot.tabBtn.marginLeft or 0), 0)
+        end
+        prevTabBtn = slot.tabBtn
     end
 
     -- ── 5. Equip refresh for newly-bound bots only ────────────

@@ -376,12 +376,24 @@ end
 -- ============================================================
 -- Layout helper — anchors widget directly below above using their
 -- combined margins as the gap (above.marginBottom + widget.marginTop).
--- xOffset shifts the horizontal anchor (defaults to 0).
+-- Horizontal position is inherited from the chain (BOTTOMLEFT → TOPLEFT).
+-- Horizontal margins do not apply here — they apply at wall-anchor time.
 -- ============================================================
-NS.CB_AnchorBelow = function(widget, above, xOffset)
-    local gap    = (above.marginBottom or 0) + (widget.marginTop or 0)
-    local xShift = (xOffset or 0) + (widget.marginLeft or 0) - (above.marginLeft or 0)
-    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", xShift, -gap)
+NS.CB_AnchorBelow = function(widget, above)
+    local gap = (above.marginBottom or 0) + (widget.marginTop or 0)
+    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -gap)
+end
+
+-- ============================================================
+-- Layout helper — anchors widget directly ahead (to the right) of
+-- before using their combined margins as the gap
+-- (before.marginRight + widget.marginLeft).
+-- Vertical position is inherited from the chain (TOPRIGHT → TOPLEFT).
+-- Vertical margins do not apply here — they apply at wall-anchor time.
+-- ============================================================
+NS.CB_AnchorAhead = function(widget, before)
+    local gap = (before.marginRight or 0) + (widget.marginLeft or 0)
+    widget:SetPoint("TOPLEFT", before, "TOPRIGHT", gap, 0)
 end
 
 -- ============================================================
@@ -502,6 +514,8 @@ NS.CB_CreateTab = function(parent, name, text, onClick)
         end
     end
 
+    tab.marginLeft  = NS.MARGIN.button.left
+    tab.marginRight = NS.COLUMN_GAP
     tab:SetActive(false)  -- start inactive
     return tab
 end
