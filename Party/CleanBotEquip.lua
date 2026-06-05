@@ -93,6 +93,82 @@ local function CB_ShowEquipMenu(btn)
     ToggleDropDownMenu(1, nil, equipMenu, btn, 0, 0)
 end
 
+-- ── Unequip drag (equip slot → inventory frame) ──────────────────────────
+
+local function CB_StopUnequipDrag()
+    if not NS.unequipDragging then return end
+    local d = NS.unequipDragging
+
+    if d.hoverCell then d.hoverCell:UnlockHighlight() end
+
+    if d.sourceBtn and d.sourceBtn.icon then
+        d.sourceBtn.icon:SetDesaturated(false)
+    end
+
+    if d.dropCell then
+        local entry = CleanBot_PartyBots[d.slot.key]
+        if entry then
+            local itemId   = strmatch(d.itemLink, "item:(%d+)")
+            local iconPath = GetItemIcon(tonumber(itemId) or 0)
+            d.sourceBtn.icon:Hide()
+            d.sourceBtn.itemLink = nil
+            d.dropCell.icon:SetTexture(iconPath)
+            d.dropCell.icon:Show()
+            d.dropCell.itemLink = d.itemLink
+
+            entry.pendingValidation = { link = d.itemLink, expectPresent = true }
+            NS.CB_SendBotCommand(entry.name, "ue " .. d.itemLink)
+            local capturedSlot = d.slot
+            local capturedKey  = d.slot.key
+            NS.CB_After(1.5, function()
+                if capturedSlot.unit and UnitExists(capturedSlot.unit) then
+                    NS.CB_QueueEquipRefresh({{ key = capturedKey, unit = capturedSlot.unit }})
+                end
+                NS.CB_FetchInventory(capturedKey, entry.name)
+            end)
+        end
+    end
+
+    NS.unequipDragging = nil
+    NS.CB_EndCapture()
+    ResetCursor()
+end
+
+local function CB_UnequipDragOnUpdate()
+    if not NS.unequipDragging then return end
+    local d = NS.unequipDragging
+
+    local invFrame  = NS.botInventoryFrames and NS.botInventoryFrames[d.slot.key]
+    local foundCell = nil
+    if invFrame and invFrame:IsShown() then
+        local scale  = UIParent:GetEffectiveScale()
+        local mx, my = GetCursorPosition()
+        mx, my = mx / scale, my / scale
+        for _, cell in ipairs(invFrame.cells) do
+            if cell:IsShown() and not cell.itemLink then
+                local l, r, b, t = cell:GetLeft(), cell:GetRight(), cell:GetBottom(), cell:GetTop()
+                if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
+                    foundCell = cell
+                    break
+                end
+            end
+        end
+    end
+
+    if foundCell ~= d.hoverCell then
+        if d.hoverCell then d.hoverCell:UnlockHighlight() end
+        if foundCell then foundCell:LockHighlight() end
+        d.hoverCell = foundCell
+    end
+    d.dropCell = foundCell
+end
+
+local function CB_BeginUnequipDrag()
+    NS.CB_BeginCapture(CB_UnequipDragOnUpdate, function(btn)
+        if btn == "LeftButton" then CB_StopUnequipDrag() end
+    end)
+end
+
 NS.CB_CreateEquipSlots = function(slot, model)
     slot.equipSlots = {}
 
@@ -146,10 +222,26 @@ NS.CB_CreateEquipSlots = function(slot, model)
         btn.slotName = eqdef.name
 
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
         btn:SetScript("OnClick", function(self, mouseBtn)
             if mouseBtn == "RightButton" and self.itemLink then
                 CB_ShowEquipMenu(self)
             end
+        end)
+
+        btn:SetScript("OnMouseDown", function(self, mouseBtn)
+            if mouseBtn ~= "LeftButton" or not self.itemLink then return end
+            local itemId   = strmatch(self.itemLink, "item:(%d+)")
+            local iconPath = GetItemIcon(tonumber(itemId) or 0)
+            NS.unequipDragging = { slot = slot, itemLink = self.itemLink, sourceBtn = self, overInventory = false }
+            self.icon:SetDesaturated(true)
+            GameTooltip:Hide()
+            SetCursor(iconPath)
+            CB_BeginUnequipDrag()
+        end)
+
+        btn:SetScript("OnMouseUp", function(self, mouseBtn)
+            if mouseBtn == "LeftButton" then CB_StopUnequipDrag() end
         end)
 
         btn:SetScript("OnEnter", function(self)
@@ -284,7 +376,7 @@ NS.CB_OnInspectReady = function(guid)
     -- guid not in our table = player opened inspect themselves; leave it alone
 end
 
--- Refreshes slot icons for one bot from live inventory data.
+-- Refreshes slot icons and the DressUpModel for one bot from live inventory data.
 NS.CB_RefreshEquipSlots = function(key, unit)
     local slots = NS.botEquipSlots and NS.botEquipSlots[key]
     if not slots then return end
@@ -297,6 +389,14 @@ NS.CB_RefreshEquipSlots = function(key, unit)
         else
             btn.icon:Hide()
             btn.itemLink = nil
+        end
+    end
+
+    -- Refresh the model so it renders the updated equipment appearance
+    for _, slot in ipairs(NS.tabList or {}) do
+        if slot.key == key and slot.model and slot.model:IsShown() then
+            slot.model:SetUnit(unit)
+            break
         end
     end
 end
