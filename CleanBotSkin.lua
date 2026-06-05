@@ -166,28 +166,9 @@ end
 
 -- Applies the inventory window title bar label.
 -- Blizz: plain centred label via CB_ApplyContainerTitleLabel.
--- ElvUI: class-coloured badge with bag icon and centred label.
+-- ElvUI: centred label using GameFontNormalLarge.
 NS.CB_ApplyInventoryTitleBar = function(frame, botName, class)
     if NS.ElvUI_S then
-        local BADGE_SIZE = 50
-        local BADGE_X    = 34
-        local BADGE_Y    = 4
-        local ICON_INSET = 5
-        local cc = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class])
-                or { r = 0.5, g = 0.5, b = 0.5 }
-
-        local badge = CreateFrame("Frame", nil, frame)
-        badge:SetSize(BADGE_SIZE, BADGE_SIZE)
-        badge:SetPoint("CENTER", frame, "TOPLEFT", BADGE_X, BADGE_Y)
-        badge:SetTemplate("Default")
-        badge:SetBackdropColor(cc.r * 0.4, cc.g * 0.4, cc.b * 0.4, 1)
-
-        local icon = badge:CreateTexture(nil, "ARTWORK")
-        icon:SetPoint("TOPLEFT",     badge, "TOPLEFT",      ICON_INSET, -ICON_INSET)
-        icon:SetPoint("BOTTOMRIGHT", badge, "BOTTOMRIGHT", -ICON_INSET,  ICON_INSET)
-        icon:SetTexture("Interface\\ContainerFrame\\UI-BackpackBackground")
-        icon:SetTexCoord(0.27734375, 0.43359375, 0.01953125, 0.17578125)
-
         local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         lbl:SetText(botName .. "'s Inventory")
         lbl:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2))

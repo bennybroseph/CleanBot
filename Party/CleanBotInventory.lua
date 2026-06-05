@@ -11,6 +11,23 @@ local CELL_PAD         = 3
 local FOOTER_H         = 24
 local BLIZZ_CELL_PAD = { top = 16, bottom = 0, left = 3, right = 0 }   -- extra cell padding on the Blizz path
 
+local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:0|t"
+local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:0|t"
+local COPPER_ICON = "|TInterface\\MoneyFrame\\UI-CopperIcon:0|t"
+
+local function FormatMoney(gold, silver, copper)
+    if gold == 0 and silver == 0 and copper == 0 then return "0" .. COPPER_ICON end
+    local parts = {}
+    if gold   > 0 then parts[#parts + 1] = gold   .. GOLD_ICON   end
+    if silver > 0 then parts[#parts + 1] = silver .. SILVER_ICON end
+    if copper > 0 then parts[#parts + 1] = copper .. COPPER_ICON end
+    local result = ""
+    for i, p in ipairs(parts) do
+        result = result .. (i > 1 and " " or "") .. p
+    end
+    return result
+end
+
 -- ── URL decode (bridge sends UrlEncodeField output) ───────────────────────
 local function UrlDecode(s)
     return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
@@ -153,17 +170,23 @@ NS.CB_GetInventoryFrame = function(key, botName)
     closeBtn:SetScript("OnClick", function() f:Hide() end)
     if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
+    local FOOTER_Y       = NS.ElvUI_S and 8  or 13
+    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left or (NS.PADDING.frame.left + 5)
+    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or (NS.PADDING.frame.right + 5)
+
     -- Slot counter label (bridge path only)
-    local SLOT_LABEL_BLIZZ = { x = NS.PADDING.frame.left + 5, y = 13 }
     local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     slotLabel:SetTextColor(1, 1, 1)
-    if NS.ElvUI_S then
-        slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", NS.PADDING.frame.left, 8)
-    else
-        slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", SLOT_LABEL_BLIZZ.x, SLOT_LABEL_BLIZZ.y)
-    end
+    slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FOOTER_LEFT_X, FOOTER_Y)
     slotLabel:Hide()
     f.slotLabel = slotLabel
+
+    -- Money label
+    local moneyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    moneyLabel:SetTextColor(1, 1, 1)
+    moneyLabel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -FOOTER_RIGHT_X, FOOTER_Y)
+    moneyLabel:Hide()
+    f.moneyLabel = moneyLabel
 
     -- Container for item cells (re-used across renders)
     f.cells = {}
@@ -292,6 +315,15 @@ NS.CB_RenderInventory = function(key)
         f.slotLabel:Show()
     else
         f.slotLabel:Hide()
+    end
+
+    -- ── Money display ─────────────────────────────────────────
+    local money = entry.money
+    if money then
+        f.moneyLabel:SetText(FormatMoney(money.gold or 0, money.silver or 0, money.copper or 0))
+        f.moneyLabel:Show()
+    else
+        f.moneyLabel:Hide()
     end
 end
 
