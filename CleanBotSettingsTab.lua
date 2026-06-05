@@ -176,7 +176,9 @@ local function showSampleLayout()
         -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
         local overlayCB = NS.CB_CreateCheckBox(panel, "CleanBotSampleLayoutOverlayCB")
         overlayCB:SetChecked(overlayVisible)
-        overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", NS.PADDING.panel.left, NS.PADDING.panel.bottom)
+        overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        NS.PADDING.panel.left    + (overlayCB.marginLeft   or 0),
+        NS.PADDING.panel.bottom  + (overlayCB.marginBottom or 0))
         local overlayCBLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         overlayCBLbl:SetText("Show Overlays")
         overlayCBLbl:SetPoint("LEFT", overlayCB, "RIGHT", 2, 0)
@@ -276,19 +278,19 @@ NS.CleanBot_BuildSettingsContent = function()
     local themeTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsThemeTab", "Theme",
         function() selectSubTab(1) end)
     themeTab:SetWidth(NS.TAB_WIDTH)
-    themeTab:SetPoint("LEFT", subTabBar, "LEFT", NS.PADDING.panel.left, 0)
+    themeTab:SetPoint("LEFT", subTabBar, "LEFT", NS.PADDING.panel.left + (themeTab.marginLeft or 0), 0)
     subTabs[1] = themeTab
 
     local layoutTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsLayoutTab", "Layout",
         function() selectSubTab(2) end)
     layoutTab:SetWidth(NS.TAB_WIDTH)
-    layoutTab:SetPoint("LEFT", themeTab, "RIGHT", 2, 0)
+    NS.CB_AnchorAhead(layoutTab, themeTab)
     subTabs[2] = layoutTab
 
     local otherTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsOtherTab", "Other",
         function() selectSubTab(3) end)
     otherTab:SetWidth(NS.TAB_WIDTH)
-    otherTab:SetPoint("LEFT", layoutTab, "RIGHT", 2, 0)
+    NS.CB_AnchorAhead(otherTab, layoutTab)
     subTabs[3] = otherTab
 
     -- ── Theme tab: ScrollFrame ─────────────────────────────────
@@ -318,7 +320,9 @@ NS.CleanBot_BuildSettingsContent = function()
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
         50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v end)
     scaleSlider:SetWidth(SLIDER_W)
-    scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
+    scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT",
+        NS.PADDING.panel.left  + (scaleSlider.marginLeft or 0),
+        -(NS.PADDING.panel.top + (scaleSlider.marginTop  or 0)))
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
@@ -361,7 +365,9 @@ NS.CleanBot_BuildSettingsContent = function()
     -- ── Show Sample Layout ─────────────────────────────────────
     local sampleBtn = NS.CB_CreateButton(layoutChild, "CleanBotShowSampleLayout",
         "Show Sample Layout", 140, 22, showSampleLayout)
-    sampleBtn:SetPoint("TOPLEFT", layoutChild, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
+    sampleBtn:SetPoint("TOPLEFT", layoutChild, "TOPLEFT",
+        NS.PADDING.panel.left  + (sampleBtn.marginLeft or 0),
+        -(NS.PADDING.panel.top + (sampleBtn.marginTop  or 0)))
 
     local COL_TYPE_W = 80
     local COL_GAP    = 10
@@ -412,14 +418,15 @@ NS.CleanBot_BuildSettingsContent = function()
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
+        local P_MIN, P_MAX = 0, 40
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Top",
-            "Top", 0, 20, NS.PADDING[key].top, "0", "20",
+            "Top", P_MIN, P_MAX, NS.PADDING[key].top, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
-            "Bot", 0, 20, NS.PADDING[key].bottom, "0", "20",
+            "Bot", P_MIN, P_MAX, NS.PADDING[key].bottom, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -431,13 +438,13 @@ NS.CleanBot_BuildSettingsContent = function()
         NS.CB_AnchorBelow(rowB, rowA)
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Left",
-            "Left", 0, 20, NS.PADDING[key].left, "0", "20",
+            "Left", P_MIN, P_MAX, NS.PADDING[key].left, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
-            "Right", 0, 20, NS.PADDING[key].right, "0", "20",
+            "Right", P_MIN, P_MAX, NS.PADDING[key].right, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -478,14 +485,15 @@ NS.CleanBot_BuildSettingsContent = function()
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
+        local M_RANGE = 20
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Top",
-            "Top", -12, 12, NS.MARGIN[key].top, "-12", "12",
+            "Top", -M_RANGE, M_RANGE, NS.MARGIN[key].top, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
-            "Bot", -12, 12, NS.MARGIN[key].bottom, "-12", "12",
+            "Bot", -M_RANGE, M_RANGE, NS.MARGIN[key].bottom, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -498,13 +506,13 @@ NS.CleanBot_BuildSettingsContent = function()
         NS.CB_AnchorBelow(rowB, rowA)
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Left",
-            "Left", -12, 12, NS.MARGIN[key].left, "-12", "12",
+            "Left", -M_RANGE, M_RANGE, NS.MARGIN[key].left, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
-            "Right", -12, 12, NS.MARGIN[key].right, "-12", "12",
+            "Right", -M_RANGE, M_RANGE, NS.MARGIN[key].right, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
@@ -521,7 +529,9 @@ NS.CleanBot_BuildSettingsContent = function()
 
     -- ── Other tab: Bot Emotes ──────────────────────────────────
     local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behaviour")
-    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT", NS.PADDING.panel.left, -NS.PADDING.panel.top)
+    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT",
+        NS.PADDING.panel.left  + (botEmotesHeader.marginLeft or 0),
+        -(NS.PADDING.panel.top + (botEmotesHeader.marginTop  or 0)))
 
     local botEmotesCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotBotEmotesCB")
     botEmotesCB:SetChecked(NS.botEmotes)
@@ -598,7 +608,9 @@ NS.CleanBot_BuildSettingsContent = function()
         end
         syncPendingToUI()
     end)
-    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", NS.PADDING.panel.left, NS.PADDING.panel.bottom)
+    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        NS.PADDING.panel.left   + (defaultsBtn.marginLeft   or 0),
+        NS.PADDING.panel.bottom + (defaultsBtn.marginBottom or 0))
 
     local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
         pendingScale        = NS.scale
@@ -639,7 +651,9 @@ NS.CleanBot_BuildSettingsContent = function()
         end
         syncPendingToUI()
     end)
-    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, NS.PADDING.panel.bottom)
+    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -(NS.PADDING.panel.right  + (cancelBtn.marginRight  or 0)),
+        NS.PADDING.panel.bottom   + (cancelBtn.marginBottom or 0))
 
     local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
         -- Scale

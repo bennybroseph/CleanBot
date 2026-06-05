@@ -84,12 +84,13 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH       = 680
+NS.FRAME_WIDTH       = 850
 NS.FRAME_HEIGHT      = 560
 NS.TAB_WIDTH         = 88
 NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
+NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
 NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border margin needed
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
@@ -97,7 +98,7 @@ NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- panel:   main panels and column containers (managePanel, partyPanel, ctrl, left/right columns)
 -- section: strategy section frames (the bordered checkbox groups in the party tab)
 NS.PADDING_DEFAULTS = {
-    frame   = { top = 4, bottom = 4, left = 16, right = 16 },
+    frame   = { top = 32, bottom = 4, left = 16, right = 16 },
     panel   = { top = 6, bottom = 6, left = 6,  right = 6 },
     section = { top = 4, bottom = 4, left = 4,  right = 4 },
 }
@@ -113,8 +114,8 @@ NS.MARGIN_DEFAULTS = {
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
     slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
-    dropdown = { top = 2,  bottom = 2, left = 0, right = 0 },
-    checkbox = { top = 1,  bottom = 1, left = 4, right = 0 },
+    dropdown = { top = 2,  bottom = 2, left = -12, right = 0 },
+    checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
 }
@@ -204,12 +205,18 @@ function CleanBot_BuildFrames()
     NS.topTabBar:SetHeight(NS.TOP_BAR_H)
 
     local tabLabels = { "Manage", "Party", "Settings" }
+    local prevTopTab = nil
     for i, label in ipairs(tabLabels) do
         local idx = i
         local tab = NS.CB_CreateTab(NS.topTabBar, "CleanBotTopTab" .. i, label,
                                     function() NS.CleanBot_SelectTopTab(idx) end)
         tab:SetWidth(NS.TAB_WIDTH)
-        tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PAD + (i - 1) * (NS.TAB_WIDTH + 2), 0)
+        if prevTopTab then
+            NS.CB_AnchorAhead(tab, prevTopTab)
+        else
+            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PADDING.frame.left + (tab.marginLeft or 0), 0)
+        end
+        prevTopTab  = tab
         NS.topTabs[i] = tab
     end
 
@@ -282,8 +289,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- This must happen before SavedVars are applied so that the Defaults button in
         -- Settings shows the correct value, and so that NS.accentColor starts at the
         -- right value when no saved data exists yet.
-        local defaultAccentColor = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        local defaultAccentColor  = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        local defaultTransparency = NS.ElvUI_S and 75 or 90
         NS.THEME_DEFAULTS.accentColor   = defaultAccentColor
+        NS.THEME_DEFAULTS.transparency  = defaultTransparency
+        NS.transparency                 = defaultTransparency
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end

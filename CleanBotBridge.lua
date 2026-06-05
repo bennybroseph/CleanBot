@@ -195,7 +195,7 @@ function CleanBot_RequestRosterThenRefresh()
     NS.CB_RequestSync()
 end
 
--- Tick inventory timeouts for the whisper path (3s silence = done)
+-- Tick inventory and money timeouts for the whisper path (3s silence = done)
 local invTickFrame = CreateFrame("Frame")
 invTickFrame:SetScript("OnUpdate", function(self, dt)
     for key, entry in pairs(CleanBot_PartyBots) do
@@ -206,6 +206,20 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                 entry.invTimeout        = 0
                 local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
                 if f and f:IsShown() then NS.CB_RenderInventory(key) end
+
+                -- Inventory done — now ask for money separately so the reply
+                -- arrives on its own and is not swallowed by awaitingInventory.
+                entry.awaitingMoney  = true
+                entry.moneyTimeout   = 0
+                SendChatMessage("stats", "WHISPER", nil, entry.name)
+            end
+        end
+
+        if entry.awaitingMoney then
+            entry.moneyTimeout = (entry.moneyTimeout or 0) + dt
+            if entry.moneyTimeout >= 3 then
+                entry.awaitingMoney  = false
+                entry.moneyTimeout   = 0
             end
         end
     end
@@ -291,6 +305,36 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
             entry.invTimeout = 0   -- reset timeout on every whisper from this bot
+            return
+        end
+
+        -- Money/stats capture (whisper path): reply from "stats" whisper.
+        -- Format: "Ng Ns Nc, used/total Bag, X% (Y) Dur, cur/max% XP"
+        -- Each money denomination is optional (e.g. a broke bot omits gold).
+        if entry and entry.awaitingMoney then
+            entry.moneyTimeout  = 0
+            entry.awaitingMoney = false
+
+            local gold   = tonumber(msg:match("(%d+)g")) or 0
+            local silver = tonumber(msg:match("(%d+)s")) or 0
+            local copper = tonumber(msg:match("(%d+)c")) or 0
+            entry.money  = { gold = gold, silver = silver, copper = copper }
+
+            -- Bag totals are not available from the "items" whisper, but stats gives them.
+            local bagUsed, bagTotal = msg:match("(%d+)/(%d+)%s+Bag")
+            if bagUsed and entry.inventory then
+                entry.inventory.bagUsed  = tonumber(bagUsed)
+                entry.inventory.bagTotal = tonumber(bagTotal)
+            end
+
+            -- Durability and XP are whisper-only — store for future display.
+            local durPct            = tonumber(msg:match("(%d+)%%%s+%(%d+%)%s+Dur"))
+            local xpCur, xpMax     = msg:match("(%d+)/(%d+)%%%s+XP")
+            entry.durability        = durPct
+            entry.xpPercent         = xpCur and (tonumber(xpCur) .. "/" .. tonumber(xpMax)) or nil
+
+            local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
+            if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
             return
         end
 
@@ -421,18 +465,27 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
         elseif msg and strsub(msg, 1, 12) == "INV_SUMMARY~" then
-            local rest                  = strsub(msg, 13)
-            local name, r2              = NS.CB_SplitOnce(rest, "~")
-            local _, r3                 = NS.CB_SplitOnce(r2,   "~")  -- skip token
-            local gold, r4              = NS.CB_SplitOnce(r3,   "~")  -- skip gold
-            local silver, r5            = NS.CB_SplitOnce(r4,   "~")  -- skip silver
-            local copper, r6            = NS.CB_SplitOnce(r5,   "~")  -- skip copper
-            local bagUsed, bagTotal     = NS.CB_SplitOnce(r6,   "~")
+            local rest              = strsub(msg, 13)
+            local name, r2          = NS.CB_SplitOnce(rest, "~")
+            local _, r3             = NS.CB_SplitOnce(r2,   "~")  -- skip token
+            local gold, r4          = NS.CB_SplitOnce(r3,   "~")
+            local silver, r5        = NS.CB_SplitOnce(r4,   "~")
+            local copper, r6        = NS.CB_SplitOnce(r5,   "~")
+            local bagUsed, bagTotal = NS.CB_SplitOnce(r6,   "~")
             local key   = strlower(name)
             local entry = CleanBot_PartyBots[key]
-            if entry and entry.inventory then
-                entry.inventory.bagUsed  = tonumber(bagUsed)  or 0
-                entry.inventory.bagTotal = tonumber(bagTotal) or 0
+            if entry then
+                -- Money is a bot attribute, not an inventory item — stored separately
+                -- so it can be displayed and accessed independently of the bag grid.
+                entry.money = {
+                    gold   = tonumber(gold)   or 0,
+                    silver = tonumber(silver) or 0,
+                    copper = tonumber(copper) or 0,
+                }
+                if entry.inventory then
+                    entry.inventory.bagUsed  = tonumber(bagUsed)  or 0
+                    entry.inventory.bagTotal = tonumber(bagTotal) or 0
+                end
             end
 
         elseif msg and strsub(msg, 1, 9) == "INV_ITEM~" then
