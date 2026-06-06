@@ -297,7 +297,8 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
-        if type(CleanBot_SavedVars.favoriteBots) ~= "table" then CleanBot_SavedVars.favoriteBots = {} end
+        if type(CleanBot_SavedVars.favoriteBots)        ~= "table" then CleanBot_SavedVars.favoriteBots        = {} end
+        if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
 
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then

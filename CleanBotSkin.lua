@@ -452,6 +452,92 @@ NS.CB_CreateHeader = function(parent, text, fontObj)
     return hdr
 end
 
+-- Creates a collapsible section for the Manage tab.
+--
+-- All widgets — the toggle button, the title label, and all content widgets —
+-- are direct children of parent. No container frames are used, which guarantees
+-- visibility in WoW 3.3.5a regardless of frame-level or clipping behaviour.
+--
+-- section.frame starts as the toggle button. Call section:Finalize(lastWidget)
+-- once all content widgets are added; this sets section.frame to lastWidget so
+-- the next section can chain its CB_AnchorBelow off the correct anchor point.
+--
+-- Content widgets must be registered via:
+--   section.contentWidgets[#section.contentWidgets + 1] = widget
+-- They are hidden/shown as a group when the section is toggled.
+--
+-- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
+NS.CB_CreateSection = function(parent, key, title)
+    local section = {}
+
+    -- Toggle button: direct child of parent — same as every other visible widget.
+    local toggleBtn = NS.CB_CreateButton(parent,
+        "CleanBotSection_" .. key .. "_Toggle", "-", 18, 18)
+
+    -- Title label: FontString on parent, to the right of the toggle button.
+    local titleLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    titleLabel:SetText(title)
+    titleLabel:SetPoint("LEFT", toggleBtn, "RIGHT", 4, 0)
+
+    -- Load saved collapse state.
+    local saved = CleanBot_SavedVars and CleanBot_SavedVars.collapsedSections
+    section.collapsed      = saved and saved[key] == true or false
+    section.key            = key
+    section.toggleBtn      = toggleBtn   -- always the section header; never hidden
+    section.lastWidget     = nil         -- set by Finalize; deepest content widget
+    section.frame          = toggleBtn   -- updated to lastWidget in Finalize
+    section.contentWidgets = {}
+    section.onToggle       = nil         -- optional callback fired after each toggle
+
+    -- Returns the bottommost currently-visible widget for this section.
+    -- Collapsed → header toggle button only; expanded → last content widget.
+    -- Falls back to toggleBtn if Finalize has not been called yet.
+    section.GetAnchor = function(self)
+        return self.collapsed and self.toggleBtn or (self.lastWidget or self.toggleBtn)
+    end
+
+    section.Apply = function(self)
+        for _, w in ipairs(self.contentWidgets) do
+            if self.collapsed then w:Hide() else w:Show() end
+        end
+        toggleBtn:SetText(self.collapsed and "+" or "-")
+    end
+
+    section.Toggle = function(self)
+        self.collapsed = not self.collapsed
+        if CleanBot_SavedVars then
+            if not CleanBot_SavedVars.collapsedSections then
+                CleanBot_SavedVars.collapsedSections = {}
+            end
+            CleanBot_SavedVars.collapsedSections[self.key] = self.collapsed or nil
+        end
+        self:Apply()
+        -- Fire after Apply so GetAnchor already reflects the new state.
+        if self.onToggle then self.onToggle() end
+    end
+
+    -- Call once all content widgets have been added and registered.
+    -- lastWidget: the bottommost content widget in the section.
+    -- Sets section.frame / section.lastWidget so GetAnchor and the next
+    -- section's anchor both resolve correctly.
+    section.Finalize = function(self, lastWidget)
+        self.lastWidget = lastWidget
+        self.frame      = lastWidget
+        self:Apply()
+    end
+
+    toggleBtn:SetScript("OnClick", function() section:Toggle() end)
+
+    -- Match label margins so CB_AnchorBelow spacing is consistent with the
+    -- old plain-label style that sections replace.
+    toggleBtn.marginTop    = NS.MARGIN.label.top
+    toggleBtn.marginBottom = NS.MARGIN.label.bottom
+    toggleBtn.marginLeft   = NS.MARGIN.label.left
+    toggleBtn.marginRight  = NS.MARGIN.label.right
+
+    return section
+end
+
 -- UIPanelButtonTemplate button. w/h, text and onClick are optional.
 NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
     local btn = CreateFrame("Button", name, parent, "UIPanelButtonTemplate")

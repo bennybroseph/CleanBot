@@ -160,10 +160,10 @@ NS.CleanBot_BuildManageContent = function()
         -(NS.PADDING.panel.top + (inviteByNameBtn.marginTop  or 0)))
 
     -- ── Target section ────────────────────────────────────────
-    local targetLabel = NS.CB_CreateLabel(NS.managePanel, "Target")
-    NS.CB_AnchorBelow(targetLabel, inviteByNameBtn)
+    local targetSection = NS.CB_CreateSection(NS.managePanel, "target", "Target")
+    NS.CB_AnchorBelow(targetSection.frame, inviteByNameBtn)
+    local tw = targetSection.contentWidgets  -- shorthand for tracking
 
-    -- ── Column 1: party invite / uninvite ─────────────────────
     local inviteTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageInviteTargetBtn",
         "Invite Target", 120, 24, function()
             local target = requireValidPlayerTarget()
@@ -174,7 +174,8 @@ NS.CleanBot_BuildManageContent = function()
             end
             InviteUnit(target)
         end)
-    NS.CB_AnchorBelow(inviteTargetBtn, targetLabel)
+    NS.CB_AnchorBelow(inviteTargetBtn, targetSection.frame)
+    tw[#tw + 1] = inviteTargetBtn
 
     local uninviteTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageUninviteTargetBtn",
         "Uninvite Target", 120, 24, function()
@@ -191,6 +192,7 @@ NS.CleanBot_BuildManageContent = function()
             UninviteUnit(target)
         end)
     NS.CB_AnchorBelow(uninviteTargetBtn, inviteTargetBtn)
+    tw[#tw + 1] = uninviteTargetBtn
 
     local uninviteAllBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageUninviteAllBtn",
         "Uninvite All", 120, 24, function()
@@ -208,8 +210,8 @@ NS.CleanBot_BuildManageContent = function()
             end
         end)
     NS.CB_AnchorBelow(uninviteAllBtn, uninviteTargetBtn)
+    tw[#tw + 1] = uninviteAllBtn
 
-    -- ── Column 2: bot login / logout (ahead of column 1) ──────
     local loginTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageLoginTargetBtn",
         "Login Target", 120, 24, function()
             local target = requireValidPlayerTarget()
@@ -218,6 +220,7 @@ NS.CleanBot_BuildManageContent = function()
         end)
     loginTargetBtn.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(loginTargetBtn, inviteTargetBtn)
+    tw[#tw + 1] = loginTargetBtn
 
     local logoutTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageLogoutTargetBtn",
         "Logout Target", 120, 24, function()
@@ -226,15 +229,18 @@ NS.CleanBot_BuildManageContent = function()
             SendChatMessage(".playerbots bot remove " .. target, "SAY")
         end)
     NS.CB_AnchorBelow(logoutTargetBtn, loginTargetBtn)
+    tw[#tw + 1] = logoutTargetBtn
 
     local logoutAllBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageLogoutAllBtn",
         "Logout All", 120, 24, function()
             SendChatMessage(".playerbots bot remove *", "SAY")
         end)
     NS.CB_AnchorBelow(logoutAllBtn, logoutTargetBtn)
+    tw[#tw + 1] = logoutAllBtn
+
+    targetSection:Finalize(uninviteAllBtn)  -- deepest col-1 widget; col-2 is same depth
 
     -- ── Party/Raid section ────────────────────────────────────
-    -- Routes a command string to RAID if in a raid, PARTY if in a party.
     local function CB_SendGroupCommand(cmd)
         if GetNumRaidMembers() > 0 then
             SendChatMessage(cmd, "RAID")
@@ -245,43 +251,42 @@ NS.CleanBot_BuildManageContent = function()
         end
     end
 
-    local partyRaidLabel = NS.CB_CreateLabel(NS.managePanel, "Party/Raid")
-    NS.CB_AnchorBelow(partyRaidLabel, uninviteAllBtn)
+    local partyRaidSection = NS.CB_CreateSection(NS.managePanel, "partyRaid", "Party/Raid")
+    NS.CB_AnchorBelow(partyRaidSection.frame, targetSection.frame)
+    local pw = partyRaidSection.contentWidgets
 
     local summonBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageSummonBtn",
-        "Summon", 120, 24, function()
-            CB_SendGroupCommand("summon")
-        end)
-    NS.CB_AnchorBelow(summonBtn, partyRaidLabel)
+        "Summon", 120, 24, function() CB_SendGroupCommand("summon") end)
+    NS.CB_AnchorBelow(summonBtn, partyRaidSection.frame)
+    pw[#pw + 1] = summonBtn
 
     local maintenanceBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageMaintenanceBtn",
-        "Maintenance", 120, 24, function()
-            CB_SendGroupCommand("maintenance")
-        end)
+        "Maintenance", 120, 24, function() CB_SendGroupCommand("maintenance") end)
     NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
+    pw[#pw + 1] = maintenanceBtn
 
     local eatDrinkBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageEatDrinkBtn",
-        "Eat/Drink", 120, 24, function()
-            CB_SendGroupCommand("drink")
-        end)
+        "Eat/Drink", 120, 24, function() CB_SendGroupCommand("drink") end)
     NS.CB_AnchorBelow(eatDrinkBtn, maintenanceBtn)
+    pw[#pw + 1] = eatDrinkBtn
 
     local reviveBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageReviveBtn",
-        "Revive", 120, 24, function()
-            CB_SendGroupCommand("revive")
-        end)
+        "Revive", 120, 24, function() CB_SendGroupCommand("revive") end)
     reviveBtn.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(reviveBtn, summonBtn)
+    pw[#pw + 1] = reviveBtn
 
     local releaseBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageReleaseBtn",
-        "Release", 120, 24, function()
-            CB_SendGroupCommand("release")
-        end)
+        "Release", 120, 24, function() CB_SendGroupCommand("release") end)
     NS.CB_AnchorBelow(releaseBtn, reviveBtn)
+    pw[#pw + 1] = releaseBtn
+
+    partyRaidSection:Finalize(eatDrinkBtn)  -- col-1 is deeper
 
     -- ── Favorites section ─────────────────────────────────────
-    local favLabel = NS.CB_CreateLabel(NS.managePanel, "Favorites")
-    NS.CB_AnchorBelow(favLabel, eatDrinkBtn)
+    local favoritesSection = NS.CB_CreateSection(NS.managePanel, "favorites", "Favorites")
+    NS.CB_AnchorBelow(favoritesSection.frame, partyRaidSection.frame)
+    local fw = favoritesSection.contentWidgets
 
     local inviteAllBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotInviteAllFavoritesBtn",
         "Invite All", 80, 24, function()
@@ -294,7 +299,8 @@ NS.CleanBot_BuildManageContent = function()
                 SendChatMessage(".playerbots bot add " .. name, "SAY")
             end
         end)
-    NS.CB_AnchorBelow(inviteAllBtn, favLabel)
+    NS.CB_AnchorBelow(inviteAllBtn, favoritesSection.frame)
+    fw[#fw + 1] = inviteAllBtn
 
     local selectedFavName = nil
     local addFavBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotAddFavoriteBtn",
@@ -306,14 +312,18 @@ NS.CleanBot_BuildManageContent = function()
             SendChatMessage(".playerbots bot add " .. selectedFavName, "SAY")
         end)
     NS.CB_AnchorBelow(addFavBtn, inviteAllBtn)
+    fw[#fw + 1] = addFavBtn
     local favDD = makeListDropdown("CleanBotFavoritesDD", addFavBtn, favoritesList,
         "No favorites saved", function(name) selectedFavName = name end)
+    fw[#fw + 1] = favDD
 
     local selectedDelName = nil
     local delFavBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotDeleteFavoriteBtn", "Delete", 60, 24)
     NS.CB_AnchorBelow(delFavBtn, addFavBtn)
+    fw[#fw + 1] = delFavBtn
     local delFavDD = makeListDropdown("CleanBotFavoritesDelDD", delFavBtn, favoritesList,
         "No favorites saved", function(name) selectedDelName = name end)
+    fw[#fw + 1] = delFavDD
     delFavBtn:SetScript("OnClick", function()
         if not selectedDelName then
             NS.CB_Print("No favorite selected.")
@@ -332,15 +342,19 @@ NS.CleanBot_BuildManageContent = function()
         selectedFavName = nil
     end)
 
+    favoritesSection:Finalize(delFavBtn)
+
     -- ── Altbots section ───────────────────────────────────────
-    local altLabel = NS.CB_CreateLabel(NS.managePanel, "Altbots")
-    NS.CB_AnchorBelow(altLabel, delFavBtn)
+    local altbotsSection = NS.CB_CreateSection(NS.managePanel, "altbots", "Altbots")
+    NS.CB_AnchorBelow(altbotsSection.frame, favoritesSection.frame)
+    local aw = altbotsSection.contentWidgets
 
     local linkAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotLinkAltBtn",
         "Link Account", 100, 24, function()
             StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_NAME")
         end)
-    NS.CB_AnchorBelow(linkAltBtn, altLabel)
+    NS.CB_AnchorBelow(linkAltBtn, altbotsSection.frame)
+    aw[#aw + 1] = linkAltBtn
 
     local inviteAllAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotInviteAllAltBtn",
         "Invite All", 100, 24, function()
@@ -354,6 +368,7 @@ NS.CleanBot_BuildManageContent = function()
             end
         end)
     NS.CB_AnchorBelow(inviteAllAltBtn, linkAltBtn)
+    aw[#aw + 1] = inviteAllAltBtn
 
     local selectedAltAccount = nil
     local addAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotAddAltBtn",
@@ -365,22 +380,27 @@ NS.CleanBot_BuildManageContent = function()
             SendChatMessage(".playerbots bot addaccount " .. selectedAltAccount, "SAY")
         end)
     NS.CB_AnchorBelow(addAltBtn, inviteAllAltBtn)
+    aw[#aw + 1] = addAltBtn
 
     local altDD = makeListDropdown("CleanBotAltAccountDD", addAltBtn, linkedAccountsList,
         "No accounts found", function(name) selectedAltAccount = name end)
+    aw[#aw + 1] = altDD
 
     local refreshAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotRefreshAltBtn",
         "Refresh", 60, 24, function()
             NS.CleanBot_FetchLinkedAccounts()
         end)
     NS.CB_AnchorAhead(refreshAltBtn, altDD)
+    aw[#aw + 1] = refreshAltBtn
 
     local selectedUnlinkAccount = nil
     local unlinkAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotUnlinkAltBtn", "Unlink Account", 100, 24)
     NS.CB_AnchorBelow(unlinkAltBtn, addAltBtn)
+    aw[#aw + 1] = unlinkAltBtn
 
     local unlinkDD = makeListDropdown("CleanBotUnlinkAccountDD", unlinkAltBtn, linkedAccountsList,
         "No accounts found", function(name) selectedUnlinkAccount = name end)
+    aw[#aw + 1] = unlinkDD
 
     unlinkAltBtn:SetScript("OnClick", function()
         if not selectedUnlinkAccount then
@@ -399,4 +419,26 @@ NS.CleanBot_BuildManageContent = function()
         selectedUnlinkAccount = nil
         selectedAltAccount    = nil
     end)
+
+    altbotsSection:Finalize(unlinkAltBtn)
+
+    -- ── Reflow: re-anchor section headers after any collapse/expand ───────────
+    -- Hidden widgets still occupy their anchor positions in WoW, leaving a gap
+    -- when a section collapses. Reflow fixes this by re-setting each section
+    -- header's TOPLEFT to the last *visible* widget of the section above it.
+    -- Called once at the end to correct any saved collapsed state, then wired
+    -- into each section's onToggle so it fires on every expand/collapse.
+    local function reflow()
+        NS.CB_AnchorBelow(targetSection.toggleBtn,    inviteByNameBtn)
+        NS.CB_AnchorBelow(partyRaidSection.toggleBtn, targetSection:GetAnchor())
+        NS.CB_AnchorBelow(favoritesSection.toggleBtn, partyRaidSection:GetAnchor())
+        NS.CB_AnchorBelow(altbotsSection.toggleBtn,   favoritesSection:GetAnchor())
+    end
+
+    targetSection.onToggle    = reflow
+    partyRaidSection.onToggle = reflow
+    favoritesSection.onToggle = reflow
+    altbotsSection.onToggle   = reflow
+
+    reflow()  -- apply correct initial positions when any section is saved as collapsed
 end
