@@ -5,11 +5,22 @@ local NS = CleanBotNS
 
 NS.botInventoryFrames = NS.botInventoryFrames or {}
 
-local CELL_SIZE        = 37
-local COLS             = 10
-local CELL_PAD         = 3
-local FOOTER_H         = 24
-local BLIZZ_CELL_PAD = { top = 16, bottom = 0, left = 3, right = 0 }   -- extra cell padding on the Blizz path
+local CELL_SIZE = 37
+local COLS      = 10
+local CELL_PAD  = 3
+local FOOTER_H  = 24
+
+-- These replace NS.PADDING.frame.* entirely on the Blizz path — the art has
+-- its own fixed spacing that doesn't respond to the user-tunable padding values.
+local BLIZZ_INV_PAD = { top = 49, bottom = 6, left = 17, right = 12 }
+
+-- Manual pixel positions for the slot-count and money footer labels (Blizz path only).
+-- Relative to the frame's BOTTOMLEFT / BOTTOMRIGHT corners respectively.
+-- Adjust these two constants to reposition the labels without touching layout logic.
+local BLIZZ_LABEL_X = 20   -- inset from left (slot label) / right (money label) edge
+local BLIZZ_LABEL_Y = 14   -- distance above the bottom edge
+local BLIZZ_CLOSE_X = 0   -- X offset from TOPRIGHT for the close button (negative = left)
+local BLIZZ_CLOSE_Y = -1   -- Y offset from TOPRIGHT for the close button (negative = down)
 
 local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:0|t"
 local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:0|t"
@@ -49,9 +60,7 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 -- apply the change, re-queries inventory. Shared by the right-click menu
 -- and drag-and-drop paths.
 local function CB_EquipItem(key, botName, link)
-    local itemId     = strmatch(link, "item:(%d+)")
-    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
-    NS.CB_SendBotCommand(botName, "e " .. (apiLink or link))
+    NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
     NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
 end
 
@@ -64,7 +73,6 @@ local function CB_ShowInvMenu(cell, key)
     equipLoc = equipLoc or ""
     local isEquipment  = equipLoc ~= ""
     local isConsumable = itemType == "Consumable"
-    if not isEquipment and not isConsumable then return end
 
     UIDropDownMenu_Initialize(invMenu, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -85,10 +93,23 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                NS.CB_SendBotCommand(entry.name, "use " .. cell.itemLink)
+                NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
+                -- Optimistic update: decrement stack or clear cell immediately.
+                local curCount = tonumber(cell.countText:GetText()) or 1
+                if curCount > 1 then
+                    cell.countText:SetText(curCount - 1)
+                else
+                    cell.icon:Hide()
+                    cell.countText:Hide()
+                    cell.itemLink = nil
+                    NS.CB_ClearQualityBorder(cell)
+                end
+                NS.CB_After(1.5, function() NS.CB_FetchInventory(key, entry.name) end)
             end
             UIDropDownMenu_AddButton(info)
         end
+
+        NS.CB_AddWowheadMenuButton(info, cell.itemLink)
 
         info.text = "Cancel"
         info.func = function() CloseDropDownMenus() end
@@ -134,13 +155,15 @@ local function CB_ItemFitsSlot(link, slotId)
 end
 
 local function CB_SetSlotTint(btn, r, g, b)
-    if btn.bg   then btn.bg:SetVertexColor(r, g, b)                    end
+    local bgTex = btn.bgTex or btn.bg  -- bgTex = equip slot (bg is a Frame); bg = inv cell (bg is a Texture)
+    if bgTex then bgTex:SetVertexColor(r, g, b) end
     if btn.icon and btn.icon:IsShown() then btn.icon:SetVertexColor(r, g, b) end
 end
 
 local function CB_ResetSlotTint(btn)
-    if btn.bg   then btn.bg:SetVertexColor(1, 1, 1)   end
-    if btn.icon then btn.icon:SetVertexColor(1, 1, 1)  end
+    local bgTex = btn.bgTex or btn.bg
+    if bgTex then bgTex:SetVertexColor(1, 1, 1) end
+    if btn.icon then btn.icon:SetVertexColor(1, 1, 1) end
 end
 
 -- ── Drag stop (shared by cell OnMouseUp and capture frame OnMouseUp) ─────
@@ -165,6 +188,7 @@ local function CB_StopDrag()
             src.icon:Hide()
             src.itemLink = nil
             if src.countText then src.countText:Hide() end
+            NS.CB_ClearQualityBorder(src)
         end
     elseif invDropCell and src then
         -- ── Drop onto inventory cell → visual swap ─────────────
@@ -190,6 +214,20 @@ local function CB_StopDrag()
         invDropCell.itemLink = tmpLink
         if tmpCount then invDropCell.countText:SetText(tmpCount); invDropCell.countText:Show()
         else invDropCell.countText:Hide() end
+
+        -- Sync quality borders to match swapped item links.
+        if src.itemLink then
+            local _, _, q = GetItemInfo(src.itemLink)
+            if q then NS.CB_SetQualityBorder(src, q) else NS.CB_ClearQualityBorder(src) end
+        else
+            NS.CB_ClearQualityBorder(src)
+        end
+        if invDropCell.itemLink then
+            local _, _, q = GetItemInfo(invDropCell.itemLink)
+            if q then NS.CB_SetQualityBorder(invDropCell, q) else NS.CB_ClearQualityBorder(invDropCell) end
+        else
+            NS.CB_ClearQualityBorder(invDropCell)
+        end
 
         src.icon:SetDesaturated(false)
     else
@@ -282,7 +320,9 @@ end
 NS.CB_GetInventoryFrame = function(key, botName)
     if NS.botInventoryFrames[key] then return NS.botInventoryFrames[key] end
 
-    local frameW = NS.PADDING.frame.left + NS.PADDING.frame.right + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
+    local padL   = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_INV_PAD.left
+    local padR   = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_INV_PAD.right
+    local frameW = padL + padR + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
     local f = CreateFrame("Frame", "CleanBotInventory_" .. key, UIParent)
     NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
@@ -305,13 +345,17 @@ NS.CB_GetInventoryFrame = function(key, botName)
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+    if NS.ElvUI_S then
+        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+        NS.ElvUI_S:HandleCloseButton(closeBtn)
+    else
+        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", BLIZZ_CLOSE_X, BLIZZ_CLOSE_Y)
+    end
     closeBtn:SetScript("OnClick", function() f:Hide() end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
-    local FOOTER_Y       = NS.ElvUI_S and 8  or 13
-    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left or (NS.PADDING.frame.left + 5)
-    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or (NS.PADDING.frame.right + 5)
+    local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
+    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X
+    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_LABEL_X
 
     -- Slot counter label (bridge path only)
     local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -441,6 +485,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
                 cell.icon:Hide()
                 cell.itemLink = nil
                 cell.countText:Hide()
+                NS.CB_ClearQualityBorder(cell)
             end
         end
     end
@@ -467,6 +512,8 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.icon:SetTexture(GetItemIcon(strmatch(item.link, "item:(%d+)") or 0))
             cell.icon:Show()
             cell.itemLink = item.link
+            local _, _, quality = GetItemInfo(item.link)
+            if quality then NS.CB_SetQualityBorder(cell, quality) end
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -534,10 +581,12 @@ NS.CB_RenderInventory = function(key)
     local items = CB_SortInventory(rawItems)
 
     -- ── Resize frame to fit grid ──────────────────────────────
-    local blizzPad = NS.ElvUI_S and { top = 0, bottom = 0, left = 0, right = 0 } or BLIZZ_CELL_PAD
-    local rows    = math.max(1, math.ceil(cellCount / COLS))
-    local gridH   = rows * CELL_SIZE + (rows - 1) * CELL_PAD
-    local frameH  = NS.PADDING.frame.top + blizzPad.top + gridH + NS.PADDING.frame.bottom + FOOTER_H
+    local padTop    = NS.ElvUI_S and NS.PADDING.frame.top    or BLIZZ_INV_PAD.top
+    local padBottom = NS.ElvUI_S and NS.PADDING.frame.bottom or BLIZZ_INV_PAD.bottom
+    local padLeft   = NS.ElvUI_S and NS.PADDING.frame.left   or BLIZZ_INV_PAD.left
+    local rows   = math.max(1, math.ceil(cellCount / COLS))
+    local gridH  = rows * CELL_SIZE + (rows - 1) * CELL_PAD
+    local frameH = padTop + gridH + padBottom + FOOTER_H
     f:SetHeight(frameH)
     if not NS.ElvUI_S then NS.CB_UpdateContainerTiles(f, rows) end
 
@@ -548,36 +597,37 @@ NS.CB_RenderInventory = function(key)
     for i = 1, cellCount do
         local cell = f.cells[i]
         if not cell then
-            cell = CreateFrame("Button", nil, f)
+            local cellName = "CleanBotInvCell_" .. key .. "_" .. i
+            cell = CreateFrame("Button", cellName, f, "ItemButtonTemplate")
             cell:SetSize(CELL_SIZE, CELL_SIZE)
 
-            if NS.ElvUI_S then
-                local bg = cell:CreateTexture(nil, "BACKGROUND")
-                bg:SetAllPoints()
-                bg:SetTexture("Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
-                bg:SetVertexColor(0.3, 0.3, 0.3, 0.8)
-                cell.bg = bg
-            end
+            -- NormalTexture (UI-Quickslot2) provides the rounded slot look.
+            -- Kept visible on Blizz path as an empty-slot indicator (standard WoW
+            -- bag behaviour). CB_SkinInventoryCell's StripTextures hides it on ElvUI.
+            -- CB_SetQualityBorder tints it with the item quality colour when equipped.
+            cell.normTex = _G[cellName .. "NormalTexture"]
 
-            local icon = cell:CreateTexture(nil, "ARTWORK")
+            local icon = _G[cellName .. "IconTexture"]
             icon:SetAllPoints()
             icon:Hide()
             cell.icon = icon
 
-            local countText = cell:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-            countText:SetPoint("BOTTOMRIGHT", cell, "BOTTOMRIGHT", -2, 2)
-            countText:Hide()
-            cell.countText = countText
+            -- $parentCount is the template's stack-count FontString (BOTTOMRIGHT corner).
+            cell.countText = _G[cellName .. "Count"]
 
-            cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-
+            NS.CB_SkinInventoryCell(cell)
             cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
             cell:SetScript("OnClick", function(self, btn)
-                if btn == "RightButton" then CB_ShowInvMenu(self, key) end
+                if btn == "RightButton" then
+                    CB_ShowInvMenu(self, key)
+                elseif btn == "LeftButton" and IsShiftKeyDown() and self.itemLink then
+                    ChatEdit_InsertLink(NS.CB_CleanItemLink(self.itemLink))
+                end
             end)
 
             cell:SetScript("OnMouseDown", function(self, btn)
-                if btn ~= "LeftButton" or not self.itemLink then return end
+                if btn ~= "LeftButton" or not self.itemLink or IsShiftKeyDown() then return end
                 local itemId   = strmatch(self.itemLink, "item:(%d+)")
                 local iconPath = GetItemIcon(tonumber(itemId) or 0)
                 NS.dragging = { link = self.itemLink, key = key, hoverBtn = nil, sourceCell = self }
@@ -603,10 +653,10 @@ NS.CB_RenderInventory = function(key)
         end
 
         -- Position
-        local col = (i - 1) % COLS
-        local row = math.floor((i - 1) / COLS)
-        local xOff = NS.PADDING.frame.left + blizzPad.left + col * (CELL_SIZE + CELL_PAD)
-        local yOff = -(NS.PADDING.frame.top + blizzPad.top + row * (CELL_SIZE + CELL_PAD))
+        local col  = (i - 1) % COLS
+        local row  = math.floor((i - 1) / COLS)
+        local xOff = padLeft + col * (CELL_SIZE + CELL_PAD)
+        local yOff = -(padTop + row * (CELL_SIZE + CELL_PAD))
         cell:ClearAllPoints()
         cell:SetPoint("TOPLEFT", f, "TOPLEFT", xOff, yOff)
 
@@ -617,6 +667,8 @@ NS.CB_RenderInventory = function(key)
             cell.icon:SetTexture(tex)
             cell.icon:Show()
             cell.itemLink = item.link
+            local _, _, quality = GetItemInfo(item.link)
+            if quality then NS.CB_SetQualityBorder(cell, quality) end
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -627,6 +679,7 @@ NS.CB_RenderInventory = function(key)
             cell.icon:Hide()
             cell.countText:Hide()
             cell.itemLink = nil
+            NS.CB_ClearQualityBorder(cell)
         end
 
         cell:Show()

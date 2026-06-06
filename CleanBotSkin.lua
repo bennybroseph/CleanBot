@@ -796,3 +796,128 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     wrapper.marginRight  = NS.MARGIN.swatch.right
     return wrapper
 end
+
+-- Applies an ElvUI-style square skin to an equipment slot button.
+--
+-- Applies an ElvUI-style square skin to an equipment slot button.
+--
+-- StripTextures nulls btn.bg and btn.icon. SetTemplate applies the dark
+-- backdrop + border directly on btn (avoids backdrop child frame level issues).
+-- Both the slot art (btn.bg) and item icon (btn.icon) are restored with
+-- E.TexCoords cropping, which trims the rounded edges off the circular paperdoll
+-- slot textures and makes them read as square. btn.bg sits in BACKGROUND below
+-- the ARTWORK icon, so when equipped the icon renders on top of the slot art.
+-- RefreshEquipSlots hides btn.bg when an item is equipped and shows it when empty.
+-- No-op when ElvUI is not installed.
+-- Applies ElvUI's standard icon crop to a texture. Trims the rounded edges that
+-- are baked into WoW's icon and paperdoll slot textures, giving them a square look.
+-- No-op when ElvUI is not installed.
+-- Returns the clean API item link for a raw item link (which may contain color
+-- codes and extra fields). Strips to the item ID and re-fetches from the client
+-- cache via GetItemInfo. Falls back to the raw link if the cache misses.
+-- Use this before sending any item link over whisper or a bot command.
+NS.CB_CleanItemLink = function(rawLink)
+    local itemId = strmatch(rawLink, "item:(%d+)")
+    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
+    return apiLink or rawLink
+end
+
+NS.CB_ApplyElvCoords = function(texture)
+    if not NS.ElvUI_E then return end
+    texture:SetTexCoord(unpack(NS.ElvUI_E.TexCoords))
+end
+
+-- Applies an ElvUI-style square skin to an inventory cell button.
+-- Mirrors CB_SkinEquipSlot but for plain Button frames — no ItemButtonTemplate
+-- chrome means no StripTextures needed. SetTemplate provides the dark backdrop
+-- and border; StyleButton adds hover/push highlight textures; both the icon and
+-- the bag-slot background texture receive the E.TexCoords crop.
+-- No-op when ElvUI is not installed.
+NS.CB_SkinInventoryCell = function(cell)
+    if not NS.ElvUI_S then return end
+    cell:StripTextures()
+    cell:SetTemplate("Default")
+    cell:StyleButton()
+    if cell.icon then
+        NS.CB_ApplyElvCoords(cell.icon)
+        cell.icon:SetInside()
+    end
+    if cell.bg then
+        NS.CB_ApplyElvCoords(cell.bg)
+        cell.bg:SetAllPoints()
+    end
+end
+
+NS.CB_SkinEquipSlot = function(btn)
+    if not NS.ElvUI_S then return end
+    btn:StripTextures()
+    btn:SetTemplate("Default")
+    btn:StyleButton()
+    if btn.icon then
+        NS.CB_ApplyElvCoords(btn.icon)
+        btn.icon:SetInside()
+    end
+    -- btn.bg is created AFTER this function returns (in CB_CreateEquipSlots) so
+    -- that it is always the last BACKGROUND texture on the button and renders
+    -- above the dark fill that SetTemplate just stamped on.
+end
+
+-- Colors the border of an item button to match the item's quality.
+--
+-- ElvUI path: SetTemplate already applied a backdrop border — SetBackdropBorderColor
+--   tints it with the quality colour.
+-- Blizz path: btn.normTex is the ItemButtonTemplate NormalTexture (UI-Quickslot2),
+--   a mostly-transparent overlay with visible rounded edges. SetVertexColor tints
+--   those edges to the quality colour; Show() makes it visible if it was hidden
+--   (equip slots hide normTex on empty slots; inventory cells keep it visible).
+-- Creates a rounded quality-colour border on an item button for the Blizz UI
+-- path using a child frame with Interface\Tooltips\UI-Tooltip-Border as the
+-- edgeFile. The child frame renders above the parent's texture layers so the
+-- border is visible over the icon. Border is hidden (alpha 0) until equipped.
+-- Equip slots use this; inventory cells fall back to normTex which is always
+-- visible and serves as both the slot indicator and quality tint.
+-- No-op on ElvUI — SetTemplate's iborder/oborder child frames handle this.
+NS.CB_ApplyQualityBackdrop = function(btn)
+    if NS.ElvUI_S then return end
+    local f = CreateFrame("Frame", nil, btn)
+    f:SetAllPoints()
+    f:SetFrameLevel(btn:GetFrameLevel() + 2)
+    f:SetBackdrop({
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets   = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    f:SetBackdropBorderColor(0, 0, 0, 0)
+    btn.qualityFrame = f
+end
+
+-- Colors the border of an item button to match the item's quality.
+-- ElvUI: SetBackdropBorderColor (targets SetTemplate's iborder/oborder frames).
+-- Blizz with qualityFrame (equip slots): SetBackdropBorderColor on the child frame.
+-- Blizz with normTex only (inventory cells): vertex-colours normTex (already visible).
+NS.CB_SetQualityBorder = function(btn, quality)
+    local r, g, b = GetItemQualityColor(quality or 1)
+    if NS.ElvUI_S then
+        btn:SetBackdropBorderColor(r, g, b, 1)
+    elseif btn.qualityFrame then
+        btn.qualityFrame:SetBackdropBorderColor(r, g, b, 1)
+    elseif btn.normTex then
+        btn.normTex:SetVertexColor(r, g, b)
+    end
+end
+
+-- Resets the border of an item button to its uncoloured state.
+-- ElvUI: restores db.general.bordercolor.
+-- Blizz with qualityFrame: hides the border (alpha 0) on empty slots.
+-- Blizz with normTex only: resets to white (no tint; normTex stays visible).
+NS.CB_ClearQualityBorder = function(btn)
+    if NS.ElvUI_S then
+        local E  = NS.ElvUI_E
+        local bc = (E and E.db and E.db.general and E.db.general.bordercolor) or {}
+        btn:SetBackdropBorderColor(bc.r or 0.3, bc.g or 0.3, bc.b or 0.3, 1)
+    elseif btn.qualityFrame then
+        btn.qualityFrame:SetBackdropBorderColor(0, 0, 0, 0)
+    elseif btn.normTex then
+        btn.normTex:SetVertexColor(1, 1, 1)
+    end
+end
