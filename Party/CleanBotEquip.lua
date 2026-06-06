@@ -183,7 +183,8 @@ NS.CB_CreateEquipSlots = function(slot, model)
     local gapYBot  = g.gapYBot
 
     for _, eqdef in ipairs(NS.EQUIP_SLOTS) do
-        local btn = CreateFrame("Button", "CleanBotEquip_" .. slot.index .. "_" .. eqdef.id, model)
+        local btnName = "CleanBotEquip_" .. slot.index .. "_" .. eqdef.id
+        local btn = CreateFrame("Button", btnName, model, "ItemButtonTemplate")
         btn:SetSize(slotSize, slotSize)
         btn.slot = slot
 
@@ -201,14 +202,21 @@ NS.CB_CreateEquipSlots = function(slot, model)
             btn:SetPoint("TOPLEFT", model, "BOTTOMLEFT", xOff, -gapYBot)
         end
 
-        -- ── Empty-slot background (shown when nothing equipped) ──
-        local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetTexture(eqdef.tex)
-        btn.bg = bg
+        -- ── Empty-slot background ─────────────────────────────────────────────
+        -- Unregister the template NormalTexture from the button's state machine
+        -- entirely. Simply calling Hide() on the texture object is insufficient —
+        -- WoW's C++ button code re-shows it on every state transition (OnShow,
+        -- normal-state entry, etc.), covering btn.bg.  SetNormalTexture("") severs
+        -- the reference so the state machine never touches it again.
+        -- Equip slots use btn.qualityFrame for quality borders, not normTex.
+        btn:SetNormalTexture("")
 
-        -- ── Item icon (shown when something is equipped) ──────
-        local icon = btn:CreateTexture(nil, "ARTWORK")
+        -- ── Item icon — template's IconTexture, hidden until equipped ────────
+        -- ClearAllPoints first: the template XML may have set its own anchors
+        -- (e.g. a centered AbsDimension), which would conflict with SetAllPoints
+        -- and cause the renderer to clamp to the smallest valid size.
+        local icon = _G[btnName .. "IconTexture"]
+        icon:ClearAllPoints()
         icon:SetAllPoints()
         icon:Hide()
         btn.icon = icon
@@ -217,11 +225,13 @@ NS.CB_CreateEquipSlots = function(slot, model)
         btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
+        NS.CB_ApplyQualityBackdrop(btn)
+
         -- ── Tooltip ───────────────────────────────────────────
         btn.slotId   = eqdef.id
         btn.slotName = eqdef.name
 
-        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        -- Template OnLoad already calls RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
         btn:SetScript("OnClick", function(self, mouseBtn)
             if mouseBtn == "RightButton" and self.itemLink then
@@ -255,20 +265,50 @@ NS.CB_CreateEquipSlots = function(slot, model)
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+        NS.CB_SkinEquipSlot(btn)
+
+        -- ── Empty-slot background ─────────────────────────────────────────────
+        -- Wrapped in a child Frame rather than a direct child Texture. ElvUI's
+        -- global ItemButtonTemplate hook calls StripTextures on the button itself
+        -- (wiping all direct child textures) after our code runs. Child Frames are
+        -- not regions — StripTextures never descends into them — so the slot art
+        -- texture survives ElvUI's late global pass regardless of timing.
+        local bgFrame = CreateFrame("Frame", nil, btn)
+        bgFrame:SetAllPoints()
+        bgFrame:SetFrameLevel(btn:GetFrameLevel() + 1)
+        local bgTex = bgFrame:CreateTexture(nil, "BACKGROUND")
+        bgTex:SetAllPoints()
+        bgTex:SetTexture(eqdef.tex)
+        NS.CB_ApplyElvCoords(bgTex)
+        btn.bg     = bgFrame
+        btn.slotTex = eqdef.tex
+
         slot.equipSlots[eqdef.id] = btn
     end
 
     -- ── Bag icon — opens the inventory frame ──────────────────
-    local bagBtn = CreateFrame("Button", "CleanBotBagBtn_" .. slot.index, model)
+    -- Plain Button (no ItemButtonTemplate) so it stays out of all the equip
+    -- slot / normTex / quality border infrastructure entirely.
+    local bagBtnName = "CleanBotBagBtn_" .. slot.index
+    local bagBtn = CreateFrame("Button", bagBtnName, model)
     bagBtn:SetSize(slotSize, slotSize)
     bagBtn:SetPoint("LEFT", slot.equipSlots[9],  "LEFT", 0, 0)
     bagBtn:SetPoint("TOP",  slot.equipSlots[16], "TOP",  0, 0)
+    bagBtn:RegisterForClicks("LeftButtonUp")
+
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleButton(bagBtn)
+        bagBtn:StyleButton()
+    else
+        bagBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        bagBtn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+    end
 
     local bagIcon = bagBtn:CreateTexture(nil, "ARTWORK")
-    bagIcon:SetAllPoints()
     bagIcon:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
-    bagBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-    bagBtn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+    bagIcon:SetAllPoints()
+    NS.CB_ApplyElvCoords(bagIcon)
+    bagIcon:Show()
 
     bagBtn:SetScript("OnClick", function()
         local key     = slot.key
@@ -381,14 +421,20 @@ NS.CB_RefreshEquipSlots = function(key, unit)
     local slots = NS.botEquipSlots and NS.botEquipSlots[key]
     if not slots then return end
     for slotId, btn in pairs(slots) do
-        local itemTex = GetInventoryItemTexture(unit, slotId)
+        local itemTex  = GetInventoryItemTexture(unit, slotId)
+        local itemLink = GetInventoryItemLink(unit, slotId)
         if itemTex then
             btn.icon:SetTexture(itemTex)
             btn.icon:Show()
-            btn.itemLink = GetInventoryItemLink(unit, slotId)
+            if btn.bg then btn.bg:Hide() end
+            btn.itemLink = itemLink
+            local _, _, quality = GetItemInfo(itemLink)
+            if quality then NS.CB_SetQualityBorder(btn, quality) end
         else
             btn.icon:Hide()
+            if btn.bg then btn.bg:Show() end
             btn.itemLink = nil
+            NS.CB_ClearQualityBorder(btn)
         end
     end
 

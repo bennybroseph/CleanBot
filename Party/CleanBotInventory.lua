@@ -165,6 +165,7 @@ local function CB_StopDrag()
             src.icon:Hide()
             src.itemLink = nil
             if src.countText then src.countText:Hide() end
+            NS.CB_ClearQualityBorder(src)
         end
     elseif invDropCell and src then
         -- ── Drop onto inventory cell → visual swap ─────────────
@@ -190,6 +191,20 @@ local function CB_StopDrag()
         invDropCell.itemLink = tmpLink
         if tmpCount then invDropCell.countText:SetText(tmpCount); invDropCell.countText:Show()
         else invDropCell.countText:Hide() end
+
+        -- Sync quality borders to match swapped item links.
+        if src.itemLink then
+            local _, _, q = GetItemInfo(src.itemLink)
+            if q then NS.CB_SetQualityBorder(src, q) else NS.CB_ClearQualityBorder(src) end
+        else
+            NS.CB_ClearQualityBorder(src)
+        end
+        if invDropCell.itemLink then
+            local _, _, q = GetItemInfo(invDropCell.itemLink)
+            if q then NS.CB_SetQualityBorder(invDropCell, q) else NS.CB_ClearQualityBorder(invDropCell) end
+        else
+            NS.CB_ClearQualityBorder(invDropCell)
+        end
 
         src.icon:SetDesaturated(false)
     else
@@ -441,6 +456,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
                 cell.icon:Hide()
                 cell.itemLink = nil
                 cell.countText:Hide()
+                NS.CB_ClearQualityBorder(cell)
             end
         end
     end
@@ -467,6 +483,8 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.icon:SetTexture(GetItemIcon(strmatch(item.link, "item:(%d+)") or 0))
             cell.icon:Show()
             cell.itemLink = item.link
+            local _, _, quality = GetItemInfo(item.link)
+            if quality then NS.CB_SetQualityBorder(cell, quality) end
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -548,30 +566,27 @@ NS.CB_RenderInventory = function(key)
     for i = 1, cellCount do
         local cell = f.cells[i]
         if not cell then
-            cell = CreateFrame("Button", nil, f)
+            local cellName = "CleanBotInvCell_" .. key .. "_" .. i
+            cell = CreateFrame("Button", cellName, f, "ItemButtonTemplate")
             cell:SetSize(CELL_SIZE, CELL_SIZE)
 
-            if NS.ElvUI_S then
-                local bg = cell:CreateTexture(nil, "BACKGROUND")
-                bg:SetAllPoints()
-                bg:SetTexture("Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
-                bg:SetVertexColor(0.3, 0.3, 0.3, 0.8)
-                cell.bg = bg
-            end
+            -- NormalTexture (UI-Quickslot2) provides the rounded slot look.
+            -- Kept visible on Blizz path as an empty-slot indicator (standard WoW
+            -- bag behaviour). CB_SkinInventoryCell's StripTextures hides it on ElvUI.
+            -- CB_SetQualityBorder tints it with the item quality colour when equipped.
+            cell.normTex = _G[cellName .. "NormalTexture"]
 
-            local icon = cell:CreateTexture(nil, "ARTWORK")
+            local icon = _G[cellName .. "IconTexture"]
             icon:SetAllPoints()
             icon:Hide()
             cell.icon = icon
 
-            local countText = cell:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-            countText:SetPoint("BOTTOMRIGHT", cell, "BOTTOMRIGHT", -2, 2)
-            countText:Hide()
-            cell.countText = countText
+            -- $parentCount is the template's stack-count FontString (BOTTOMRIGHT corner).
+            cell.countText = _G[cellName .. "Count"]
 
-            cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-
-            cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            -- Template OnLoad already calls RegisterForClicks and sets HighlightTexture.
+            NS.CB_SkinInventoryCell(cell)
+            -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
             cell:SetScript("OnClick", function(self, btn)
                 if btn == "RightButton" then CB_ShowInvMenu(self, key) end
             end)
@@ -617,6 +632,8 @@ NS.CB_RenderInventory = function(key)
             cell.icon:SetTexture(tex)
             cell.icon:Show()
             cell.itemLink = item.link
+            local _, _, quality = GetItemInfo(item.link)
+            if quality then NS.CB_SetQualityBorder(cell, quality) end
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -627,6 +644,7 @@ NS.CB_RenderInventory = function(key)
             cell.icon:Hide()
             cell.countText:Hide()
             cell.itemLink = nil
+            NS.CB_ClearQualityBorder(cell)
         end
 
         cell:Show()
