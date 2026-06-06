@@ -812,6 +812,16 @@ end
 -- Applies ElvUI's standard icon crop to a texture. Trims the rounded edges that
 -- are baked into WoW's icon and paperdoll slot textures, giving them a square look.
 -- No-op when ElvUI is not installed.
+-- Returns the clean API item link for a raw item link (which may contain color
+-- codes and extra fields). Strips to the item ID and re-fetches from the client
+-- cache via GetItemInfo. Falls back to the raw link if the cache misses.
+-- Use this before sending any item link over whisper or a bot command.
+NS.CB_CleanItemLink = function(rawLink)
+    local itemId = strmatch(rawLink, "item:(%d+)")
+    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
+    return apiLink or rawLink
+end
+
 NS.CB_ApplyElvCoords = function(texture)
     if not NS.ElvUI_E then return end
     texture:SetTexCoord(unpack(NS.ElvUI_E.TexCoords))

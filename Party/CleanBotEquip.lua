@@ -22,7 +22,25 @@ local NS = CleanBotNS
 
 -- ── Shared Wowhead URL popup ──────────────────────────────────────────────
 -- Plain-text URL in a selectable EditBox — Ctrl+C works fine on regular text.
-local function CB_GetWowheadPopup()
+-- Populates `info` with the Wowhead menu entry for `itemLink` and adds it.
+-- Reusable across any UIDropDownMenu that has an item link in scope.
+NS.CB_AddWowheadMenuButton = function(info, itemLink)
+    info.text         = "Open on Wowhead"
+    info.notCheckable = true
+    info.func         = function()
+        local itemId = strmatch(itemLink, "item:(%d+)")
+        if not itemId then return end
+        local url   = "https://www.wowhead.com/wotlk/item=" .. itemId
+        local popup = NS.CB_GetWowheadPopup()
+        popup.box:SetText(url)
+        popup:Show()
+        popup.box:SetFocus()
+        popup.box:HighlightText()
+    end
+    UIDropDownMenu_AddButton(info)
+end
+
+NS.CB_GetWowheadPopup = function()
     if NS.wowheadPopup then return NS.wowheadPopup end
 
     local popup = CreateFrame("Frame", "CleanBotWowheadPopup", UIParent)
@@ -71,19 +89,7 @@ local function CB_ShowEquipMenu(btn)
         end
         UIDropDownMenu_AddButton(info)
 
-        info.text         = "Open on Wowhead"
-        info.notCheckable = true
-        info.func         = function()
-            local itemId = strmatch(btn.itemLink, "item:(%d+)")
-            if not itemId then return end
-            local url    = "https://www.wowhead.com/wotlk/item=" .. itemId
-            local popup  = CB_GetWowheadPopup()
-            popup.box:SetText(url)
-            popup:Show()
-            popup.box:SetFocus()
-            popup.box:HighlightText()
-        end
-        UIDropDownMenu_AddButton(info)
+        NS.CB_AddWowheadMenuButton(info, btn.itemLink)
 
         info.text         = "Close"
         info.notCheckable = true
@@ -236,11 +242,13 @@ NS.CB_CreateEquipSlots = function(slot, model)
         btn:SetScript("OnClick", function(self, mouseBtn)
             if mouseBtn == "RightButton" and self.itemLink then
                 CB_ShowEquipMenu(self)
+            elseif mouseBtn == "LeftButton" and IsShiftKeyDown() and self.itemLink then
+                ChatEdit_InsertLink(NS.CB_CleanItemLink(self.itemLink))
             end
         end)
 
         btn:SetScript("OnMouseDown", function(self, mouseBtn)
-            if mouseBtn ~= "LeftButton" or not self.itemLink then return end
+            if mouseBtn ~= "LeftButton" or not self.itemLink or IsShiftKeyDown() then return end
             local itemId   = strmatch(self.itemLink, "item:(%d+)")
             local iconPath = GetItemIcon(tonumber(itemId) or 0)
             NS.unequipDragging = { slot = slot, itemLink = self.itemLink, sourceBtn = self, overInventory = false }
@@ -266,6 +274,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
         NS.CB_SkinEquipSlot(btn)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
         -- ── Empty-slot background ─────────────────────────────────────────────
         -- Wrapped in a child Frame rather than a direct child Texture. ElvUI's
@@ -281,6 +290,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
         bgTex:SetTexture(eqdef.tex)
         NS.CB_ApplyElvCoords(bgTex)
         btn.bg     = bgFrame
+        btn.bgTex  = bgTex
         btn.slotTex = eqdef.tex
 
         slot.equipSlots[eqdef.id] = btn

@@ -60,9 +60,7 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 -- apply the change, re-queries inventory. Shared by the right-click menu
 -- and drag-and-drop paths.
 local function CB_EquipItem(key, botName, link)
-    local itemId     = strmatch(link, "item:(%d+)")
-    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
-    NS.CB_SendBotCommand(botName, "e " .. (apiLink or link))
+    NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
     NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
 end
 
@@ -75,7 +73,6 @@ local function CB_ShowInvMenu(cell, key)
     equipLoc = equipLoc or ""
     local isEquipment  = equipLoc ~= ""
     local isConsumable = itemType == "Consumable"
-    if not isEquipment and not isConsumable then return end
 
     UIDropDownMenu_Initialize(invMenu, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -96,10 +93,23 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                NS.CB_SendBotCommand(entry.name, "use " .. cell.itemLink)
+                NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
+                -- Optimistic update: decrement stack or clear cell immediately.
+                local curCount = tonumber(cell.countText:GetText()) or 1
+                if curCount > 1 then
+                    cell.countText:SetText(curCount - 1)
+                else
+                    cell.icon:Hide()
+                    cell.countText:Hide()
+                    cell.itemLink = nil
+                    NS.CB_ClearQualityBorder(cell)
+                end
+                NS.CB_After(1.5, function() NS.CB_FetchInventory(key, entry.name) end)
             end
             UIDropDownMenu_AddButton(info)
         end
+
+        NS.CB_AddWowheadMenuButton(info, cell.itemLink)
 
         info.text = "Cancel"
         info.func = function() CloseDropDownMenus() end
@@ -145,13 +155,15 @@ local function CB_ItemFitsSlot(link, slotId)
 end
 
 local function CB_SetSlotTint(btn, r, g, b)
-    if btn.bg   then btn.bg:SetVertexColor(r, g, b)                    end
+    local bgTex = btn.bgTex or btn.bg  -- bgTex = equip slot (bg is a Frame); bg = inv cell (bg is a Texture)
+    if bgTex then bgTex:SetVertexColor(r, g, b) end
     if btn.icon and btn.icon:IsShown() then btn.icon:SetVertexColor(r, g, b) end
 end
 
 local function CB_ResetSlotTint(btn)
-    if btn.bg   then btn.bg:SetVertexColor(1, 1, 1)   end
-    if btn.icon then btn.icon:SetVertexColor(1, 1, 1)  end
+    local bgTex = btn.bgTex or btn.bg
+    if bgTex then bgTex:SetVertexColor(1, 1, 1) end
+    if btn.icon then btn.icon:SetVertexColor(1, 1, 1) end
 end
 
 -- ── Drag stop (shared by cell OnMouseUp and capture frame OnMouseUp) ─────
@@ -603,15 +615,19 @@ NS.CB_RenderInventory = function(key)
             -- $parentCount is the template's stack-count FontString (BOTTOMRIGHT corner).
             cell.countText = _G[cellName .. "Count"]
 
-            -- Template OnLoad already calls RegisterForClicks and sets HighlightTexture.
             NS.CB_SkinInventoryCell(cell)
+            cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
             cell:SetScript("OnClick", function(self, btn)
-                if btn == "RightButton" then CB_ShowInvMenu(self, key) end
+                if btn == "RightButton" then
+                    CB_ShowInvMenu(self, key)
+                elseif btn == "LeftButton" and IsShiftKeyDown() and self.itemLink then
+                    ChatEdit_InsertLink(NS.CB_CleanItemLink(self.itemLink))
+                end
             end)
 
             cell:SetScript("OnMouseDown", function(self, btn)
-                if btn ~= "LeftButton" or not self.itemLink then return end
+                if btn ~= "LeftButton" or not self.itemLink or IsShiftKeyDown() then return end
                 local itemId   = strmatch(self.itemLink, "item:(%d+)")
                 local iconPath = GetItemIcon(tonumber(itemId) or 0)
                 NS.dragging = { link = self.itemLink, key = key, hoverBtn = nil, sourceCell = self }
