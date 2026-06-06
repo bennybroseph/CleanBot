@@ -196,9 +196,55 @@ NS.CleanBot_BuildManageContent = function()
         end)
     NS.CB_AnchorBelow(logoutAllBtn, logoutTargetBtn)
 
+    -- ── Party/Raid section ────────────────────────────────────
+    -- Routes a command string to RAID if in a raid, PARTY if in a party.
+    local function CB_SendGroupCommand(cmd)
+        if GetNumRaidMembers() > 0 then
+            SendChatMessage(cmd, "RAID")
+        elseif GetNumPartyMembers() > 0 then
+            SendChatMessage(cmd, "PARTY")
+        else
+            NS.CB_Print("You are not in a party or raid.")
+        end
+    end
+
+    local partyRaidLabel = NS.CB_CreateLabel(NS.managePanel, "Party/Raid")
+    NS.CB_AnchorBelow(partyRaidLabel, uninviteAllBtn)
+
+    local summonBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageSummonBtn",
+        "Summon", 120, 24, function()
+            CB_SendGroupCommand("summon")
+        end)
+    NS.CB_AnchorBelow(summonBtn, partyRaidLabel)
+
+    local maintenanceBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageMaintenanceBtn",
+        "Maintenance", 120, 24, function()
+            CB_SendGroupCommand("maintenance")
+        end)
+    NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
+
+    local eatDrinkBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageEatDrinkBtn",
+        "Eat/Drink", 120, 24, function()
+            CB_SendGroupCommand("drink")
+        end)
+    NS.CB_AnchorBelow(eatDrinkBtn, maintenanceBtn)
+
+    local reviveBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageReviveBtn",
+        "Revive", 120, 24, function()
+            CB_SendGroupCommand("revive")
+        end)
+    reviveBtn.marginLeft = NS.COLUMN_GAP
+    NS.CB_AnchorAhead(reviveBtn, summonBtn)
+
+    local releaseBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageReleaseBtn",
+        "Release", 120, 24, function()
+            CB_SendGroupCommand("release")
+        end)
+    NS.CB_AnchorBelow(releaseBtn, reviveBtn)
+
     -- ── Favorites section ─────────────────────────────────────
     local favLabel = NS.CB_CreateLabel(NS.managePanel, "Favorites")
-    NS.CB_AnchorBelow(favLabel, uninviteAllBtn)
+    NS.CB_AnchorBelow(favLabel, eatDrinkBtn)
 
     local inviteAllBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotInviteAllFavoritesBtn",
         "Invite All", 80, 24, function()
@@ -287,7 +333,7 @@ NS.CleanBot_BuildManageContent = function()
         "No accounts found", function(name) selectedAltAccount = name end)
 
     local refreshAltBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotRefreshAltBtn",
-        "Refresh List", 100, 24, function()
+        "Refresh", 60, 24, function()
             NS.CleanBot_FetchLinkedAccounts()
         end)
     NS.CB_AnchorAhead(refreshAltBtn, altDD)
