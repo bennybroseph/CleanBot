@@ -5,11 +5,22 @@ local NS = CleanBotNS
 
 NS.botInventoryFrames = NS.botInventoryFrames or {}
 
-local CELL_SIZE        = 37
-local COLS             = 10
-local CELL_PAD         = 3
-local FOOTER_H         = 24
-local BLIZZ_CELL_PAD = { top = 16, bottom = 0, left = 3, right = 0 }   -- extra cell padding on the Blizz path
+local CELL_SIZE = 37
+local COLS      = 10
+local CELL_PAD  = 3
+local FOOTER_H  = 24
+
+-- These replace NS.PADDING.frame.* entirely on the Blizz path — the art has
+-- its own fixed spacing that doesn't respond to the user-tunable padding values.
+local BLIZZ_INV_PAD = { top = 49, bottom = 6, left = 17, right = 12 }
+
+-- Manual pixel positions for the slot-count and money footer labels (Blizz path only).
+-- Relative to the frame's BOTTOMLEFT / BOTTOMRIGHT corners respectively.
+-- Adjust these two constants to reposition the labels without touching layout logic.
+local BLIZZ_LABEL_X = 20   -- inset from left (slot label) / right (money label) edge
+local BLIZZ_LABEL_Y = 14   -- distance above the bottom edge
+local BLIZZ_CLOSE_X = 0   -- X offset from TOPRIGHT for the close button (negative = left)
+local BLIZZ_CLOSE_Y = -1   -- Y offset from TOPRIGHT for the close button (negative = down)
 
 local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:0|t"
 local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:0|t"
@@ -297,7 +308,9 @@ end
 NS.CB_GetInventoryFrame = function(key, botName)
     if NS.botInventoryFrames[key] then return NS.botInventoryFrames[key] end
 
-    local frameW = NS.PADDING.frame.left + NS.PADDING.frame.right + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
+    local padL   = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_INV_PAD.left
+    local padR   = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_INV_PAD.right
+    local frameW = padL + padR + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
     local f = CreateFrame("Frame", "CleanBotInventory_" .. key, UIParent)
     NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
@@ -320,13 +333,17 @@ NS.CB_GetInventoryFrame = function(key, botName)
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+    if NS.ElvUI_S then
+        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+        NS.ElvUI_S:HandleCloseButton(closeBtn)
+    else
+        closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", BLIZZ_CLOSE_X, BLIZZ_CLOSE_Y)
+    end
     closeBtn:SetScript("OnClick", function() f:Hide() end)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
-    local FOOTER_Y       = NS.ElvUI_S and 8  or 13
-    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left or (NS.PADDING.frame.left + 5)
-    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or (NS.PADDING.frame.right + 5)
+    local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
+    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X
+    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_LABEL_X
 
     -- Slot counter label (bridge path only)
     local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -552,10 +569,12 @@ NS.CB_RenderInventory = function(key)
     local items = CB_SortInventory(rawItems)
 
     -- ── Resize frame to fit grid ──────────────────────────────
-    local blizzPad = NS.ElvUI_S and { top = 0, bottom = 0, left = 0, right = 0 } or BLIZZ_CELL_PAD
-    local rows    = math.max(1, math.ceil(cellCount / COLS))
-    local gridH   = rows * CELL_SIZE + (rows - 1) * CELL_PAD
-    local frameH  = NS.PADDING.frame.top + blizzPad.top + gridH + NS.PADDING.frame.bottom + FOOTER_H
+    local padTop    = NS.ElvUI_S and NS.PADDING.frame.top    or BLIZZ_INV_PAD.top
+    local padBottom = NS.ElvUI_S and NS.PADDING.frame.bottom or BLIZZ_INV_PAD.bottom
+    local padLeft   = NS.ElvUI_S and NS.PADDING.frame.left   or BLIZZ_INV_PAD.left
+    local rows   = math.max(1, math.ceil(cellCount / COLS))
+    local gridH  = rows * CELL_SIZE + (rows - 1) * CELL_PAD
+    local frameH = padTop + gridH + padBottom + FOOTER_H
     f:SetHeight(frameH)
     if not NS.ElvUI_S then NS.CB_UpdateContainerTiles(f, rows) end
 
@@ -618,10 +637,10 @@ NS.CB_RenderInventory = function(key)
         end
 
         -- Position
-        local col = (i - 1) % COLS
-        local row = math.floor((i - 1) / COLS)
-        local xOff = NS.PADDING.frame.left + blizzPad.left + col * (CELL_SIZE + CELL_PAD)
-        local yOff = -(NS.PADDING.frame.top + blizzPad.top + row * (CELL_SIZE + CELL_PAD))
+        local col  = (i - 1) % COLS
+        local row  = math.floor((i - 1) / COLS)
+        local xOff = padLeft + col * (CELL_SIZE + CELL_PAD)
+        local yOff = -(padTop + row * (CELL_SIZE + CELL_PAD))
         cell:ClearAllPoints()
         cell:SetPoint("TOPLEFT", f, "TOPLEFT", xOff, yOff)
 
