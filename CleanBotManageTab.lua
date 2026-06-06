@@ -120,6 +120,12 @@ NS.CleanBot_BuildManageContent = function()
 
     local function linkedAccountsList() return NS.linkedAccounts end
 
+    -- ── Target section ────────────────────────────────────────
+    local targetLabel = NS.CB_CreateLabel(NS.managePanel, "Target")
+    targetLabel:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT",
+        NS.PADDING.panel.left  + (targetLabel.marginLeft or 0),
+        -(NS.PADDING.panel.top + (targetLabel.marginTop  or 0)))
+
     -- ── Column 1: party invite / uninvite ─────────────────────
     local inviteTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageInviteTargetBtn",
         "Invite Target", 120, 24, function()
@@ -131,9 +137,7 @@ NS.CleanBot_BuildManageContent = function()
             end
             InviteUnit(target)
         end)
-    inviteTargetBtn:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT",
-        NS.PADDING.panel.left  + (inviteTargetBtn.marginLeft or 0),
-        -(NS.PADDING.panel.top + (inviteTargetBtn.marginTop  or 0)))
+    NS.CB_AnchorBelow(inviteTargetBtn, targetLabel)
 
     local uninviteTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageUninviteTargetBtn",
         "Uninvite Target", 120, 24, function()
