@@ -3,47 +3,79 @@
 -- ============================================================
 local NS = CleanBotNS
 
--- ── Link Account popup (two-step: account name → security key) ───────────────
+-- ── Edit box popup factory ────────────────────────────────────────────────────
+-- Registers a StaticPopupDialog with a single edit box, OK/Cancel buttons, and
+-- a centred position. onAccept(dialog, data) is called on OK or Enter.
+-- Only the prompt text and accept logic vary between popups — everything else
+-- is shared boilerplate handled here.
 local function CB_PositionPopup(self)
     self:ClearAllPoints()
     self:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
 end
 
-StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_NAME"] = {
-    text         = "Enter the name of the account to link:",
-    button1      = "OK",
-    button2      = "Cancel",
-    hasEditBox   = 1,
-    timeout      = 0,
-    whileDead    = true,
-    hideOnEscape = true,
-    OnShow   = CB_PositionPopup,
-    OnAccept = function(self)
+local function CB_RegisterEditPopup(key, text, onAccept)
+    StaticPopupDialogs[key] = {
+        text         = text,
+        button1      = "OK",
+        button2      = "Cancel",
+        hasEditBox   = 1,
+        timeout      = 0,
+        whileDead    = true,
+        hideOnEscape = true,
+        OnShow       = CB_PositionPopup,
+        OnAccept     = onAccept,
+        EditBoxOnEnterPressed = function(self)
+            local dialog = self:GetParent()
+            onAccept(dialog, dialog.data)
+            dialog:Hide()
+        end,
+    }
+end
+
+-- ── Popup: invite one or more bots by character name ─────────────────────────
+CB_RegisterEditPopup("CLEANBOT_INVITE_BY_NAME",
+    "Enter the character name(s) below separated by a comma:",
+    function(self)
+        local input = self.editBox and self.editBox:GetText()
+        input = input and input:match("^%s*(.-)%s*$")
+        if not input or input == "" then
+            NS.CB_Print("Please enter at least one character name.")
+            return
+        end
+        -- Clean each entry: title-case every word, strip spaces.
+        -- e.g. "john doe,  jane smith" → "JohnDoe,JaneSmith"
+        local names = {}
+        for entry in input:gmatch("[^,]+") do
+            entry = entry:match("^%s*(.-)%s*$")
+            entry = entry:gsub("(%a)([%a]*)", function(first, rest)
+                return first:upper() .. rest:lower()
+            end):gsub("%s+", "")
+            if entry ~= "" then names[#names + 1] = entry end
+        end
+        if #names == 0 then
+            NS.CB_Print("Please enter at least one character name.")
+            return
+        end
+        SendChatMessage(".playerbots bot add " .. table.concat(names, ","), "SAY")
+    end)
+
+-- ── Popup: link account — step 1, account name ───────────────────────────────
+CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_NAME",
+    "Enter the name of the account to link:",
+    function(self)
         local name = self.editBox and self.editBox:GetText()
-        name = name and strupper(name:match("^%s*(.-)%s*$"))  -- trim + uppercase
+        name = name and strupper(name:match("^%s*(.-)%s*$"))
         if not name or name == "" then
             NS.CB_Print("Account name cannot be empty.")
             return
         end
         StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_KEY", name, nil, name)
-    end,
-    EditBoxOnEnterPressed = function(self)
-        local dialog = self:GetParent()
-        StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_NAME"].OnAccept(dialog)
-        dialog:Hide()
-    end,
-}
+    end)
 
-StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_KEY"] = {
-    text         = "Enter the security key for account |cffffd200%s|r:",
-    button1      = "OK",
-    button2      = "Cancel",
-    hasEditBox   = 1,
-    timeout      = 0,
-    whileDead    = true,
-    hideOnEscape = true,
-    OnShow   = CB_PositionPopup,
-    OnAccept = function(self, data)
+-- ── Popup: link account — step 2, security key ───────────────────────────────
+CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
+    "Enter the security key for account |cffffd200%s|r:",
+    function(self, data)
         local key = self.editBox and self.editBox:GetText()
         key = key and key:match("^%s*(.-)%s*$")
         if not key or key == "" then
@@ -61,13 +93,7 @@ StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_KEY"] = {
             NS.linkedAccounts[#NS.linkedAccounts + 1] = accountName
         end
         NS.CB_Print("Linking account '" .. accountName .. "'...")
-    end,
-    EditBoxOnEnterPressed = function(self)
-        local dialog = self:GetParent()
-        StaticPopupDialogs["CLEANBOT_LINK_ACCOUNT_KEY"].OnAccept(dialog, dialog.data)
-        dialog:Hide()
-    end,
-}
+    end)
 
 NS.CleanBot_BuildManageContent = function()
     local function requireValidPlayerTarget()
@@ -120,11 +146,22 @@ NS.CleanBot_BuildManageContent = function()
 
     local function linkedAccountsList() return NS.linkedAccounts end
 
+    -- ── Invite by Name ────────────────────────────────────────
+    local inviteByNameBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotInviteByNameBtn",
+        "Invite by Name", 120, 24, function()
+            local popup = StaticPopup_Show("CLEANBOT_INVITE_BY_NAME")
+            if popup then
+                popup:SetWidth(420)
+                popup.text:SetWidth(380)
+            end
+        end)
+    inviteByNameBtn:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT",
+        NS.PADDING.panel.left  + (inviteByNameBtn.marginLeft or 0),
+        -(NS.PADDING.panel.top + (inviteByNameBtn.marginTop  or 0)))
+
     -- ── Target section ────────────────────────────────────────
     local targetLabel = NS.CB_CreateLabel(NS.managePanel, "Target")
-    targetLabel:SetPoint("TOPLEFT", NS.managePanel, "TOPLEFT",
-        NS.PADDING.panel.left  + (targetLabel.marginLeft or 0),
-        -(NS.PADDING.panel.top + (targetLabel.marginTop  or 0)))
+    NS.CB_AnchorBelow(targetLabel, inviteByNameBtn)
 
     -- ── Column 1: party invite / uninvite ─────────────────────
     local inviteTargetBtn = NS.CB_CreateButton(NS.managePanel, "CleanBotManageInviteTargetBtn",
