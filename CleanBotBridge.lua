@@ -22,6 +22,13 @@ NS.bridgeState   = "unknown"
 NS.probed        = {}   -- name-key -> true: party member already probed for bot-hood
 NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strategies:" reply
 
+-- No-bridge login gating: on a fresh login (not a /reload) bots may not be
+-- online yet, so we block CB_ProbePartyForBots until bridge detection
+-- resolves. "Hello!" whispers from bots are buffered here and flushed once
+-- the bridge is declared absent.
+NS.loginPhaseActive = false  -- true only on fresh login, cleared when detection resolves
+NS.pendingHello     = {}     -- name-key -> display-name: buffered "Hello!" senders
+
 -- ============================================================
 -- Linked accounts  (populated by .playerbots account linkedAccounts)
 -- ============================================================
@@ -45,7 +52,10 @@ NS.syncPending = false
 -- Only members that reply with a "Strategies: " line are treated as bots
 -- (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so they
 -- are probed a single time and then ignored.
+-- Skipped during loginPhaseActive — bots may not be online yet on fresh
+-- login; the "Hello!" path gates probing until each bot announces itself.
 local function CB_ProbePartyForBots()
+    if NS.loginPhaseActive then return end
     local n = GetNumPartyMembers()
 
     -- Forget probe records for members who have left, so a rejoin re-probes.
@@ -271,9 +281,22 @@ local function CB_StartBridgeDetection()
     CB_SendHello()
 
     NS.CB_After(3, function()
-        NS.bridgeDetecting = false
+        NS.bridgeDetecting  = false
+        NS.loginPhaseActive = false   -- login gate lifted regardless of outcome
         if NS.bridgeState == "unknown" then
             NS.bridgeState = "absent"
+
+            -- Flush bots that said "Hello!" during detection (fresh login path).
+            -- CB_ProbePartyForBots is now unblocked for mid-session joins.
+            for key, displayName in pairs(NS.pendingHello) do
+                if not CleanBot_PartyBots[key] and not NS.probed[key] then
+                    NS.probed[key]        = true
+                    NS.awaitingProbe[key] = true
+                    NS.CB_SendBotCommand(displayName, "co ?")
+                end
+            end
+            NS.pendingHello = {}
+
             NS.CB_RequestSync()
         end
     end)
@@ -291,11 +314,36 @@ bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 bridgeFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
 bridgeFrame:RegisterEvent("INSPECT_READY")
 bridgeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+bridgeFrame:RegisterEvent("PLAYER_LOGOUT")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
         local key   = strlower(sender)
         local entry = CleanBot_PartyBots[key]
+
+        -- "Hello!" detection: a bot has just come online (no-bridge, fresh-login path).
+        -- We verify the sender is actually in our party to avoid acting on a real player.
+        -- "Hello!" is not a Strategies reply, so we return early after handling it.
+        if msg == "Hello!" and NS.bridgeState ~= "present" then
+            local inParty = false
+            for i = 1, GetNumPartyMembers() do
+                if UnitName("party" .. i) == sender then inParty = true; break end
+            end
+            if inParty then
+                if NS.loginPhaseActive then
+                    -- Detection still running: buffer for processing when it resolves.
+                    NS.pendingHello[key] = sender
+                elseif NS.bridgeState == "absent" then
+                    -- Detection already resolved to absent: probe immediately.
+                    if not CleanBot_PartyBots[key] and not NS.probed[key] then
+                        NS.probed[key]        = true
+                        NS.awaitingProbe[key] = true
+                        NS.CB_SendBotCommand(sender, "co ?")
+                    end
+                end
+            end
+            return
+        end
 
         -- Inventory collection (whisper path): grab any item link, ignore everything else
         if entry and entry.awaitingInventory then
@@ -383,9 +431,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         if msg and strsub(msg, 1, 10) == "HELLO_ACK~" then
             NS.lastHelloAck = msg
             if not NS.bridgeReady then
-                NS.bridgeReady     = true
-                NS.bridgeState     = "present"
-                NS.bridgeDetecting = false
+                NS.bridgeReady      = true
+                NS.bridgeState      = "present"
+                NS.bridgeDetecting  = false
+                NS.loginPhaseActive = false  -- bridge handles discovery; no Hello! gating needed
+                NS.pendingHello     = {}
                 CB_BridgeRequest()
                 NS.CleanBot_FetchLinkedAccounts()
             end
@@ -567,12 +617,27 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- One-shot: reset bridge state at the first world entry (login),
         -- then stop listening so later zone/instance loads don't wipe the cache.
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        NS.bridgeReady     = false
-        NS.bridgeState     = "unknown"
-        NS.bridgeDetecting = false
-        NS.probed          = {}
-        NS.awaitingProbe   = {}
-        CleanBot_PartyBots = {}
+
+        -- Determine whether this is a fresh login or a /reload.
+        -- PLAYER_LOGOUT does not fire on /reload, so sessionActive remaining true
+        -- means the last session ended via reload rather than a proper logout.
+        local isReload = CleanBot_SavedVars and CleanBot_SavedVars.sessionActive == true
+        CleanBot_SavedVars.sessionActive = true
+
+        NS.loginPhaseActive = not isReload  -- gate bot probing on fresh login only
+        NS.pendingHello     = {}
+        NS.bridgeReady      = false
+        NS.bridgeState      = "unknown"
+        NS.bridgeDetecting  = false
+        NS.probed           = {}
+        NS.awaitingProbe    = {}
+        CleanBot_PartyBots  = {}
         CB_StartBridgeDetection()
+
+    elseif event == "PLAYER_LOGOUT" then
+        -- Clear the flag so the next session is treated as a fresh login.
+        if CleanBot_SavedVars then
+            CleanBot_SavedVars.sessionActive = false
+        end
     end
 end)
