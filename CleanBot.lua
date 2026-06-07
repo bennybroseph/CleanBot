@@ -84,7 +84,7 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH       = 850
+NS.EXPANDED_WIDTH    = 850
 NS.FRAME_HEIGHT      = 560
 NS.TAB_WIDTH         = 88
 NS.TAB_HEIGHT        = 24
@@ -155,10 +155,15 @@ NS.EQUIP_WEAPON_PAD  = 60
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
-NS.partyPanel      = nil
-NS.botTabBar       = nil
-NS.partyContent    = nil
-NS.partyEmptyLabel = nil
+NS.partyPanel        = nil
+NS.botTabBar         = nil
+NS.partyContent      = nil
+NS.partyModelPanel   = nil
+NS.partyStratPanel   = nil
+NS.partyExpandBtn    = nil
+NS.partyEmptyLabel   = nil
+NS.partyExpanded     = false
+NS.COLLAPSED_WIDTH   = nil  -- computed in CleanBot_BuildPartyTab after geometry is known
 NS.managePanel      = nil
 NS.manageScrollFrame = nil
 NS.manageScrollChild = nil
@@ -181,6 +186,7 @@ NS.CleanBot_SelectTopTab = function(index)
     if NS.managePanel     then if index == 1 then NS.managePanel:Show()     else NS.managePanel:Hide()     end end
     if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
+    if NS.partyExpandBtn then if index == 2 then NS.partyExpandBtn:Show() else NS.partyExpandBtn:Hide() end end
 
     if index == 2 then
         for i, info in ipairs(NS.tabList or {}) do
@@ -204,8 +210,8 @@ end
 -- references are fine.
 -- ============================================================
 function CleanBot_BuildFrames()
-    -- Static frame size — never shrinks/grows based on party state
-    CleanBotFrame:SetWidth(NS.FRAME_WIDTH)
+    -- Static frame size — shrunk to collapsed width after BuildFrames if needed
+    CleanBotFrame:SetWidth(NS.EXPANDED_WIDTH)
     CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
 
     -- Stamp padding fields so child anchors can read CleanBotFrame.paddingXxx
@@ -312,6 +318,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
             NS.botEmotes = CleanBot_SavedVars.botEmotes
         end
+        NS.partyExpanded = CleanBot_SavedVars.partyExpanded == true
 
         -- Restore theme values.
         if type(CleanBot_SavedVars.scale) == "number" then
@@ -354,6 +361,15 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         NS.CB_RegisterRootFrame(CleanBotFrame)
         CleanBot_BuildFrames()
+        -- Apply saved party expand state now that COLLAPSED_WIDTH is known.
+        -- BuildFrames always starts at EXPANDED_WIDTH; collapse it here if needed.
+        if not NS.partyExpanded and NS.COLLAPSED_WIDTH then
+            CleanBotFrame:SetWidth(NS.COLLAPSED_WIDTH)
+            if NS.partyStratPanel then NS.partyStratPanel:Hide() end
+        end
+        if NS.partyExpandBtn then
+            NS.partyExpandBtn:SetText(NS.partyExpanded and "<" or ">")
+        end
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
         -- Accent colour is baked in during CB_ApplyFrameSkin calls inside

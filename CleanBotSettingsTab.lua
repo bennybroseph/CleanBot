@@ -572,7 +572,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- Scroll child is a borderless void — full width, no content padding.
     -- Subtract the panel padding on both sides (scroll frame inset) plus 20px scroll bar.
-    local SEP_W = NS.FRAME_WIDTH - (panel.paddingLeft or 0) - (panel.paddingRight or 0) - 20
+    local SEP_W = NS.EXPANDED_WIDTH - (panel.paddingLeft or 0) - (panel.paddingRight or 0) - 20
 
     -- ── Padding ────────────────────────────────────────────────
     local paddingHeader = NS.CB_CreateHeader(layoutChild, "Padding")

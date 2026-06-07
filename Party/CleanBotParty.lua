@@ -29,6 +29,47 @@ NS.CleanBot_BuildPartyTab = function()
     NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
     NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
     NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT", 0,  0)
+
+    -- ── Two-column panel structure ────────────────────────────────
+    -- Compute model panel width from frame height (decoupled from frame width).
+    -- This means the model area never changes size when the frame expands/collapses.
+    -- modelW factor (0.7) approximates the original contentW/3 at 850px width.
+    -- Adjust in-game via this multiplier if the model looks too wide or narrow.
+    local panelH  = NS.partyContent:GetHeight()
+    if panelH == 0 then
+        panelH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H
+                 - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom)
+    end
+    local modelH  = panelH - NS.EQUIP_WEAPON_PAD
+    local modelW  = math.floor(modelH * 0.7)
+    local g       = NS.CB_SlotGeometry(modelW, modelH)
+    local panelW  = g.colW + modelW + g.colW
+
+    -- Column 1: model + equip slots. Fixed width, never resizes.
+    NS.partyModelPanel = CreateFrame("Frame", "CleanBotPartyModelPanel", NS.partyContent)
+    NS.partyModelPanel:SetPoint("TOPLEFT",    NS.partyContent, "TOPLEFT",    0, 0)
+    NS.partyModelPanel:SetPoint("BOTTOMLEFT", NS.partyContent, "BOTTOMLEFT", 0, 0)
+    NS.partyModelPanel:SetWidth(panelW)
+
+    -- Column 2: strategy tabs and controls. Fills the remaining width via BOTTOMRIGHT.
+    NS.partyStratPanel = CreateFrame("Frame", "CleanBotPartyStratPanel", NS.partyContent)
+    NS.partyStratPanel:SetPoint("TOPLEFT",     NS.partyModelPanel, "TOPRIGHT",    0, 0)
+    NS.partyStratPanel:SetPoint("BOTTOMRIGHT", NS.partyContent,    "BOTTOMRIGHT", 0, 0)
+
+    -- Collapsed width = model panel + frame padding on both sides.
+    NS.COLLAPSED_WIDTH = panelW + NS.PADDING.frame.left + NS.PADDING.frame.right
+
+    -- ── Expand / collapse toggle button ─────────────────────────
+    -- Parented to CleanBotFrame and anchored to its RIGHT edge.
+    -- IMPORTANT: static pixel offset intentionally bypasses the padding/margin
+    -- model. This is a fixed UI affordance at the frame edge; do not convert
+    -- these offsets to NS.PADDING or margin values.
+    NS.partyExpandBtn = NS.CB_CreateButton(CleanBotFrame, "CleanBotPartyExpandBtn",
+        ">", 20, 50, function() NS.CB_TogglePartyExpand() end)
+    NS.partyExpandBtn:ClearAllPoints()
+    NS.partyExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", -4, 0)
+    NS.partyExpandBtn:SetFrameLevel(CleanBotFrame:GetFrameLevel() + 20)
+    NS.partyExpandBtn:Hide()  -- shown only when Party tab is active (CleanBot_SelectTopTab)
 end
 
 -- ============================================================
@@ -77,14 +118,15 @@ NS.botRegistries = {
 local function CB_GetGeometry()
     local contentW = NS.partyContent and NS.partyContent:GetWidth()  or 0
     local contentH = NS.partyContent and NS.partyContent:GetHeight() or 0
-    if contentW == 0 then contentW = NS.FRAME_WIDTH - 8 end
-    if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom) - NS.PAD * 2 end
+    if contentW == 0 then contentW = NS.EXPANDED_WIDTH - NS.PADDING.frame.left - NS.PADDING.frame.right end
+    if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom) end
 
-    local modelH   = contentH - NS.EQUIP_WEAPON_PAD
-    local modelW   = math.floor(contentW / 3)
-    local g        = NS.CB_SlotGeometry(modelW, modelH)
-    local ctrlLeft = NS.PADDING.panel.left + g.colW + modelW + g.colW + NS.PAD
-    return contentW, contentH, modelH, g.colW, ctrlLeft
+    -- modelW is derived from modelH, not contentW, so the model panel width is
+    -- stable regardless of whether the frame is expanded or collapsed.
+    local modelH = contentH - NS.EQUIP_WEAPON_PAD
+    local modelW = math.floor(modelH * 0.7)
+    local g      = NS.CB_SlotGeometry(modelW, modelH)
+    return contentW, contentH, modelH, g.colW, modelW
 end
 
 -- ============================================================
@@ -697,7 +739,7 @@ end
 
 -- Build the container frames for a new pool slot (once per slot index).
 local function CB_CreateSlot(index)
-    local contentW, contentH, modelH, eqColW, ctrlLeft = CB_GetGeometry()
+    local contentW, contentH, modelH, eqColW, modelW = CB_GetGeometry()
     local slot = { index = index, contentByClass = {}, active = false }
 
     -- ── Tab button ────────────────────────────────────────────
@@ -713,16 +755,21 @@ local function CB_CreateSlot(index)
     slot.tabIcon = icon
 
     -- ── Model (also builds star + equip slots, all class-agnostic) ──
-    local model = NS.CB_CreateModel(slot, NS.partyContent, contentW, modelH)
+    -- Parented to partyModelPanel so the model column is self-contained.
+    -- Positioned at eqColW from the panel's left edge, leaving room for the
+    -- left equip column. Equip buttons extend outside the model frame into
+    -- that column area — this is intentional and valid in WoW.
+    local model = NS.CB_CreateModel(slot, NS.partyModelPanel, modelW, modelH)
     model:ClearAllPoints()
-    model:SetPoint("TOPLEFT", NS.partyContent, "TOPLEFT", NS.PADDING.panel.left + eqColW, 0)
+    model:SetPoint("TOPLEFT", NS.partyModelPanel, "TOPLEFT", eqColW, 0)
     model:Hide()
     slot.model = model
 
     -- ── Ctrl container (holds the per-class content frames) ────
-    local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. index, NS.partyContent)
-    ctrl:SetPoint("TOPLEFT",     NS.partyContent, "TOPLEFT",     ctrlLeft,                  -NS.PADDING.panel.top)
-    ctrl:SetPoint("BOTTOMRIGHT", NS.partyContent, "BOTTOMRIGHT", -NS.PADDING.panel.right,    NS.PADDING.panel.bottom)
+    -- Parented to partyStratPanel so hiding that panel hides all ctrl frames.
+    local ctrl = CreateFrame("Frame", "CleanBotCtrl" .. index, NS.partyStratPanel)
+    ctrl:SetPoint("TOPLEFT",     NS.partyStratPanel, "TOPLEFT",     NS.PADDING.panel.left,  -NS.PADDING.panel.top)
+    ctrl:SetPoint("BOTTOMRIGHT", NS.partyStratPanel, "BOTTOMRIGHT", -NS.PADDING.panel.right,  NS.PADDING.panel.bottom)
     ctrl:Hide()
     slot.ctrl = ctrl
 
@@ -810,6 +857,31 @@ local function CB_BindSlot(slot, info)
     if slot.updateStar then slot.updateStar() end
     if NS.CB_RefreshEquipSlots then NS.CB_RefreshEquipSlots(slot.key, slot.unit) end
     NS.CB_UpdateTabData(info.key)
+end
+
+-- ============================================================
+-- NS.CB_TogglePartyExpand — shows/hides the strategy panel and resizes
+-- CleanBotFrame. No slot relayout is needed because each panel (model and
+-- strategy) tracks its own anchors independently.
+-- ============================================================
+NS.CB_TogglePartyExpand = function()
+    NS.partyExpanded = not NS.partyExpanded
+    if CleanBot_SavedVars then
+        CleanBot_SavedVars.partyExpanded = NS.partyExpanded
+    end
+
+    CleanBotFrame:SetWidth(NS.partyExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH)
+
+    if NS.partyExpanded then
+        NS.partyStratPanel:Show()
+        NS.partyExpandBtn:SetText("<")
+        -- Ensure the active slot's ctrl is visible now that the panel is open.
+        local sel = NS.tabList[NS.selectedTabIndex]
+        if sel and sel.ctrl then sel.ctrl:Show() end
+    else
+        NS.partyStratPanel:Hide()
+        NS.partyExpandBtn:SetText(">")
+    end
 end
 
 -- ============================================================

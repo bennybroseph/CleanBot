@@ -11,9 +11,9 @@ local NS = CleanBotNS
 -- Stores slot.updateStar (star refresh) and slot.equipSlots (paperdoll).
 -- Rotation drag uses the shared capture frame (NS.CB_BeginCapture).
 -- Returns the model frame; the caller positions it.
-NS.CB_CreateModel = function(slot, parent, contentW, contentH)
+NS.CB_CreateModel = function(slot, parent, modelW, modelH)
     local model = CreateFrame("DressUpModel", "CleanBotModel" .. slot.index, parent)
-    model:SetSize(contentW / 3, contentH)
+    model:SetSize(modelW, modelH)
     model:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     model:Hide()
 
