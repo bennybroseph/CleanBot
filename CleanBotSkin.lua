@@ -369,7 +369,7 @@ NS.CB_ApplyFrameSkin = function(frame, nestLevel)
         local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
         local alpha      = (NS.transparency or 100) / 100
         local depth      = level - 1
-        local brightness = NS.ElvUI_S and math.max(0, 0.10 - depth * 0.05) or (depth * 0.05)
+        local brightness = NS.ElvUI_S and math.max(0, 0.10 - depth * 0.02) or (depth * 0.05)
         if NS.ElvUI_S then
             frame:StripTextures()
             frame:SetTemplate("Default")

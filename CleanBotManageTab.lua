@@ -177,20 +177,9 @@ NS.CleanBot_BuildManageTab = function()
         return dd
     end
 
-    local function favoritesList()
-        local favs = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots
-        local list = {}
-        if favs then
-            for key in pairs(favs) do
-                list[#list + 1] = key:sub(1, 1):upper() .. key:sub(2)
-            end
-        end
-        return list
-    end
-
     local function linkedAccountsList() return NS.linkedAccounts end
 
-    -- ── Invite by Name ────────────────────────────────────────
+    -- ── Invite by Name ────────────────────────────────────
     local inviteByNameBtn = NS.CB_CreateButton(panel, "CleanBotInviteByNameBtn",
         "Invite by Name", 120, 24, function()
             local popup = StaticPopup_Show("CLEANBOT_INVITE_BY_NAME")
@@ -203,7 +192,7 @@ NS.CleanBot_BuildManageTab = function()
         (panel.paddingLeft or 0) + (inviteByNameBtn.marginLeft or 0),
       -((panel.paddingTop  or 0) + (inviteByNameBtn.marginTop  or 0)))
 
-    -- ── Target section ────────────────────────────────────────
+    -- ── Target section ────────────────────────────────────
     local targetSection = NS.CB_CreateSection(panel, "target", "Target", 3)
 
     local inviteTargetBtn = NS.CB_CreateButton(targetSection.bg, "CleanBotManageInviteTargetBtn",
@@ -278,7 +267,7 @@ NS.CleanBot_BuildManageTab = function()
 
     targetSection:Finalize(uninviteAllBtn)  -- deepest col-1 widget; col-2 is same depth
 
-    -- ── Party/Raid section ────────────────────────────────────
+    -- ── Party/Raid section ────────────────────────────────
     local function CB_SendGroupCommand(cmd)
         if GetNumRaidMembers() > 0 then
             SendChatMessage(cmd, "RAID")
@@ -316,74 +305,379 @@ NS.CleanBot_BuildManageTab = function()
 
     partyRaidSection:Finalize(eatDrinkBtn)  -- col-1 is deeper
 
-    -- ── Favorites section ─────────────────────────────────────
-    local favoritesSection = NS.CB_CreateSection(panel, "favorites", "Favorites", 3)
+    -- ── Favorites/Presets section ─────────────────────────
+    -- SavedVars shape:
+    --   CleanBot_SavedVars.presets = {
+    --       ["Favorites"] = { "BotName1", ... },   ← protected; seeded on init
+    --       ["PresetName"] = { "BotName1", ... },
+    --   }
+    -- "Favorites" is the protected preset populated by the Party tab star buttons.
+    -- It cannot be renamed or removed. Left list: preset names. Right list: bots in
+    -- the selected preset. Col-2 buttons anchor independently below presetList2 so
+    -- both columns stay vertically aligned regardless of button label width differences.
 
-    local inviteAllBtn = NS.CB_CreateButton(favoritesSection.bg, "CleanBotInviteAllFavoritesBtn",
-        "Invite All", 80, 24, function()
-            local list = favoritesList()
-            if #list == 0 then
-                NS.CB_Print("No favorites saved.")
+    local FAVORITES_KEY = "Favorites"  -- protected preset name; guards reference this
+
+    local presetsSection = NS.CB_CreateSection(panel, "presets", "Favorites/Presets", 3)
+
+    -- Title-cases a single name and strips spaces.
+    -- e.g. "john doe" → "JohnDoe"  (matches the bot add command convention)
+    local function titleCaseName(str)
+        return str:gsub("(%a)([%a]*)", function(first, rest)
+            return first:upper() .. rest:lower()
+        end):gsub("%s+", "")
+    end
+
+    local selectedPresetName = nil
+    local presetList2  -- forward-declared; assigned before any onSelect fires
+
+    -- ── Row 1: Invite buttons ─────────────────────────────
+    local invitePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotInvitePresetBtn",
+        "Invite Preset", 110, 24)
+    invitePresetBtn:SetPoint("TOPLEFT", presetsSection.bg, "TOPLEFT",
+        NS.PADDING.section.left  + (invitePresetBtn.marginLeft or 0),
+      -(NS.PADDING.section.top   + (invitePresetBtn.marginTop  or 0)))
+
+    local inviteBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetInviteBotBtn",
+        "Invite Bot", 110, 24)
+    inviteBotBtn.marginLeft = NS.COLUMN_GAP
+    NS.CB_AnchorAhead(inviteBotBtn, invitePresetBtn)
+
+    -- ── Row 2: Selectable lists ───────────────────────────
+    local presetList1 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList1", 160, 104,
+        function(name)
+            selectedPresetName = name
+            local entries = (CleanBot_SavedVars.presets or {})[name] or {}
+            presetList2:SetItems(entries)
+        end)
+    NS.CB_AnchorBelow(presetList1, invitePresetBtn)
+
+    presetList2 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList2", 160, 104)
+    presetList2.marginLeft = NS.COLUMN_GAP
+    NS.CB_AnchorAhead(presetList2, presetList1)
+
+    -- Re-anchor Invite Bot so its left edge aligns with presetList2 rather than
+    -- sitting offset from invitePresetBtn. Pin BOTTOMLEFT → presetList2 TOPLEFT
+    -- with the combined facing margins as the gap (mirror of CB_AnchorBelow).
+    inviteBotBtn:ClearAllPoints()
+    inviteBotBtn:SetPoint("BOTTOMLEFT", presetList2, "TOPLEFT",
+        0, (presetList2.marginTop or 0) + (inviteBotBtn.marginBottom or 0))
+
+    -- ── Col-1 buttons (below presetList1) ─────────────────
+    local addPresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotAddPresetBtn",
+        "Add Preset", 110, 24)
+    NS.CB_AnchorBelow(addPresetBtn, presetList1)
+
+    local renamePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotRenamePresetBtn",
+        "Rename Preset", 110, 24)
+    NS.CB_AnchorBelow(renamePresetBtn, addPresetBtn)
+
+    local removePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotRemovePresetBtn",
+        "Remove Preset", 110, 24)
+    NS.CB_AnchorBelow(removePresetBtn, renamePresetBtn)
+
+    -- ── Col-2 buttons (independently anchored below presetList2) ──────────────
+    local addBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetAddBotBtn",
+        "Add Bot", 110, 24)
+    NS.CB_AnchorBelow(addBotBtn, presetList2)
+
+    local renameBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRenameBotBtn",
+        "Rename Bot", 110, 24)
+    NS.CB_AnchorBelow(renameBotBtn, addBotBtn)
+
+    local removeBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRemoveBotBtn",
+        "Remove Bot", 110, 24)
+    NS.CB_AnchorBelow(removeBotBtn, renameBotBtn)
+
+    presetsSection:Finalize(removePresetBtn)  -- col-1 deepest; both cols same row count
+
+    -- ── Helpers ───────────────────────────────────────────
+
+    -- Rebuilds the left list from saved vars. "Favorites" is pinned at the top;
+    -- all other presets are sorted alphabetically below it.
+    -- Clears selection and the right list since the active preset is no longer reliable.
+    local function refreshPresetList()
+        local presets = CleanBot_SavedVars and CleanBot_SavedVars.presets or {}
+        local names = {}
+        for k in pairs(presets) do
+            if k ~= FAVORITES_KEY then names[#names + 1] = k end
+        end
+        table.sort(names)
+        -- Pin Favorites at position 1 if it exists.
+        if presets[FAVORITES_KEY] then
+            table.insert(names, 1, FAVORITES_KEY)
+        end
+        presetList1:SetItems(names)
+        presetList2:SetItems({})
+        selectedPresetName = nil
+    end
+
+    -- Re-populates the right list from the currently selected preset's entries.
+    local function refreshPresetEntries()
+        if not selectedPresetName then return end
+        local entries = (CleanBot_SavedVars.presets or {})[selectedPresetName] or {}
+        presetList2:SetItems(entries)
+    end
+
+    -- ── Popups ────────────────────────────────────────────
+
+    CB_RegisterEditPopup("CLEANBOT_ADD_PRESET",
+        "Enter a name for the new preset:",
+        function(self)
+            local name = self.editBox and self.editBox:GetText()
+            name = name and name:match("^%s*(.-)%s*$")
+            if not name or name == "" then
+                NS.CB_Print("Please enter a preset name.")
                 return
             end
-            for _, name in ipairs(list) do
-                SendChatMessage(".playerbots bot add " .. name, "SAY")
-            end
-        end)
-    inviteAllBtn:SetPoint("TOPLEFT", favoritesSection.bg, "TOPLEFT",
-        NS.PADDING.section.left  + (inviteAllBtn.marginLeft or 0),
-      -(NS.PADDING.section.top   + (inviteAllBtn.marginTop  or 0)))
-
-    local selectedFavName = nil
-    local addFavBtn = NS.CB_CreateButton(favoritesSection.bg, "CleanBotAddFavoriteBtn",
-        "Invite", 60, 24, function()
-            if not selectedFavName then
-                NS.CB_Print("No favorite selected.")
+            if name == FAVORITES_KEY then
+                NS.CB_Print("'" .. FAVORITES_KEY .. "' is a protected preset and cannot be created manually.")
                 return
             end
-            SendChatMessage(".playerbots bot add " .. selectedFavName, "SAY")
+            if not CleanBot_SavedVars.presets then CleanBot_SavedVars.presets = {} end
+            if CleanBot_SavedVars.presets[name] then
+                NS.CB_Print("A preset named '" .. name .. "' already exists.")
+                return
+            end
+            CleanBot_SavedVars.presets[name] = {}
+            refreshPresetList()
         end)
-    NS.CB_AnchorBelow(addFavBtn, inviteAllBtn)
-    local favDD = makeListDropdown(favoritesSection.bg, "CleanBotFavoritesDD", addFavBtn, favoritesList,
-        "No favorites saved", function(name) selectedFavName = name end)
 
-    local selectedDelName = nil
-    local delFavBtn = NS.CB_CreateButton(favoritesSection.bg, "CleanBotDeleteFavoriteBtn", "Remove", 60, 24)
-    NS.CB_AnchorBelow(delFavBtn, addFavBtn)
-    local delFavDD = makeListDropdown(favoritesSection.bg, "CleanBotFavoritesDelDD", delFavBtn, favoritesList,
-        "No favorites saved", function(name) selectedDelName = name end)
-    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_FAVORITE",
-        "Are you sure you want to remove '%s' from your favorites?",
+    CB_RegisterEditPopup("CLEANBOT_RENAME_PRESET",
+        "Enter a new name for the '%s' preset:",
         function(self, data)
-            local key = strlower(data)
-            if CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots then
-                CleanBot_SavedVars.favoriteBots[key] = nil
+            local newName = self.editBox and self.editBox:GetText()
+            newName = newName and newName:match("^%s*(.-)%s*$")
+            if not newName or newName == "" then
+                NS.CB_Print("Please enter a preset name.")
+                return
             end
-            if NS.botStarUpdaters and NS.botStarUpdaters[key] then
-                NS.botStarUpdaters[key]()
+            local oldName = data
+            if not oldName or not CleanBot_SavedVars.presets then return end
+            -- Belt-and-suspenders guard: the button handler checks first.
+            if oldName == FAVORITES_KEY then
+                NS.CB_Print("'" .. FAVORITES_KEY .. "' is a protected preset and cannot be renamed.")
+                return
             end
-            UIDropDownMenu_SetText(delFavDD, "")
-            UIDropDownMenu_SetText(favDD, "")
-            selectedDelName = nil
-            selectedFavName = nil
+            if CleanBot_SavedVars.presets[newName] then
+                NS.CB_Print("A preset named '" .. newName .. "' already exists.")
+                return
+            end
+            CleanBot_SavedVars.presets[newName] = CleanBot_SavedVars.presets[oldName]
+            CleanBot_SavedVars.presets[oldName] = nil
+            refreshPresetList()
         end)
 
-    delFavBtn:SetScript("OnClick", function()
-        if not selectedDelName then
-            NS.CB_Print("No favorite selected.")
+    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_PRESET",
+        "Are you sure you want to remove the '%s' preset?",
+        function(self, data)
+            -- Belt-and-suspenders guard: the button handler checks first.
+            if data == FAVORITES_KEY then
+                NS.CB_Print("'" .. FAVORITES_KEY .. "' is a protected preset and cannot be removed.")
+                return
+            end
+            if data and CleanBot_SavedVars.presets then
+                CleanBot_SavedVars.presets[data] = nil
+            end
+            refreshPresetList()
+        end)
+
+    CB_RegisterEditPopup("CLEANBOT_ADD_BOT_TO_PRESET",
+        "Enter a bot name to add to the '%s' preset:",
+        function(self)
+            local botName = self.editBox and self.editBox:GetText()
+            botName = botName and botName:match("^%s*(.-)%s*$")
+            if not botName or botName == "" then
+                NS.CB_Print("Please enter a bot name.")
+                return
+            end
+            if not selectedPresetName then return end
+            local preset = CleanBot_SavedVars.presets
+                and CleanBot_SavedVars.presets[selectedPresetName]
+            if not preset then return end
+            for _, v in ipairs(preset) do
+                if strlower(v) == strlower(botName) then
+                    NS.CB_Print("'" .. botName .. "' is already in this preset.")
+                    return
+                end
+            end
+            preset[#preset + 1] = botName
+            -- If adding to Favorites, refresh the star on any matching party slot.
+            if selectedPresetName == FAVORITES_KEY then
+                local key = strlower(botName)
+                if NS.botStarUpdaters and NS.botStarUpdaters[key] then
+                    NS.botStarUpdaters[key]()
+                end
+            end
+            refreshPresetEntries()
+        end)
+
+    CB_RegisterEditPopup("CLEANBOT_RENAME_BOT_IN_PRESET",
+        "Enter a new name for '%s':",
+        function(self, data)
+            local newName = self.editBox and self.editBox:GetText()
+            newName = newName and newName:match("^%s*(.-)%s*$")
+            if not newName or newName == "" then
+                NS.CB_Print("Please enter a bot name.")
+                return
+            end
+            local oldName = data
+            if not oldName or not selectedPresetName then return end
+            local preset = CleanBot_SavedVars.presets
+                and CleanBot_SavedVars.presets[selectedPresetName]
+            if not preset then return end
+            for _, v in ipairs(preset) do
+                if strlower(v) == strlower(newName) then
+                    NS.CB_Print("'" .. newName .. "' is already in this preset.")
+                    return
+                end
+            end
+            for i, v in ipairs(preset) do
+                if v == oldName then
+                    preset[i] = newName
+                    break
+                end
+            end
+            -- If renaming within Favorites, refresh stars for both old and new key.
+            if selectedPresetName == FAVORITES_KEY then
+                local oldKey = strlower(oldName)
+                local newKey = strlower(newName)
+                if NS.botStarUpdaters then
+                    if NS.botStarUpdaters[oldKey] then NS.botStarUpdaters[oldKey]() end
+                    if NS.botStarUpdaters[newKey] then NS.botStarUpdaters[newKey]() end
+                end
+            end
+            refreshPresetEntries()
+        end)
+
+    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_BOT_FROM_PRESET",
+        "Are you sure you want to remove '%s' from the '%s' preset?",
+        function(self, data)
+            if not selectedPresetName then return end
+            local preset = CleanBot_SavedVars.presets
+                and CleanBot_SavedVars.presets[selectedPresetName]
+            if not preset then return end
+            for i, v in ipairs(preset) do
+                if v == data then
+                    table.remove(preset, i)
+                    break
+                end
+            end
+            -- If removing from Favorites, update the star on any matching party slot.
+            if selectedPresetName == FAVORITES_KEY then
+                local key = strlower(data)
+                if NS.botStarUpdaters and NS.botStarUpdaters[key] then
+                    NS.botStarUpdaters[key]()
+                end
+            end
+            refreshPresetEntries()
+        end)
+
+    -- ── Button handlers ───────────────────────────────────
+
+    invitePresetBtn:SetScript("OnClick", function()
+        if not selectedPresetName then
+            NS.CB_Print("No preset selected.")
             return
         end
-        local popup = StaticPopup_Show("CLEANBOT_REMOVE_FAVORITE",
-            selectedDelName, nil, selectedDelName)
+        local preset = CleanBot_SavedVars.presets
+            and CleanBot_SavedVars.presets[selectedPresetName]
+        if not preset or #preset == 0 then
+            NS.CB_Print("This preset has no bots.")
+            return
+        end
+        local names = {}
+        for _, v in ipairs(preset) do
+            names[#names + 1] = titleCaseName(v)
+        end
+        SendChatMessage(".playerbots bot add " .. table.concat(names, ","), "SAY")
+    end)
+
+    inviteBotBtn:SetScript("OnClick", function()
+        local selected = presetList2:GetSelected()
+        if not selected then
+            NS.CB_Print("No bot selected.")
+            return
+        end
+        SendChatMessage(".playerbots bot add " .. titleCaseName(selected), "SAY")
+    end)
+
+    addPresetBtn:SetScript("OnClick", function()
+        StaticPopup_Show("CLEANBOT_ADD_PRESET")
+    end)
+
+    renamePresetBtn:SetScript("OnClick", function()
+        local selected = presetList1:GetSelected()
+        if not selected then
+            NS.CB_Print("No preset selected.")
+            return
+        end
+        if selected == FAVORITES_KEY then
+            NS.CB_Print("'" .. FAVORITES_KEY .. "' is a protected preset and cannot be renamed.")
+            return
+        end
+        StaticPopup_Show("CLEANBOT_RENAME_PRESET", selected, nil, selected)
+    end)
+
+    removePresetBtn:SetScript("OnClick", function()
+        local selected = presetList1:GetSelected()
+        if not selected then
+            NS.CB_Print("No preset selected.")
+            return
+        end
+        if selected == FAVORITES_KEY then
+            NS.CB_Print("'" .. FAVORITES_KEY .. "' is a protected preset and cannot be removed.")
+            return
+        end
+        local popup = StaticPopup_Show("CLEANBOT_REMOVE_PRESET", selected, nil, selected)
         if popup then
             popup:SetWidth(420)
             popup.text:SetWidth(380)
         end
     end)
 
-    favoritesSection:Finalize(delFavBtn)
+    addBotBtn:SetScript("OnClick", function()
+        if not selectedPresetName then
+            NS.CB_Print("No preset selected.")
+            return
+        end
+        StaticPopup_Show("CLEANBOT_ADD_BOT_TO_PRESET", selectedPresetName)
+    end)
 
-    -- ── Altbots section ───────────────────────────────────────
+    renameBotBtn:SetScript("OnClick", function()
+        if not selectedPresetName then
+            NS.CB_Print("No preset selected.")
+            return
+        end
+        local selected = presetList2:GetSelected()
+        if not selected then
+            NS.CB_Print("No bot selected.")
+            return
+        end
+        StaticPopup_Show("CLEANBOT_RENAME_BOT_IN_PRESET", selected, nil, selected)
+    end)
+
+    removeBotBtn:SetScript("OnClick", function()
+        if not selectedPresetName then
+            NS.CB_Print("No preset selected.")
+            return
+        end
+        local selected = presetList2:GetSelected()
+        if not selected then
+            NS.CB_Print("No bot selected.")
+            return
+        end
+        local popup = StaticPopup_Show("CLEANBOT_REMOVE_BOT_FROM_PRESET",
+            selected, selectedPresetName, selected)
+        if popup then
+            popup:SetWidth(420)
+            popup.text:SetWidth(380)
+        end
+    end)
+
+    refreshPresetList()  -- populate from saved vars on load
+
+    -- ── Altbots section ───────────────────────────────────
     local altbotsSection = NS.CB_CreateSection(panel, "altbots", "Altbots", 3)
 
     local linkAltBtn = NS.CB_CreateButton(altbotsSection.bg, "CleanBotLinkAltBtn",
@@ -465,326 +759,10 @@ NS.CleanBot_BuildManageTab = function()
 
     altbotsSection:Finalize(unlinkAltBtn)
 
-    -- ── Presets section ───────────────────────────────────────
-    -- SavedVars shape:
-    --   CleanBot_SavedVars.presets = {
-    --       ["PresetName"] = { "BotName1", "BotName2", ... },
-    --   }
-    -- Left list: preset names. Right list: bots in the selected preset.
-    -- Col-2 buttons anchor independently below presetList2 so both columns
-    -- stay vertically aligned regardless of button label width differences.
-
-    local presetsSection = NS.CB_CreateSection(panel, "presets", "Presets", 3)
-
-    -- Title-cases a single name and strips spaces.
-    -- e.g. "john doe" → "JohnDoe"  (matches the bot add command convention)
-    local function titleCaseName(str)
-        return str:gsub("(%a)([%a]*)", function(first, rest)
-            return first:upper() .. rest:lower()
-        end):gsub("%s+", "")
-    end
-
-    local selectedPresetName = nil
-    local presetList2  -- forward-declared; assigned before any onSelect fires
-
-    -- ── Row 1: Invite buttons ─────────────────────────────
-    local invitePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotInvitePresetBtn",
-        "Invite Preset", 110, 24)
-    invitePresetBtn:SetPoint("TOPLEFT", presetsSection.bg, "TOPLEFT",
-        NS.PADDING.section.left  + (invitePresetBtn.marginLeft or 0),
-      -(NS.PADDING.section.top   + (invitePresetBtn.marginTop  or 0)))
-
-    local inviteBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetInviteBotBtn",
-        "Invite Bot", 110, 24)
-    inviteBotBtn.marginLeft = NS.COLUMN_GAP
-    NS.CB_AnchorAhead(inviteBotBtn, invitePresetBtn)
-
-    -- ── Row 2: Selectable lists ───────────────────────────
-    local presetList1 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList1", 160, 104,
-        function(name)
-            selectedPresetName = name
-            local entries = (CleanBot_SavedVars.presets or {})[name] or {}
-            presetList2:SetItems(entries)
-        end)
-    NS.CB_AnchorBelow(presetList1, invitePresetBtn)
-
-    presetList2 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList2", 160, 104)
-    presetList2.marginLeft = NS.COLUMN_GAP
-    NS.CB_AnchorAhead(presetList2, presetList1)
-
-    -- Re-anchor Invite Bot so its left edge aligns with presetList2 rather than
-    -- sitting offset from invitePresetBtn. Pin BOTTOMLEFT → presetList2 TOPLEFT
-    -- with the combined facing margins as the gap (mirror of CB_AnchorBelow).
-    inviteBotBtn:ClearAllPoints()
-    inviteBotBtn:SetPoint("BOTTOMLEFT", presetList2, "TOPLEFT",
-        0, (presetList2.marginTop or 0) + (inviteBotBtn.marginBottom or 0))
-
-    -- ── Col-1 buttons (below presetList1) ─────────────────
-    local addPresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotAddPresetBtn",
-        "Add Preset", 110, 24)
-    NS.CB_AnchorBelow(addPresetBtn, presetList1)
-
-    local renamePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotRenamePresetBtn",
-        "Rename Preset", 110, 24)
-    NS.CB_AnchorBelow(renamePresetBtn, addPresetBtn)
-
-    local removePresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotRemovePresetBtn",
-        "Remove Preset", 110, 24)
-    NS.CB_AnchorBelow(removePresetBtn, renamePresetBtn)
-
-    -- ── Col-2 buttons (independently anchored below presetList2) ──────────────
-    local addBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetAddBotBtn",
-        "Add Bot", 110, 24)
-    NS.CB_AnchorBelow(addBotBtn, presetList2)
-
-    local renameBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRenameBotBtn",
-        "Rename Bot", 110, 24)
-    NS.CB_AnchorBelow(renameBotBtn, addBotBtn)
-
-    local removeBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRemoveBotBtn",
-        "Remove Bot", 110, 24)
-    NS.CB_AnchorBelow(removeBotBtn, renameBotBtn)
-
-    presetsSection:Finalize(removePresetBtn)  -- col-1 deepest; both cols same row count
-
-    -- ── Helpers ───────────────────────────────────────────
-
-    -- Rebuilds the left list from saved vars, sorted alphabetically.
-    -- Clears selection and the right list since the active preset is no longer reliable.
-    local function refreshPresetList()
-        local presets = CleanBot_SavedVars and CleanBot_SavedVars.presets or {}
-        local names = {}
-        for k in pairs(presets) do names[#names + 1] = k end
-        table.sort(names)
-        presetList1:SetItems(names)
-        presetList2:SetItems({})
-        selectedPresetName = nil
-    end
-
-    -- Re-populates the right list from the currently selected preset's entries.
-    local function refreshPresetEntries()
-        if not selectedPresetName then return end
-        local entries = (CleanBot_SavedVars.presets or {})[selectedPresetName] or {}
-        presetList2:SetItems(entries)
-    end
-
-    -- ── Popups ────────────────────────────────────────────
-
-    CB_RegisterEditPopup("CLEANBOT_ADD_PRESET",
-        "Enter a name for the new preset:",
-        function(self)
-            local name = self.editBox and self.editBox:GetText()
-            name = name and name:match("^%s*(.-)%s*$")
-            if not name or name == "" then
-                NS.CB_Print("Please enter a preset name.")
-                return
-            end
-            if not CleanBot_SavedVars.presets then CleanBot_SavedVars.presets = {} end
-            if CleanBot_SavedVars.presets[name] then
-                NS.CB_Print("A preset named '" .. name .. "' already exists.")
-                return
-            end
-            CleanBot_SavedVars.presets[name] = {}
-            refreshPresetList()
-        end)
-
-    CB_RegisterEditPopup("CLEANBOT_RENAME_PRESET",
-        "Enter a new name for the '%s' preset:",
-        function(self, data)
-            local newName = self.editBox and self.editBox:GetText()
-            newName = newName and newName:match("^%s*(.-)%s*$")
-            if not newName or newName == "" then
-                NS.CB_Print("Please enter a preset name.")
-                return
-            end
-            local oldName = data
-            if not oldName or not CleanBot_SavedVars.presets then return end
-            if CleanBot_SavedVars.presets[newName] then
-                NS.CB_Print("A preset named '" .. newName .. "' already exists.")
-                return
-            end
-            CleanBot_SavedVars.presets[newName] = CleanBot_SavedVars.presets[oldName]
-            CleanBot_SavedVars.presets[oldName] = nil
-            refreshPresetList()
-        end)
-
-    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_PRESET",
-        "Are you sure you want to remove the '%s' preset?",
-        function(self, data)
-            if data and CleanBot_SavedVars.presets then
-                CleanBot_SavedVars.presets[data] = nil
-            end
-            refreshPresetList()
-        end)
-
-    CB_RegisterEditPopup("CLEANBOT_ADD_BOT_TO_PRESET",
-        "Enter a bot name to add to the '%s' preset:",
-        function(self)
-            local botName = self.editBox and self.editBox:GetText()
-            botName = botName and botName:match("^%s*(.-)%s*$")
-            if not botName or botName == "" then
-                NS.CB_Print("Please enter a bot name.")
-                return
-            end
-            if not selectedPresetName then return end
-            local preset = CleanBot_SavedVars.presets
-                and CleanBot_SavedVars.presets[selectedPresetName]
-            if not preset then return end
-            for _, v in ipairs(preset) do
-                if strlower(v) == strlower(botName) then
-                    NS.CB_Print("'" .. botName .. "' is already in this preset.")
-                    return
-                end
-            end
-            preset[#preset + 1] = botName
-            refreshPresetEntries()
-        end)
-
-    CB_RegisterEditPopup("CLEANBOT_RENAME_BOT_IN_PRESET",
-        "Enter a new name for '%s':",
-        function(self, data)
-            local newName = self.editBox and self.editBox:GetText()
-            newName = newName and newName:match("^%s*(.-)%s*$")
-            if not newName or newName == "" then
-                NS.CB_Print("Please enter a bot name.")
-                return
-            end
-            local oldName = data
-            if not oldName or not selectedPresetName then return end
-            local preset = CleanBot_SavedVars.presets
-                and CleanBot_SavedVars.presets[selectedPresetName]
-            if not preset then return end
-            for _, v in ipairs(preset) do
-                if strlower(v) == strlower(newName) then
-                    NS.CB_Print("'" .. newName .. "' is already in this preset.")
-                    return
-                end
-            end
-            for i, v in ipairs(preset) do
-                if v == oldName then
-                    preset[i] = newName
-                    break
-                end
-            end
-            refreshPresetEntries()
-        end)
-
-    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_BOT_FROM_PRESET",
-        "Are you sure you want to remove '%s' from the '%s' preset?",
-        function(self, data)
-            if not selectedPresetName then return end
-            local preset = CleanBot_SavedVars.presets
-                and CleanBot_SavedVars.presets[selectedPresetName]
-            if not preset then return end
-            for i, v in ipairs(preset) do
-                if v == data then
-                    table.remove(preset, i)
-                    break
-                end
-            end
-            refreshPresetEntries()
-        end)
-
-    -- ── Button handlers ───────────────────────────────────
-
-    invitePresetBtn:SetScript("OnClick", function()
-        if not selectedPresetName then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        local preset = CleanBot_SavedVars.presets
-            and CleanBot_SavedVars.presets[selectedPresetName]
-        if not preset or #preset == 0 then
-            NS.CB_Print("This preset has no bots.")
-            return
-        end
-        local names = {}
-        for _, v in ipairs(preset) do
-            names[#names + 1] = titleCaseName(v)
-        end
-        SendChatMessage(".playerbots bot add " .. table.concat(names, ","), "SAY")
-    end)
-
-    inviteBotBtn:SetScript("OnClick", function()
-        local selected = presetList2:GetSelected()
-        if not selected then
-            NS.CB_Print("No bot selected.")
-            return
-        end
-        SendChatMessage(".playerbots bot add " .. titleCaseName(selected), "SAY")
-    end)
-
-    addPresetBtn:SetScript("OnClick", function()
-        StaticPopup_Show("CLEANBOT_ADD_PRESET")
-    end)
-
-    renamePresetBtn:SetScript("OnClick", function()
-        local selected = presetList1:GetSelected()
-        if not selected then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        StaticPopup_Show("CLEANBOT_RENAME_PRESET", selected, nil, selected)
-    end)
-
-    removePresetBtn:SetScript("OnClick", function()
-        local selected = presetList1:GetSelected()
-        if not selected then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        local popup = StaticPopup_Show("CLEANBOT_REMOVE_PRESET", selected, nil, selected)
-        if popup then
-            popup:SetWidth(420)
-            popup.text:SetWidth(380)
-        end
-    end)
-
-    addBotBtn:SetScript("OnClick", function()
-        if not selectedPresetName then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        StaticPopup_Show("CLEANBOT_ADD_BOT_TO_PRESET", selectedPresetName)
-    end)
-
-    renameBotBtn:SetScript("OnClick", function()
-        if not selectedPresetName then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        local selected = presetList2:GetSelected()
-        if not selected then
-            NS.CB_Print("No bot selected.")
-            return
-        end
-        StaticPopup_Show("CLEANBOT_RENAME_BOT_IN_PRESET", selected, nil, selected)
-    end)
-
-    removeBotBtn:SetScript("OnClick", function()
-        if not selectedPresetName then
-            NS.CB_Print("No preset selected.")
-            return
-        end
-        local selected = presetList2:GetSelected()
-        if not selected then
-            NS.CB_Print("No bot selected.")
-            return
-        end
-        local popup = StaticPopup_Show("CLEANBOT_REMOVE_BOT_FROM_PRESET",
-            selected, selectedPresetName, selected)
-        if popup then
-            popup:SetWidth(420)
-            popup.text:SetWidth(380)
-        end
-    end)
-
-    refreshPresetList()  -- populate from saved vars on load
-
     -- ── Content height ────────────────────────────────────────────────────────
     local function updateContentHeight()
         local scrollTop  = NS.manageScrollChild:GetTop()
-        local lastAnchor = presetsSection:GetAnchor()
+        local lastAnchor = altbotsSection:GetAnchor()
         local lastBottom = lastAnchor and lastAnchor:GetBottom()
         if not (scrollTop and lastBottom) then return end
         local contentH = scrollTop - lastBottom
@@ -801,9 +779,8 @@ NS.CleanBot_BuildManageTab = function()
             self:SetScript("OnUpdate", nil)
             targetSection:UpdateBackground()
             partyRaidSection:UpdateBackground()
-            favoritesSection:UpdateBackground()
-            altbotsSection:UpdateBackground()
             presetsSection:UpdateBackground()
+            altbotsSection:UpdateBackground()
             updateContentHeight()
         end)
     end
@@ -829,17 +806,15 @@ NS.CleanBot_BuildManageTab = function()
     local function reflow()
         anchorToggle(targetSection.toggleBtn,    inviteByNameBtn)
         anchorToggle(partyRaidSection.toggleBtn, targetSection:GetAnchor())
-        anchorToggle(favoritesSection.toggleBtn, partyRaidSection:GetAnchor())
-        anchorToggle(altbotsSection.toggleBtn,   favoritesSection:GetAnchor())
-        anchorToggle(presetsSection.toggleBtn,   altbotsSection:GetAnchor())
+        anchorToggle(presetsSection.toggleBtn,   partyRaidSection:GetAnchor())
+        anchorToggle(altbotsSection.toggleBtn,   presetsSection:GetAnchor())
         scheduleUpdate()
     end
 
     targetSection.onToggle    = reflow
     partyRaidSection.onToggle = reflow
-    favoritesSection.onToggle = reflow
-    altbotsSection.onToggle   = reflow
     presetsSection.onToggle   = reflow
+    altbotsSection.onToggle   = reflow
 
     reflow()
     scheduleUpdate()  -- initial deferred pass: backgrounds + height after first render

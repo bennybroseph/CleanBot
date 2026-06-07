@@ -283,9 +283,22 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
-        if type(CleanBot_SavedVars.favoriteBots)        ~= "table" then CleanBot_SavedVars.favoriteBots        = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
         if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
+
+        -- Seed the protected "Favorites" preset, migrating the old favoriteBots set
+        -- (format: { [lowercaseName] = true }) into the preset array format on first run.
+        if type(CleanBot_SavedVars.presets["Favorites"]) ~= "table" then
+            local migrated = {}
+            if type(CleanBot_SavedVars.favoriteBots) == "table" then
+                for key in pairs(CleanBot_SavedVars.favoriteBots) do
+                    migrated[#migrated + 1] = key:sub(1, 1):upper() .. key:sub(2)
+                end
+                table.sort(migrated)
+            end
+            CleanBot_SavedVars.presets["Favorites"] = migrated
+        end
+        CleanBot_SavedVars.favoriteBots = nil  -- drop old storage key after migration
 
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
