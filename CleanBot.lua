@@ -110,6 +110,7 @@ end
 -- Per-element margins — each widget declares the space it needs above and below.
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
+    -- Widget types — space a widget reserves around itself within a flow.
     header   = { top = 10, bottom = 4, left = 0, right = 0 },
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
@@ -118,6 +119,10 @@ NS.MARGIN_DEFAULTS = {
     checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+    -- Frame types — extra breathing room a child frame adds on top of its
+    -- parent's padding when placed via CB_CreateInnerFrame.
+    panel    = { top = 0, bottom = 0, left = 0, right = 0 },
+    section  = { top = 0, bottom = 0, left = 0, right = 0 },
 }
 -- Canonical defaults for theme settings — read by the Defaults button.
 -- accentColor.a is set to the skin-appropriate value at PLAYER_LOGIN (after ElvUI detection):
@@ -224,12 +229,12 @@ function CleanBot_BuildFrames()
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
     NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      NS.PADDING.frame.left, -(NS.TITLE_H + NS.TOP_BAR_H))
     NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
-    NS.CB_ApplyPanelSkin(NS.contentFrame, 0)
+    NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────
     NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
     NS.partyPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.partyPanel, 1)
+    NS.CB_ApplyFrameSkin(NS.partyPanel, 2)
 
     NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
     NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
@@ -252,14 +257,50 @@ function CleanBot_BuildFrames()
     -- ── Manage panel ───────────────────────────────────────────
     NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
     NS.managePanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.managePanel, 1)
+    NS.CB_ApplyFrameSkin(NS.managePanel, 2)
     NS.managePanel:Hide()
+
+    -- Intermediate container between the skinned panel and the scroll frame.
+    -- NS.managePanel has ElvUI's SetTemplate applied, which stamps iborder/oborder
+    -- child frames at specific frame levels. Nesting the scroll frame one level
+    -- deeper isolates it from those template children so content renders correctly.
+    local manageScrollContainer = CreateFrame("Frame", "CleanBotManageScrollContainer",
+        NS.managePanel)
+    manageScrollContainer:SetAllPoints(NS.managePanel)
+
+    -- ScrollFrame that fills the container. A 20px right gap is reserved so
+    -- the UIPanelScrollFrameTemplate scroll bar sits inside the panel padding area
+    -- without overlapping content.
+    NS.manageScrollFrame = CreateFrame("ScrollFrame", "CleanBotManageScrollFrame",
+        manageScrollContainer, "UIPanelScrollFrameTemplate")
+    NS.manageScrollFrame:SetPoint("TOPLEFT",     manageScrollContainer, "TOPLEFT",      0,   0)
+    NS.manageScrollFrame:SetPoint("BOTTOMRIGHT", manageScrollContainer, "BOTTOMRIGHT", -20,  0)
+    NS.manageScrollFrame:EnableMouseWheel(true)
+    NS.manageScrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local max     = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
+    end)
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleScrollBar(CleanBotManageScrollFrameScrollBar)
+    end
+
+    -- Scroll child: parent for all manage-tab widgets. Width tracks the scroll
+    -- frame via OnSizeChanged; height is updated dynamically after content builds.
+    NS.manageScrollChild = CreateFrame("Frame", "CleanBotManageScrollChild",
+        NS.manageScrollFrame)
+    NS.manageScrollChild:SetHeight(600)  -- placeholder; overwritten by CleanBot_BuildManageContent
+    NS.manageScrollFrame:SetScrollChild(NS.manageScrollChild)
+    NS.manageScrollFrame:SetScript("OnSizeChanged", function(self, w, _)
+        NS.manageScrollChild:SetWidth(w)
+    end)
+
     NS.CleanBot_BuildManageContent()
 
     -- ── Settings panel ─────────────────────────────────────────
     NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
     NS.settingsPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.settingsPanel, 1)
+    NS.CB_ApplyFrameSkin(NS.settingsPanel, 2)
     NS.settingsPanel:Hide()
     NS.CleanBot_BuildSettingsContent()
 
@@ -267,7 +308,7 @@ function CleanBot_BuildFrames()
         CleanBotFrame:StripTextures()
         NS.ElvUI_S:HandleCloseButton(CleanBotFrameCloseButton)
     end
-    NS.CB_ApplyOuterFrameSkin(CleanBotFrame)
+    NS.CB_ApplyFrameSkin(CleanBotFrame, 0)
     -- Hide the XML-defined ARTWORK FontString — CB_ApplyTitleBar creates its own
     -- OVERLAY replacement so it renders above the ornament texture.
     CleanBotFrameTitle:Hide()
@@ -299,6 +340,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.favoriteBots)        ~= "table" then CleanBot_SavedVars.favoriteBots        = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
+        if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
 
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
@@ -348,7 +390,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         CleanBot_BuildFrames()
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent colour is baked in during CB_ApplyPanelSkin/InnerSkin calls inside
+        -- Accent colour is baked in during CB_ApplyFrameSkin calls inside
         -- CleanBot_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end

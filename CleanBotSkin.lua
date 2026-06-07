@@ -73,7 +73,7 @@ NS.CB_RegisterRootFrame = function(frame)
     frame:SetScale((NS.scale or 100) / 100)
 end
 
--- Registry of frames skinned by CB_ApplyPanelSkin / CB_ApplyOuterFrameSkin.
+-- Registry of frames skinned by CB_ApplyFrameSkin.
 -- Each entry stores { skin, brightness, level } so refresh functions can
 -- recompute both brightness and per-level alpha without re-calling the skin function.
 NS.CB_skinnedFrames = {}
@@ -122,7 +122,7 @@ end
 
 -- Adds the classic Blizzard dialog header ornament behind the frame title.
 -- Non-ElvUI only — ElvUI's SetTemplate already provides its own title treatment.
--- Must be called AFTER CB_ApplyOuterFrameSkin (i.e. after any StripTextures call).
+-- Must be called AFTER CB_ApplyFrameSkin (i.e. after any StripTextures call).
 -- The 256×64 header texture is centred at the top of the frame and elevated by 12px
 -- so it overlaps the border, matching the standard Blizzard dialog layout.
 -- Applies the title bar ornament and creates the title FontString for an outer frame.
@@ -182,7 +182,7 @@ end
 -- Applies the Blizzard ContainerFrame-style backdrop to a frame.
 -- Uses UI-BackpackBackground as the tiling background and the ornate dialog
 -- border, matching the visual style of WoW's own bag frames.
--- Unlike CB_ApplyOuterFrameSkin, this does NOT register for accent-colour or
+-- Unlike CB_ApplyFrameSkin, this does NOT register for accent-colour or
 -- transparency refresh — the ContainerFrame look is fixed art, not theme-driven.
 -- Assembles the ContainerFrame-style visual for the inventory frame from
 -- sliced pieces of UI-BackpackBackground. Call once when the frame is created.
@@ -316,61 +316,71 @@ NS.CB_UpdateContainerTiles = function(frame, rows)
         end)
 end
 
--- Variant of CB_ApplyPanelSkin used exclusively for the main CleanBotFrame.
--- Non-ElvUI path uses the thick ornate WoW dialog border (NS.OUTER_BACKDROP)
--- instead of the thin tooltip border so the window reads as a native WoW dialog.
--- ElvUI path is identical to CB_ApplyPanelSkin (SetTemplate replaces all art anyway).
-NS.CB_ApplyOuterFrameSkin = function(frame)
-    local ac         = NS.accentColor or { r = 0.0, g = 0.0, b = 0.0, a = 0 }
-    local alpha      = (NS.transparency or 100) / 100
-    -- ElvUI: outermost is lightest (0.10); non-ElvUI: outermost is darkest (0.0) and
-    -- inner frames get progressively brighter, reversing the nesting direction.
-    local brightness = NS.ElvUI_S and 0.10 or 0.0
-    if NS.ElvUI_S then
-        frame:StripTextures()
-        frame:SetTemplate("Default")
+-- Single entry point for skinning any structural frame.
+--
+-- nestLevel controls which backdrop and fill brightness to use:
+--   0        — outermost window (CleanBotFrame, inventory windows).
+--              Non-ElvUI: ornate OUTER_BACKDROP; ElvUI: SetTemplate("Default").
+--   1, 2, … — inner panels. Both paths use PANEL_BACKDROP / SetTemplate("Default");
+--              brightness scales per level so nested frames read as progressively
+--              inset (ElvUI gets darker inward, Blizzard gets lighter inward).
+--
+-- ElvUI:     level 0 → 0.10 brightness, each additional level subtracts 0.05 → max 0
+-- Non-ElvUI: level 0 → 0.00 brightness, each level adds 0.05
+--   SetBackdropColor is a vertex-colour multiply; small steps look near-black so
+--   0.05 per level keeps contrast visible across at least four nesting levels.
+--
+-- Registers every frame in CB_skinnedFrames so CB_RefreshAccentColor and
+-- CB_RefreshTransparency can re-apply shading without re-calling this function.
+NS.CB_ApplyFrameSkin = function(frame, nestLevel)
+    local level = nestLevel or 1
+
+    if level == 0 then
+        -- Outermost window: accent colour has no tint by default (a=0 on Blizzard).
+        local ac         = NS.accentColor or { r = 0.0, g = 0.0, b = 0.0, a = 0 }
+        local alpha      = (NS.transparency or 100) / 100
+        local brightness = NS.ElvUI_S and 0.10 or 0.0
+        if NS.ElvUI_S then
+            frame:StripTextures()
+            frame:SetTemplate("Default")
+        else
+            frame:SetBackdrop(NS.OUTER_BACKDROP)
+        end
+        frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, 0))
+        frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
+        NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = 0 }
     else
-        frame:SetBackdrop(NS.OUTER_BACKDROP)
+        -- Inner panel: depth is 0-based for the brightness formula (level 1 = shallowest).
+        local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
+        local alpha      = (NS.transparency or 100) / 100
+        local depth      = level - 1
+        local brightness = NS.ElvUI_S and math.max(0, 0.10 - depth * 0.05) or (depth * 0.05)
+        if NS.ElvUI_S then
+            frame:StripTextures()
+            frame:SetTemplate("Default")
+        else
+            frame:SetBackdrop(NS.PANEL_BACKDROP)
+        end
+        frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, depth))
+        frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
+        NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = depth }
     end
-    frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, 0))
-    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
-    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = 0 }
 end
 
--- nestLevel controls fill brightness relative to the outermost frame.
--- ElvUI:     level 0 = 0.10 (lightest), gets darker inward  — max(0, 0.10 - level * 0.05)
--- Non-ElvUI: level 0 = 0.00 (darkest),  gets lighter inward — level * 0.15
---   A large step is needed because SetBackdropColor is a vertex-colour multiply against
---   the UI-DialogBox-Background texture, which is already dark. Small steps (0.05) result
---   in visually indistinguishable near-black values at every level.
--- Both paths store brightness in CB_skinnedFrames so CB_RefreshTransparency preserves shading.
-NS.CB_ApplyPanelSkin = function(frame, nestLevel)
-    local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
-    local alpha      = (NS.transparency or 100) / 100
-    local level      = nestLevel or 0
-    local brightness = NS.ElvUI_S and math.max(0, 0.10 - level * 0.05) or (level * 0.05)
-    if NS.ElvUI_S then
-        frame:StripTextures()
-        frame:SetTemplate("Default")
-    else
-        frame:SetBackdrop(NS.PANEL_BACKDROP)
-    end
-    frame:SetBackdropColor(brightness, brightness, brightness, CB_LevelAlpha(alpha, level))
-    frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
-    NS.CB_skinnedFrames[frame] = { skin = "panel", brightness = brightness, level = level }
-end
-
-NS.CB_ApplyInnerSkin = function(frame)
+-- Internal skin for scrollable list containers (CB_CreateSelectList only).
+-- Uses SetTemplate("Transparent") on ElvUI so the list reads as a recessed input
+-- area rather than a standard panel. Not registered for transparency refresh —
+-- the fixed dark alpha is intentional regardless of the theme setting.
+local function CB_ApplyInnerSkin(frame)
     local ac = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
     if NS.ElvUI_S then
         frame:StripTextures()
         frame:SetTemplate("Transparent")
     else
         frame:SetBackdrop(NS.PANEL_BACKDROP)
-        frame:SetBackdropColor(0, 0, 0, 0.4)  -- fixed; transparency setting only affects panel frames
+        frame:SetBackdropColor(0, 0, 0, 0.4)
     end
     frame:SetBackdropBorderColor(ac.r, ac.g, ac.b, ac.a or 1)
-    NS.CB_skinnedFrames[frame] = { skin = "inner" }
 end
 
 -- ============================================================
@@ -394,6 +404,72 @@ end
 NS.CB_AnchorAhead = function(widget, before)
     local gap = (before.marginRight or 0) + (widget.marginLeft or 0)
     widget:SetPoint("TOPLEFT", before, "TOPRIGHT", gap, 0)
+end
+
+-- ============================================================
+-- Frame factory — creates a child frame nested inside parent,
+-- inset by parent's padding (chosen by paddingRole) plus the
+-- child's own margin (chosen by marginType, from NS.MARGIN).
+--
+-- paddingRole: "frame" | "panel" | "section"  — selects NS.PADDING[paddingRole]
+-- marginType:  "panel" | "section" | nil       — selects NS.MARGIN[marginType];
+--              nil means no extra margin (pure padding placement).
+-- widthPct / heightPct: fraction of the parent's interior to fill (default 1.0).
+-- nestLevel:   passed to CB_ApplyFrameSkin to control fill brightness relative
+--              to parent (1 = one level in from the outermost frame).
+--
+-- Full fill (both 1.0): dual anchors so the layout engine handles resizing.
+-- Partial fill: TOPLEFT anchor + OnSizeChanged to recompute size dynamically.
+--
+-- The child's margin values are stamped onto it so CB_AnchorBelow / CB_AnchorAhead
+-- can treat it the same as any other widget in a flow chain.
+-- ============================================================
+NS.CB_CreateInnerFrame = function(parent, name, paddingRole, marginType, widthPct, heightPct, nestLevel)
+    local child = CreateFrame("Frame", name, parent)
+
+    local pad = NS.PADDING[paddingRole] or NS.PADDING.panel
+    local mar = (marginType and NS.MARGIN[marginType]) or {}
+
+    local mTop    = mar.top    or 0
+    local mBottom = mar.bottom or 0
+    local mLeft   = mar.left   or 0
+    local mRight  = mar.right  or 0
+
+    child.marginTop    = mTop
+    child.marginBottom = mBottom
+    child.marginLeft   = mLeft
+    child.marginRight  = mRight
+
+    local wPct = widthPct  or 1
+    local hPct = heightPct or 1
+
+    if wPct == 1 and hPct == 1 then
+        child:SetPoint("TOPLEFT", parent, "TOPLEFT",
+             pad.left   + mLeft,
+            -(pad.top   + mTop))
+        child:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT",
+            -(pad.right  + mRight),
+              pad.bottom + mBottom)
+    else
+        child:SetPoint("TOPLEFT", parent, "TOPLEFT",
+             pad.left + mLeft,
+            -(pad.top + mTop))
+
+        local function resize(w, h)
+            local availW = w - pad.left - pad.right - mLeft - mRight
+            local availH = h - pad.top  - pad.bottom - mTop - mBottom
+            child:SetSize(math.max(availW * wPct, 1), math.max(availH * hPct, 1))
+        end
+
+        parent:HookScript("OnSizeChanged", function(self, w, h) resize(w, h) end)
+
+        local w, h = parent:GetWidth(), parent:GetHeight()
+        if w > 0 and h > 0 then resize(w, h) end
+    end
+
+    NS.CB_ApplyFrameSkin(child, nestLevel or 1)
+
+    return child
 end
 
 -- ============================================================
@@ -467,12 +543,36 @@ end
 -- They are hidden/shown as a group when the section is toggled.
 --
 -- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
-NS.CB_CreateSection = function(parent, key, title)
+NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local section = {}
 
-    -- Toggle button: direct child of parent — same as every other visible widget.
-    local toggleBtn = NS.CB_CreateButton(parent,
-        "CleanBotSection_" .. key .. "_Toggle", "-", 18, 18)
+    -- Toggle button using the native Blizzard gold +/- circle textures — the same
+    -- art used by the Reputation, Skills, TradeSkill, and Trainer panels since vanilla.
+    local toggleBtn = CreateFrame("Button", "CleanBotSection_" .. key .. "_Toggle", parent)
+    toggleBtn:SetSize(14, 14)
+
+    local MINUS_UP = "Interface\\Buttons\\UI-MinusButton-Up"
+    local MINUS_DN = "Interface\\Buttons\\UI-MinusButton-Down"
+    local PLUS_UP  = "Interface\\Buttons\\UI-PlusButton-Up"
+    local PLUS_DN  = "Interface\\Buttons\\UI-PlusButton-Down"
+    local PLUS_HL  = "Interface\\Buttons\\UI-PlusButton-Hilight"
+
+    toggleBtn:SetNormalTexture(MINUS_UP)
+    toggleBtn:SetPushedTexture(MINUS_DN)
+    toggleBtn:SetHighlightTexture(PLUS_HL, "ADD")
+
+    -- ElvUI hooks SetNormalTexture internally to swap in its own Plus/Minus textures,
+    -- so our SetText override (which calls SetNormalTexture) still drives the state.
+    if NS.ElvUI_S then NS.ElvUI_S:HandleCollapseExpandButton(toggleBtn, "-") end
+
+    -- Swap between + (collapsed) and − (expanded) by swapping normal/pushed textures.
+    toggleBtn.SetText = function(self, text)
+        if text == "+" then
+            self:SetNormalTexture(PLUS_UP) ; self:SetPushedTexture(PLUS_DN)
+        else
+            self:SetNormalTexture(MINUS_UP) ; self:SetPushedTexture(MINUS_DN)
+        end
+    end
 
     -- Title label: FontString on parent, to the right of the toggle button.
     local titleLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -497,8 +597,27 @@ NS.CB_CreateSection = function(parent, key, title)
     end
 
     section.Apply = function(self)
-        for _, w in ipairs(self.contentWidgets) do
-            if self.collapsed then w:Hide() else w:Show() end
+        if self.collapsed then
+            self.bg:Hide()
+        else
+            local mar        = NS.MARGIN.section
+            local topGap     = (toggleBtn.marginBottom or 0) + mar.top
+            local leftX      =  NS.PADDING.panel.left  + mar.left
+            local rightInset =  NS.PADDING.panel.right + mar.right
+            -- Anchor TOPLEFT to toggleBtn BOTTOMLEFT so bg tracks the toggle when
+            -- reflow moves it. toggleBtn is already at panel.left from the panel wall,
+            -- so only the section margin delta is needed as an X offset — not leftX
+            -- (which would double-count the panel padding).
+            self.bg:ClearAllPoints()
+            self.bg:SetPoint("TOPLEFT", toggleBtn, "BOTTOMLEFT",
+                mar.left - (toggleBtn.marginLeft or 0), -topGap)
+            -- Width spans from toggleBtn's left edge to the panel right inset.
+            -- toggleBtn sits at panel.left already, so subtract only its own left
+            -- margin (0) and the right inset to get the remaining available width.
+            local pw = parent:GetWidth()
+            self.bg:SetWidth(math.max(pw > 0 and (pw - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1))
+            self.bg:SetHeight(2000)  -- corrected by UpdateBackground after first render
+            self.bg:Show()
         end
         toggleBtn:SetText(self.collapsed and "+" or "-")
     end
@@ -535,7 +654,135 @@ NS.CB_CreateSection = function(parent, key, title)
     toggleBtn.marginLeft   = NS.MARGIN.label.left
     toggleBtn.marginRight  = NS.MARGIN.label.right
 
+    -- Visual background frame. BACKGROUND strata keeps it behind buttons and
+    -- labels (which default to MEDIUM/HIGH) without touching their FrameLevel.
+    -- Hidden until UpdateBackground is called after the first layout pass.
+    local bg = CreateFrame("Frame", "CleanBotSection_" .. key .. "_BG", parent)
+    bg:SetFrameStrata("BACKGROUND")
+    bg:Hide()
+    NS.CB_ApplyFrameSkin(bg, nestLevel or 3)
+    section.bg = bg
+
+    -- Corrects the bg height to exactly wrap the section's content area.
+    -- Apply() already positions and shows bg (anchored to toggleBtn BOTTOMLEFT)
+    -- with a generous temporary height. This trims it to fit once layout resolves.
+    -- lastWidget:GetBottom() is valid here because bg is positioned and its
+    -- children (content widgets) therefore have real screen coordinates.
+    section.UpdateBackground = function(self)
+        if self.collapsed or not self.lastWidget then
+            self.bg:Hide()
+            return
+        end
+        local bgTop  = self.bg:GetTop()
+        local lastBt = self.lastWidget:GetBottom()
+        if not (bgTop and lastBt) then return end
+        local mar    = NS.MARGIN.section
+        local botGap = (self.lastWidget.marginBottom or 0) + mar.bottom
+        self.bg:SetHeight(math.max(bgTop - lastBt + botGap, 4))
+    end
+
     return section
+end
+
+-- A bordered, scrollable list of selectable string rows.
+--
+-- Returns a container frame with the following API:
+--   container:SetItems({"string", ...}) — populates rows; clears any previous selection.
+--   container:GetSelected()             — returns the value of the currently selected row,
+--                                         or nil if nothing is selected.
+--
+-- onSelect(value) is called whenever the user clicks a row.
+-- width / height size the visible container; rows scroll inside it.
+-- ElvUI skins the inner scroll bar when present.
+NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
+    local ROW_H = 20
+
+    -- Outer bordered container. CB_ApplyInnerSkin gives it the panel-inset look
+    -- without registering it for theme-refresh (the list colour is fixed art).
+    local container = CreateFrame("Frame", name, parent)
+    container:SetSize(width, height)
+    CB_ApplyInnerSkin(container)
+
+    -- ScrollFrame inset 2px from the container walls; 18px right gap for the bar.
+    local sf = CreateFrame("ScrollFrame", name .. "SF", container,
+        "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT",     container, "TOPLEFT",      2,  -2)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -18,  2)
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local max = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * ROW_H)))
+    end)
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleScrollBar(_G[name .. "SFScrollBar"])
+    end
+
+    local content = CreateFrame("Frame", name .. "Content", sf)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+    sf:SetScript("OnSizeChanged", function(self, w, _)
+        content:SetWidth(w)
+    end)
+
+    -- Shared state captured by row closures. Reassigning `rows` inside SetItems
+    -- is safe — all closures share the same upvalue reference, so a new call to
+    -- SetItems immediately makes old OnClick handlers operate on the new table.
+    -- Old rows are hidden anyway and will not receive clicks.
+    local rows          = {}
+    local selectedIndex = nil
+
+    container.SetItems = function(self, items)
+        for _, r in ipairs(rows) do r:Hide() end
+        rows          = {}
+        selectedIndex = nil
+
+        for i, text in ipairs(items) do
+            local row = CreateFrame("Button", nil, content)
+            row:SetHeight(ROW_H)
+            row:SetPoint("TOPLEFT",  content, "TOPLEFT",  0, -(i - 1) * ROW_H)
+            row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -(i - 1) * ROW_H)
+
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+            lbl:SetText(text)
+            row.label = lbl
+
+            -- Highlight texture shown at reduced alpha when the row is selected.
+            local hl = row:CreateTexture(nil, "BACKGROUND")
+            hl:SetAllPoints()
+            hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            hl:SetBlendMode("ADD")
+            hl:SetAlpha(0)
+            row.hl = hl
+
+            row.index = i
+            row.value = text
+
+            row:SetScript("OnClick", function(self)
+                selectedIndex = self.index
+                for _, other in ipairs(rows) do
+                    other.hl:SetAlpha(other.index == selectedIndex and 0.4 or 0)
+                end
+                if onSelect then onSelect(self.value) end
+            end)
+
+            rows[i] = row
+        end
+
+        content:SetHeight(math.max(#items * ROW_H, 1))
+    end
+
+    container.GetSelected = function(self)
+        return selectedIndex and rows[selectedIndex] and rows[selectedIndex].value
+    end
+
+    container.marginTop    = NS.MARGIN.button.top
+    container.marginBottom = NS.MARGIN.button.bottom
+    container.marginLeft   = NS.MARGIN.button.left
+    container.marginRight  = NS.MARGIN.button.right
+
+    return container
 end
 
 -- UIPanelButtonTemplate button. w/h, text and onClick are optional.

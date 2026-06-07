@@ -70,7 +70,7 @@ function CleanBot_ShowDebugKnownBots()
         f:SetScript("OnDragStop",  f.StopMovingOrSizing)
         f:SetFrameStrata("DIALOG")
 
-        NS.CB_ApplyPanelSkin(f)
+        NS.CB_ApplyFrameSkin(f, 1)
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOP", f, "TOP", 0, -8)

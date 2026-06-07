@@ -72,7 +72,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     NS.CB_AnchorBelow(section, anchor)
     section:SetPoint("RIGHT", ctrl, "RIGHT", -NS.PADDING.panel.right, 0)
     section:SetHeight(#strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom))
-    NS.CB_ApplyPanelSkin(section, 3)
+    NS.CB_ApplyFrameSkin(section, 4)
 
     local controls = {}
     local yOffset  = NS.PADDING.section.top
@@ -575,7 +575,7 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local contentBg = CreateFrame("Frame", nil, container)
     contentBg:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
     contentBg:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
-    NS.CB_ApplyPanelSkin(contentBg, 2)
+    NS.CB_ApplyFrameSkin(contentBg, 3)
 
     local combatContent = CreateFrame("Frame", nil, container)
     combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
