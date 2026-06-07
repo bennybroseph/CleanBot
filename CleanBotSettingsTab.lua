@@ -340,12 +340,12 @@ NS.CleanBot_BuildSettingsTab = function()
         { key = "tab",      display = "Tab"      },
         { key = "header",   display = "Header"   },
         { key = "label",    display = "Label"    },
-        { key = "button",   display = "Button"   },        
+        { key = "button",   display = "Button"   },
         { key = "slider",   display = "Slider"   },
         { key = "dropdown", display = "Dropdown" },
         { key = "checkbox", display = "Checkbox" },
         { key = "swatch",   display = "Swatch"   },
-        { key = "editBox",  display = "Edit Box" },        
+        { key = "editBox",  display = "Edit Box" },
     }
 
     local PADDING_TYPES = {
