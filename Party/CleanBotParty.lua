@@ -191,9 +191,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             local sl = controls[s.field]
             if cb and sl then
                 local function setSliderEnabled(enabled)
-                    sl:SetAlpha(enabled and 1 or 0.4)
-                    sl.slider:EnableMouse(enabled)
-                    sl.editBox:EnableMouse(enabled)
+                    if enabled then sl:Enable() else sl:Disable() end
                 end
                 setSliderEnabled(cb:GetChecked())
                 local orig = cb:GetScript("OnClick")
@@ -940,9 +938,7 @@ NS.CB_UpdateTabData = function(key)
                 ctrl:SetValue(val or s.min or 0)
                 if s.dependsOn then
                     local enabled = source[s.dependsOn] and true or false
-                    ctrl:SetAlpha(enabled and 1 or 0.4)
-                    ctrl.slider:EnableMouse(enabled)
-                    ctrl.editBox:EnableMouse(enabled)
+                    if enabled then ctrl:Enable() else ctrl:Disable() end
                 end
             else
                 ctrl:SetChecked(source[s.field] == true)

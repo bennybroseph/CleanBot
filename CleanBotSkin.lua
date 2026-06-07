@@ -1123,6 +1123,36 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper.SetValue = function(self, v) s:SetValue(v) end
     wrapper.GetValue = function(self) return s:GetValue() end
 
+    -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame
+    -- so ElvUI's thumb replacement is already in place.
+    local thumbTex                    = s:GetThumbTexture()
+    local thumbR, thumbG, thumbB      = thumbTex:GetVertexColor()
+    local labelR, labelG, labelB      = label and label:GetTextColor()
+    local lowR,   lowG,   lowB        = lowLabel  and lowLabel:GetTextColor()
+    local highR,  highG,  highB       = highLabel and highLabel:GetTextColor()
+    local boxR,   boxG,   boxB        = box:GetTextColor()
+    local GREY                        = 0.5
+
+    wrapper.Disable = function(self)
+        if label    then label:SetTextColor(GREY, GREY, GREY) end
+        if lowLabel  then lowLabel:SetTextColor(GREY, GREY, GREY) end
+        if highLabel then highLabel:SetTextColor(GREY, GREY, GREY) end
+        box:SetTextColor(GREY, GREY, GREY)
+        thumbTex:SetVertexColor(GREY, GREY, GREY)
+        s:EnableMouse(false)
+        box:EnableMouse(false)
+    end
+
+    wrapper.Enable = function(self)
+        if label    then label:SetTextColor(labelR, labelG, labelB) end
+        if lowLabel  then lowLabel:SetTextColor(lowR, lowG, lowB) end
+        if highLabel then highLabel:SetTextColor(highR, highG, highB) end
+        box:SetTextColor(boxR, boxG, boxB)
+        thumbTex:SetVertexColor(thumbR, thumbG, thumbB)
+        s:EnableMouse(true)
+        box:EnableMouse(true)
+    end
+
     wrapper.label     = label
     wrapper.slider    = s
     wrapper.editBox   = box

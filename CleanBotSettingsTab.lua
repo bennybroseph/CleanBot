@@ -385,7 +385,8 @@ NS.CleanBot_BuildSettingsTab = function()
         -((panel.paddingRight  or 0) + (cancelBtn.marginRight  or 0)),
         (panel.paddingBottom   or 0) + (cancelBtn.marginBottom or 0))
 
-    local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
+    local applyBtn
+    applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
         -- Scale
         NS.scale = pendingScale
         NS.CB_RefreshScale(NS.scale)
@@ -503,7 +504,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- ── Scale ──────────────────────────────────────────────────
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
-        50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v; syncApplyBtn() end)
+        50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v; if syncApplyBtn then syncApplyBtn() end end)
     scaleSlider:SetWidth(SLIDER_W)
     scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT",
         (themeChild.paddingLeft or 0) + (scaleSlider.marginLeft or 0),
@@ -511,7 +512,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
-        0, 100, pendingTransparency, "0%", "100%", function(v) pendingTransparency = v; syncApplyBtn() end)
+        0, 100, pendingTransparency, "0%", "100%", function(v) pendingTransparency = v; if syncApplyBtn then syncApplyBtn() end end)
     transSlider:SetWidth(SLIDER_W)
     NS.CB_AnchorBelow(transSlider, scaleSlider)
 
@@ -520,7 +521,7 @@ NS.CleanBot_BuildSettingsTab = function()
         NS.accentColor.r, NS.accentColor.g, NS.accentColor.b,
         function(r, g, b, a)
             pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA = r, g, b, a
-            syncApplyBtn()
+            if syncApplyBtn then syncApplyBtn() end
         end,
         true, NS.accentColor.a)
     NS.CB_AnchorBelow(colorSwatch, transSlider)
@@ -595,13 +596,13 @@ NS.CleanBot_BuildSettingsTab = function()
         local P_MIN, P_MAX = 0, 40
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Top",
             "Top", P_MIN, P_MAX, NS.PADDING[key].top, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].top = v; syncApplyBtn() end)
+            function(v) pendingPadding[key].top = v; if syncApplyBtn then syncApplyBtn() end end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
             "Bot", P_MIN, P_MAX, NS.PADDING[key].bottom, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].bottom = v; syncApplyBtn() end)
+            function(v) pendingPadding[key].bottom = v; if syncApplyBtn then syncApplyBtn() end end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -613,13 +614,13 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Left",
             "Left", P_MIN, P_MAX, NS.PADDING[key].left, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].left = v; syncApplyBtn() end)
+            function(v) pendingPadding[key].left = v; if syncApplyBtn then syncApplyBtn() end end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
             "Right", P_MIN, P_MAX, NS.PADDING[key].right, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].right = v; syncApplyBtn() end)
+            function(v) pendingPadding[key].right = v; if syncApplyBtn then syncApplyBtn() end end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -661,13 +662,13 @@ NS.CleanBot_BuildSettingsTab = function()
         local M_RANGE = 20
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Top",
             "Top", -M_RANGE, M_RANGE, NS.MARGIN[key].top, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].top = v; syncApplyBtn() end)
+            function(v) pendingMargins[key].top = v; if syncApplyBtn then syncApplyBtn() end end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
             "Bot", -M_RANGE, M_RANGE, NS.MARGIN[key].bottom, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].bottom = v; syncApplyBtn() end)
+            function(v) pendingMargins[key].bottom = v; if syncApplyBtn then syncApplyBtn() end end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -680,13 +681,13 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Left",
             "Left", -M_RANGE, M_RANGE, NS.MARGIN[key].left, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].left = v; syncApplyBtn() end)
+            function(v) pendingMargins[key].left = v; if syncApplyBtn then syncApplyBtn() end end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
             "Right", -M_RANGE, M_RANGE, NS.MARGIN[key].right, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].right = v; syncApplyBtn() end)
+            function(v) pendingMargins[key].right = v; if syncApplyBtn then syncApplyBtn() end end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
