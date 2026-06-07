@@ -595,17 +595,20 @@ end
 
 -- Creates a collapsible section for the Manage tab.
 --
--- All widgets — the toggle button, the title label, and all content widgets —
--- are direct children of parent. No container frames are used, which guarantees
--- visibility in WoW 3.3.5a regardless of frame-level or clipping behaviour.
+-- The toggle button and title label are children of parent (scroll child, MEDIUM
+-- strata). The visual bg frame is also a child of parent but forced to BACKGROUND
+-- strata so it renders behind everything else.
+--
+-- IMPORTANT: In WoW 3.3.5a child frames INHERIT their parent's strata. section.bg
+-- defaults to MEDIUM (no explicit SetFrameStrata call), so content widgets parented
+-- to it are also MEDIUM and remain mouse-interactive. Do NOT call SetFrameStrata on bg.
 --
 -- section.frame starts as the toggle button. Call section:Finalize(lastWidget)
 -- once all content widgets are added; this sets section.frame to lastWidget so
 -- the next section can chain its CB_AnchorBelow off the correct anchor point.
 --
--- Content widgets must be registered via:
---   section.contentWidgets[#section.contentWidgets + 1] = widget
--- They are hidden/shown as a group when the section is toggled.
+-- Content widgets are children of bg and hide/show automatically with it — no
+-- manual contentWidgets registration needed.
 --
 -- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
 -- parent must have paddingRight stamped (via CB_CreatePanel) so Apply() can compute
@@ -648,13 +651,12 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
 
     -- Load saved collapse state.
     local saved = CleanBot_SavedVars and CleanBot_SavedVars.collapsedSections
-    section.collapsed      = saved and saved[key] == true or false
-    section.key            = key
-    section.toggleBtn      = toggleBtn   -- always the section header; never hidden
-    section.lastWidget     = nil         -- set by Finalize; deepest content widget
-    section.frame          = toggleBtn   -- updated to lastWidget in Finalize
-    section.contentWidgets = {}
-    section.onToggle       = nil         -- optional callback fired after each toggle
+    section.collapsed  = saved and saved[key] == true or false
+    section.key        = key
+    section.toggleBtn  = toggleBtn   -- always the section header; never hidden
+    section.lastWidget = nil         -- set by Finalize; deepest content widget
+    section.frame      = toggleBtn   -- updated to lastWidget in Finalize
+    section.onToggle   = nil         -- optional callback fired after each toggle
 
     -- Returns the bottommost currently-visible widget for this section.
     -- Collapsed → header toggle button only; expanded → last content widget.
@@ -664,6 +666,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     end
 
     section.Apply = function(self)
+        -- Content widgets are children of bg and hide/show automatically with it.
         if self.collapsed then
             self.bg:Hide()
         else
@@ -720,11 +723,13 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     toggleBtn.marginLeft   = NS.MARGIN.label.left
     toggleBtn.marginRight  = NS.MARGIN.label.right
 
-    -- Visual background frame. BACKGROUND strata keeps it behind buttons and
-    -- labels (which default to MEDIUM/HIGH) without touching their FrameLevel.
-    -- Hidden until UpdateBackground is called after the first layout pass.
+    -- Visual background frame. Stays at MEDIUM strata (default) so that child
+    -- content widgets inherit MEDIUM and remain mouse-interactive. WoW 3.3.5a
+    -- renders same-strata same-level frames in creation order, so subsequent
+    -- sections' toggle buttons (created later) always render on top of this bg
+    -- even during the height=2000 expansion phase.
+    -- Hidden until Apply() shows it on first expand.
     local bg = NS.CB_CreatePanel(parent, "CleanBotSection_" .. key .. "_BG", nestLevel or 3, "section")
-    bg:SetFrameStrata("BACKGROUND")
     bg:Hide()
     section.bg = bg
 
@@ -869,7 +874,46 @@ end
 NS.CB_CreateDropdown = function(parent, name, width)
     local dd = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
     if width then UIDropDownMenu_SetWidth(dd, width) end
-    if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, width) end
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleDropDownBox(dd, width)
+
+        -- Reparent the button and text to dd.backdrop, mirroring ElvUI's own Ace3
+        -- dropdown skin. HandleDropDownBox leaves the button as a child of dd, where
+        -- it is obscured inside a ScrollFrame. Moving it to dd.backdrop (which sits
+        -- at the same frame level as dd) resolves the rendering order issue.
+        local backdrop = dd.backdrop
+        if backdrop then
+            local btn  = _G[name .. "Button"]
+            local text = _G[name .. "Text"]
+
+            -- HandleDropDownBox anchors backdrop BOTTOMRIGHT to the button, which
+            -- creates a circular dependency when we then try to anchor the button to
+            -- the backdrop. Re-anchor backdrop to dd directly first to break the cycle.
+            backdrop:ClearAllPoints()
+            backdrop:SetPoint("TOPLEFT",     dd, "TOPLEFT",     20,  0)
+            backdrop:SetPoint("BOTTOMRIGHT", dd, "BOTTOMRIGHT", -8,  8)
+
+            if btn then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT",     backdrop, "TOPRIGHT",    -22, -2)
+                btn:SetPoint("BOTTOMRIGHT", backdrop, "BOTTOMRIGHT",  -2,  2)
+                btn:SetParent(backdrop)
+                -- After reparenting, self:GetParent() is the unnamed backdrop frame,
+                -- breaking UIDropDownMenu's name-based lookup. Reference dd directly.
+                btn:SetScript("OnClick", function()
+                    ToggleDropDownMenu(1, nil, dd)
+                end)
+            end
+
+            if text then
+                text:ClearAllPoints()
+                text:SetJustifyH("RIGHT")
+                text:SetPoint("RIGHT", btn,      "LEFT",  -3, 0)
+                text:SetPoint("LEFT",  backdrop, "LEFT",   2, 0)
+                text:SetParent(backdrop)
+            end
+        end
+    end
     dd.marginTop    = NS.MARGIN.dropdown.top
     dd.marginBottom = NS.MARGIN.dropdown.bottom
     dd.marginLeft   = NS.MARGIN.dropdown.left
