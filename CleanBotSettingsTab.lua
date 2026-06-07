@@ -91,7 +91,7 @@ local function buildSampleContent(panel)
     local header = NS.CB_CreateHeader(section, "Lorem Ipsum")
     header:SetPoint("TOPLEFT", section, "TOPLEFT",
         NS.PADDING.section.left + (header.marginLeft or 0),
-        -(NS.PADDING.section.top + header.marginTop))
+        -(NS.PADDING.section.top + (header.marginTop or 0)))
     applyDebugOverlay(section, header)
 
     local lbl = NS.CB_CreateLabel(section, "Lorem Ipsum")
@@ -105,8 +105,7 @@ local function buildSampleContent(panel)
     local chk = NS.CB_CreateCheckBox(section, nil)
     NS.CB_AnchorBelow(chk, btn)
     applyDebugOverlay(section, chk)
-    local chkLbl = section:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    chkLbl:SetText("Lorem Ipsum")
+    local chkLbl = NS.CB_CreateLabel(section, "Lorem Ipsum")
     chkLbl:SetPoint("LEFT", chk, "RIGHT", 2, 0)
     chkLbl.marginTop    = 0
     chkLbl.marginBottom = 0
@@ -177,8 +176,7 @@ local function showSampleLayout()
         overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
         NS.PADDING.panel.left    + (overlayCB.marginLeft   or 0),
         NS.PADDING.panel.bottom  + (overlayCB.marginBottom or 0))
-        local overlayCBLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        overlayCBLbl:SetText("Show Overlays")
+        local overlayCBLbl = NS.CB_CreateLabel(panel, "Show Overlays")
         overlayCBLbl:SetPoint("LEFT", overlayCB, "RIGHT", 2, 0)
         overlayCB:SetScript("OnClick", function(self)
             local checked = self:GetChecked() and true or false
@@ -203,15 +201,14 @@ end
 -- ============================================================
 
 NS.CleanBot_BuildSettingsTab = function()
-    NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
+    NS.settingsPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotSettingsPanel", 2, "panel")
     NS.settingsPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.settingsPanel, 2)
     NS.settingsPanel:Hide()
 
     local panel    = NS.settingsPanel
     local SLIDER_W = 200
 
-    local BTN_ROW_H = NS.PADDING.panel.top + 22 + NS.PADDING.panel.bottom
+    local BTN_ROW_H = (panel.paddingBottom or 0) + NS.MARGIN.button.bottom + 22 + NS.MARGIN.button.top + (panel.paddingBottom or 0)
     local SUB_TAB_H = NS.TOP_BAR_H
 
     -- ── Pending values ─────────────────────────────────────────
@@ -278,7 +275,7 @@ NS.CleanBot_BuildSettingsTab = function()
     local themeTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsThemeTab", "Theme",
         function() selectSubTab(1) end)
     themeTab:SetWidth(NS.TAB_WIDTH)
-    themeTab:SetPoint("LEFT", subTabBar, "LEFT", NS.PADDING.panel.left + (themeTab.marginLeft or 0), 0)
+    themeTab:SetPoint("LEFT", subTabBar, "LEFT", (panel.paddingLeft or 0) + (themeTab.marginLeft or 0), 0)
     subTabs[1] = themeTab
 
     local layoutTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsLayoutTab", "Layout",
@@ -359,7 +356,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- Scroll child is a borderless void — full width, no content padding.
     -- Subtract the panel padding on both sides (scroll frame inset) plus 20px scroll bar.
-    local SEP_W = NS.FRAME_WIDTH - NS.PADDING.panel.left - NS.PADDING.panel.right - 20
+    local SEP_W = NS.FRAME_WIDTH - (panel.paddingLeft or 0) - (panel.paddingRight or 0) - 20
 
     -- ── Padding ────────────────────────────────────────────────
     local paddingHeader = NS.CB_CreateHeader(layoutChild, "Padding")
@@ -382,8 +379,7 @@ NS.CleanBot_BuildSettingsTab = function()
         rowA.marginBottom = 0
         NS.CB_AnchorBelow(rowA, prevRow)
 
-        local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        nameLabel:SetText(ptype.display)
+        local nameLabel = NS.CB_CreateLabel(layoutChild, ptype.display)
         nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE, 0)
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
@@ -449,8 +445,7 @@ NS.CleanBot_BuildSettingsTab = function()
         rowA.marginBottom = 0
         NS.CB_AnchorBelow(rowA, prevRow)
 
-        local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        nameLabel:SetText(mtype.display)
+        local nameLabel = NS.CB_CreateLabel(layoutChild, mtype.display)
         nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE, 0)
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
@@ -500,16 +495,15 @@ NS.CleanBot_BuildSettingsTab = function()
     -- ── Other tab: Bot Emotes ──────────────────────────────────
     local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behaviour")
     botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT",
-        NS.PADDING.panel.left  + (botEmotesHeader.marginLeft or 0),
-        -(NS.PADDING.panel.top + (botEmotesHeader.marginTop  or 0)))
+        (otherPanel.paddingLeft or 0) + (botEmotesHeader.marginLeft or 0),
+        -((otherPanel.paddingTop or 0) + (botEmotesHeader.marginTop  or 0)))
 
     local botEmotesCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotBotEmotesCB")
     botEmotesCB:SetChecked(NS.botEmotes)
     NS.CB_AnchorBelow(botEmotesCB, botEmotesHeader)
 
     -- A small invisible frame over the label text catches mouse events for the tooltip.
-    local botEmotesCBLbl = otherPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    botEmotesCBLbl:SetText("Enable Bot Emotes")
+    local botEmotesCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Bot Emotes")
     botEmotesCBLbl:SetPoint("LEFT", botEmotesCB, "RIGHT", 2, 0)
 
     local botEmotesCBLblHit = CreateFrame("Frame", nil, otherPanel)
@@ -579,8 +573,8 @@ NS.CleanBot_BuildSettingsTab = function()
         syncPendingToUI()
     end)
     defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        NS.PADDING.panel.left   + (defaultsBtn.marginLeft   or 0),
-        NS.PADDING.panel.bottom + (defaultsBtn.marginBottom or 0))
+        (panel.paddingLeft   or 0) + (defaultsBtn.marginLeft   or 0),
+        (panel.paddingBottom or 0) + (defaultsBtn.marginBottom or 0))
 
     local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
         pendingScale        = NS.scale
@@ -622,8 +616,8 @@ NS.CleanBot_BuildSettingsTab = function()
         syncPendingToUI()
     end)
     cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -(NS.PADDING.panel.right  + (cancelBtn.marginRight  or 0)),
-        NS.PADDING.panel.bottom   + (cancelBtn.marginBottom or 0))
+        -((panel.paddingRight  or 0) + (cancelBtn.marginRight  or 0)),
+        (panel.paddingBottom   or 0) + (cancelBtn.marginBottom or 0))
 
     local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
         -- Scale
@@ -669,7 +663,8 @@ NS.CleanBot_BuildSettingsTab = function()
         end
         NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
     end)
-    applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT", -8, 0)
+    applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
+        -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)
 
     selectSubTab(1)
 end
