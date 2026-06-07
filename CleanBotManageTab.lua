@@ -126,31 +126,11 @@ NS.CleanBot_BuildManageTab = function()
     local manageScrollContainer = CreateFrame("Frame", "CleanBotManageScrollContainer",
         NS.managePanel)
     manageScrollContainer:SetAllPoints(NS.managePanel)
+    NS.CB_StampPadding(manageScrollContainer, "panel")
 
-    -- 20px right gap reserves space for the UIPanelScrollFrameTemplate scroll bar.
-    NS.manageScrollFrame = CreateFrame("ScrollFrame", "CleanBotManageScrollFrame",
-        manageScrollContainer, "UIPanelScrollFrameTemplate")
-    NS.manageScrollFrame:SetPoint("TOPLEFT",     manageScrollContainer, "TOPLEFT",     0,   0)
-    NS.manageScrollFrame:SetPoint("BOTTOMRIGHT", manageScrollContainer, "BOTTOMRIGHT", -20, 0)
-    NS.manageScrollFrame:EnableMouseWheel(true)
-    NS.manageScrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll()
-        local max     = self:GetVerticalScrollRange()
-        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
-    end)
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleScrollBar(CleanBotManageScrollFrameScrollBar)
-    end
-
-    -- Scroll child: parent for all manage-tab widgets.
-    -- Width tracks the scroll frame; height is set dynamically after content builds.
-    NS.manageScrollChild = CreateFrame("Frame", "CleanBotManageScrollChild",
-        NS.manageScrollFrame)
+    NS.manageScrollFrame, NS.manageScrollChild = NS.CB_CreateScrollFrame(
+        manageScrollContainer, "CleanBotManageScrollFrame")
     NS.manageScrollChild:SetHeight(600)
-    NS.manageScrollFrame:SetScrollChild(NS.manageScrollChild)
-    NS.manageScrollFrame:SetScript("OnSizeChanged", function(self, w, _)
-        NS.manageScrollChild:SetWidth(w)
-    end)
 
     -- ── Content ───────────────────────────────────────────────────────────────
     -- All manage-tab widgets parent to the scroll child, not the panel frame itself.
@@ -217,8 +197,8 @@ NS.CleanBot_BuildManageTab = function()
             end
         end)
     inviteByNameBtn:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        NS.PADDING.panel.left  + (inviteByNameBtn.marginLeft or 0),
-        -(NS.PADDING.panel.top + (inviteByNameBtn.marginTop  or 0)))
+        (panel.paddingLeft or 0) + (inviteByNameBtn.marginLeft or 0),
+      -((panel.paddingTop  or 0) + (inviteByNameBtn.marginTop  or 0)))
 
     -- ── Target section ────────────────────────────────────────
     local targetSection = NS.CB_CreateSection(panel, "target", "Target", 3)
@@ -843,8 +823,7 @@ NS.CleanBot_BuildManageTab = function()
         local lastBottom = lastAnchor and lastAnchor:GetBottom()
         if not (scrollTop and lastBottom) then return end
         local contentH = scrollTop - lastBottom
-            + NS.PADDING.panel.bottom
-            + (lastAnchor.marginBottom or 0)
+            + (lastAnchor.marginBottom or 0) + (panel.paddingBottom or 0)
         local frameH = NS.manageScrollFrame:GetHeight() or 0
         NS.manageScrollChild:SetHeight(math.max(contentH, frameH))
     end
@@ -878,7 +857,7 @@ NS.CleanBot_BuildManageTab = function()
         local gap = (above.marginBottom or 0) + (toggleBtn.marginTop or 0)
         toggleBtn:ClearAllPoints()
         toggleBtn:SetPoint("LEFT", panel, "LEFT",
-            NS.PADDING.panel.left + (toggleBtn.marginLeft or 0), 0)
+            (panel.paddingLeft or 0) + (toggleBtn.marginLeft or 0), 0)
         toggleBtn:SetPoint("TOP", above, "BOTTOM", 0, -gap)
     end
 

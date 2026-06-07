@@ -112,6 +112,18 @@ NS.CB_RefreshTransparency = function(t)
     end
 end
 
+-- Stamps a padding role's values directly onto a frame so any helper that creates
+-- a child (e.g. CB_CreateScrollFrame) can read parent.paddingLeft/Right/Top/Bottom
+-- without reaching into NS.PADDING by role name.
+-- Call this once after creating any bordered frame that will act as a parent.
+NS.CB_StampPadding = function(frame, paddingRole)
+    local pad = NS.PADDING[paddingRole] or NS.PADDING.panel
+    frame.paddingTop    = pad.top
+    frame.paddingBottom = pad.bottom
+    frame.paddingLeft   = pad.left
+    frame.paddingRight  = pad.right
+end
+
 -- Re-applies scale to every registered root frame.
 NS.CB_RefreshScale = function(s)
     local scale = (s or 100) / 100
@@ -473,6 +485,56 @@ NS.CB_CreateInnerFrame = function(parent, name, paddingRole, marginType, widthPc
 end
 
 -- ============================================================
+-- Scroll frame factory — creates a scroll frame inset from parent by
+-- parent's stamped padding, wires up the scroll child, mouse wheel, and
+-- ElvUI scroll bar skinning. The scroll bar is accessed via the standard
+-- UIPanelScrollFrameTemplate naming convention: name .. "ScrollBar".
+--
+-- Both the scroll frame and scroll child have paddingTop/Bottom/Left/Right = 0
+-- stamped onto them — they are borderless containers with no visual inset.
+-- Content inside the scroll child uses only its own margins; there is no
+-- border to escape from.
+--
+-- Returns scrollFrame, scrollChild.
+-- ============================================================
+NS.CB_CreateScrollFrame = function(parent, name)
+    local pTop    = parent.paddingTop    or 0
+    local pBottom = parent.paddingBottom or 0
+    local pLeft   = parent.paddingLeft   or 0
+    local pRight  = parent.paddingRight  or 0
+
+    local sf = CreateFrame("ScrollFrame", name, parent, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT",     parent, "TOPLEFT",      pLeft,          -pTop)
+    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -(pRight + 20),   pBottom)
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local max = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * 20)))
+    end)
+
+    sf.paddingTop    = 0 ; sf.paddingBottom = 0
+    sf.paddingLeft   = 0 ; sf.paddingRight  = 0
+
+    local sc = CreateFrame("Frame", name .. "Child", sf)
+    sc:SetHeight(1)
+    sf:SetScrollChild(sc)
+    sf:SetScript("OnSizeChanged", function(self, w, _)
+        sc:SetWidth(w)
+    end)
+
+    sc.paddingTop    = 0 ; sc.paddingBottom = 0
+    sc.paddingLeft   = 0 ; sc.paddingRight  = 0
+
+    local scrollBar = _G[name .. "ScrollBar"]
+    if scrollBar and NS.ElvUI_S then
+        NS.ElvUI_S:HandleScrollBar(scrollBar)
+    end
+
+    return sf, sc
+end
+
+-- ============================================================
 -- Widget factories — create a widget, apply the ElvUI skin, and
 -- stamp NS.MARGIN values onto the returned frame so CB_AnchorBelow
 -- can compute gaps automatically.
@@ -543,6 +605,8 @@ end
 -- They are hidden/shown as a group when the section is toggled.
 --
 -- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
+-- parent must have paddingRight stamped (via CB_StampPadding) so Apply() can compute
+-- the section background's right edge without guessing the parent's role.
 NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local section = {}
 
@@ -602,8 +666,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         else
             local mar        = NS.MARGIN.section
             local topGap     = (toggleBtn.marginBottom or 0) + mar.top
-            local leftX      =  NS.PADDING.panel.left  + mar.left
-            local rightInset =  NS.PADDING.panel.right + mar.right
+            local rightInset = (parent.paddingRight or 0) + mar.right
             -- Anchor TOPLEFT to toggleBtn BOTTOMLEFT so bg tracks the toggle when
             -- reflow moves it. toggleBtn is already at panel.left from the panel wall,
             -- so only the section margin delta is needed as an X offset — not leftX
@@ -661,6 +724,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     bg:SetFrameStrata("BACKGROUND")
     bg:Hide()
     NS.CB_ApplyFrameSkin(bg, nestLevel or 3)
+    NS.CB_StampPadding(bg, "section")
     section.bg = bg
 
     -- Corrects the bg height to exactly wrap the section's content area.

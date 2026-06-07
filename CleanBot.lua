@@ -95,12 +95,13 @@ NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border mar
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- Per-frame padding — space between a frame's border and the content inside it (CSS padding).
+-- frame:   outermost window (CleanBotFrame)
 -- panel:   main panels and column containers (managePanel, partyPanel, ctrl, left/right columns)
 -- section: strategy section frames (the bordered checkbox groups in the party tab)
 NS.PADDING_DEFAULTS = {
     frame   = { top = 32, bottom = 16, left = 16, right = 16 },
-    panel   = { top = 6, bottom = 6, left = 6,  right = 6 },
-    section = { top = 4, bottom = 4, left = 4,  right = 4 },
+    panel   = { top = 6,  bottom = 6,  left = 6,  right = 6  },
+    section = { top = 4,  bottom = 4,  left = 4,  right = 4  },
 }
 -- Working copy — mutated at login from SavedVars, and by the Settings Apply button.
 NS.PADDING = {}

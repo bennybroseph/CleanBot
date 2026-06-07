@@ -245,11 +245,13 @@ NS.CleanBot_BuildSettingsTab = function()
     themePanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     themePanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
     NS.CB_ApplyFrameSkin(themePanel, 3)
+    NS.CB_StampPadding(themePanel, "panel")
 
     local layoutPanel = CreateFrame("Frame", "CleanBotLayoutPanel", panel)
     layoutPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     layoutPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
     NS.CB_ApplyFrameSkin(layoutPanel, 3)
+    NS.CB_StampPadding(layoutPanel, "panel")
     layoutPanel:Hide()
 
     local otherPanel = CreateFrame("Frame", "CleanBotOtherPanel", panel)
@@ -299,35 +301,16 @@ NS.CleanBot_BuildSettingsTab = function()
     subTabs[3] = otherTab
 
     -- ── Theme tab: ScrollFrame ─────────────────────────────────
-    local themeSF = CreateFrame("ScrollFrame", "CleanBotThemeScroll", themePanel, "UIPanelScrollFrameTemplate")
-    themeSF:SetPoint("TOPLEFT",     themePanel, "TOPLEFT",     0,   0)
-    themeSF:SetPoint("BOTTOMRIGHT", themePanel, "BOTTOMRIGHT", -20, 0)
-
-    local themeChild = CreateFrame("Frame", "CleanBotThemeScrollChild", themeSF)
-    themeChild:SetWidth(NS.FRAME_WIDTH - 28)
+    local themeSF, themeChild = NS.CB_CreateScrollFrame(themePanel, "CleanBotThemeScroll")
     themeChild:SetHeight(300)
-    themeSF:SetScrollChild(themeChild)
-
-    themeSF:EnableMouseWheel(true)
-    themeSF:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll()
-        local max     = self:GetVerticalScrollRange()
-        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
-    end)
-
-    local themeScrollBar = CleanBotThemeScrollScrollBar
-    themeScrollBar:ClearAllPoints()
-    themeScrollBar:SetPoint("TOPRIGHT",    themePanel, "TOPRIGHT",    0, -19)
-    themeScrollBar:SetPoint("BOTTOMRIGHT", themePanel, "BOTTOMRIGHT", 0,  19)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(themeScrollBar) end
 
     -- ── Scale ──────────────────────────────────────────────────
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
         50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v end)
     scaleSlider:SetWidth(SLIDER_W)
     scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT",
-        NS.PADDING.panel.left  + (scaleSlider.marginLeft or 0),
-        -(NS.PADDING.panel.top + (scaleSlider.marginTop  or 0)))
+        (themeChild.paddingLeft or 0) + (scaleSlider.marginLeft or 0),
+       -((themeChild.paddingTop or 0) + (scaleSlider.marginTop  or 0)))
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
@@ -345,34 +328,15 @@ NS.CleanBot_BuildSettingsTab = function()
     NS.CB_AnchorBelow(colorSwatch, transSlider)
 
     -- ── Layout tab: ScrollFrame ────────────────────────────────
-    local layoutSF = CreateFrame("ScrollFrame", "CleanBotLayoutScroll", layoutPanel, "UIPanelScrollFrameTemplate")
-    layoutSF:SetPoint("TOPLEFT",     layoutPanel, "TOPLEFT",     0,   0)
-    layoutSF:SetPoint("BOTTOMRIGHT", layoutPanel, "BOTTOMRIGHT", -20, 0)
-
-    local layoutChild = CreateFrame("Frame", "CleanBotLayoutScrollChild", layoutSF)
-    layoutChild:SetWidth(NS.FRAME_WIDTH - 28)
+    local layoutSF, layoutChild = NS.CB_CreateScrollFrame(layoutPanel, "CleanBotLayoutScroll")
     layoutChild:SetHeight(1200)
-    layoutSF:SetScrollChild(layoutChild)
-
-    layoutSF:EnableMouseWheel(true)
-    layoutSF:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll()
-        local max     = self:GetVerticalScrollRange()
-        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
-    end)
-
-    local layoutScrollBar = CleanBotLayoutScrollScrollBar
-    layoutScrollBar:ClearAllPoints()
-    layoutScrollBar:SetPoint("TOPRIGHT",    layoutPanel, "TOPRIGHT",    0, -19)
-    layoutScrollBar:SetPoint("BOTTOMRIGHT", layoutPanel, "BOTTOMRIGHT", 0,  19)
-    if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(layoutScrollBar) end
 
     -- ── Show Sample Layout ─────────────────────────────────────
     local sampleBtn = NS.CB_CreateButton(layoutChild, "CleanBotShowSampleLayout",
         "Show Sample Layout", 140, 22, showSampleLayout)
     sampleBtn:SetPoint("TOPLEFT", layoutChild, "TOPLEFT",
-        NS.PADDING.panel.left  + (sampleBtn.marginLeft or 0),
-        -(NS.PADDING.panel.top + (sampleBtn.marginTop  or 0)))
+        (layoutChild.paddingLeft or 0) + (sampleBtn.marginLeft or 0),
+       -((layoutChild.paddingTop or 0) + (sampleBtn.marginTop  or 0)))
 
     local COL_TYPE_W = 80
     local COL_GAP    = 10
@@ -386,6 +350,8 @@ NS.CleanBot_BuildSettingsTab = function()
         { key = "checkbox", display = "Checkbox" },
         { key = "swatch",   display = "Swatch"   },
         { key = "editBox",  display = "Edit Box" },
+        { key = "panel",    display = "Panel"    },
+        { key = "section",  display = "Section"  },
     }
 
     local PADDING_TYPES = {
@@ -397,7 +363,9 @@ NS.CleanBot_BuildSettingsTab = function()
     local marginSliderRefs  = {}
     local paddingSliderRefs = {}
 
-    local SEP_W = NS.FRAME_WIDTH - 28 - NS.PADDING.panel.left - NS.PADDING.panel.right
+    -- Scroll child is a borderless void — full width, no content padding.
+    -- Subtract the panel padding on both sides (scroll frame inset) plus 20px scroll bar.
+    local SEP_W = NS.FRAME_WIDTH - NS.PADDING.panel.left - NS.PADDING.panel.right - 20
 
     -- ── Padding ────────────────────────────────────────────────
     local paddingHeader = NS.CB_CreateHeader(layoutChild, "Padding")
@@ -406,6 +374,9 @@ NS.CleanBot_BuildSettingsTab = function()
     local paddingSep = NS.CB_CreateSeparator(layoutChild)
     NS.CB_AnchorBelow(paddingSep, paddingHeader)
     paddingSep:SetWidth(SEP_W)
+
+    -- Scroll child is a borderless void — content starts at its left edge (no padding offset).
+    local COL_BASE = layoutChild.paddingLeft or 0
 
     local prevRow = paddingSep
     for i, ptype in ipairs(PADDING_TYPES) do
@@ -419,7 +390,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         nameLabel:SetText(ptype.display)
-        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left, 0)
+        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE, 0)
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
@@ -428,13 +399,13 @@ NS.CleanBot_BuildSettingsTab = function()
             "Top", P_MIN, P_MAX, NS.PADDING[key].top, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
-        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
             "Bot", P_MIN, P_MAX, NS.PADDING[key].bottom, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
-        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         local rowB = CreateFrame("Frame", nil, layoutChild)
         rowB:SetSize(1, 54)
@@ -446,13 +417,13 @@ NS.CleanBot_BuildSettingsTab = function()
             "Left", P_MIN, P_MAX, NS.PADDING[key].left, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
-        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
             "Right", P_MIN, P_MAX, NS.PADDING[key].right, tostring(P_MIN), tostring(P_MAX),
             function(v) pendingPadding[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
-        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         paddingSliderRefs[key] = { top = topSlider, bot = botSlider, left = leftSlider, right = rightSlider }
         prevRow = rowB
@@ -486,7 +457,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local nameLabel = layoutChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         nameLabel:SetText(mtype.display)
-        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left, 0)
+        nameLabel:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE, 0)
         nameLabel:SetWidth(COL_TYPE_W)
         nameLabel:SetJustifyH("LEFT")
 
@@ -495,13 +466,13 @@ NS.CleanBot_BuildSettingsTab = function()
             "Top", -M_RANGE, M_RANGE, NS.MARGIN[key].top, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].top = v end)
         topSlider:SetWidth(SLIDER_W)
-        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+        topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
             "Bot", -M_RANGE, M_RANGE, NS.MARGIN[key].bottom, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].bottom = v end)
         botSlider:SetWidth(SLIDER_W)
-        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         -- Left/Right sub-row — flush below Top/Bot, no extra gap between them.
         local rowB = CreateFrame("Frame", nil, layoutChild)
@@ -514,13 +485,13 @@ NS.CleanBot_BuildSettingsTab = function()
             "Left", -M_RANGE, M_RANGE, NS.MARGIN[key].left, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].left = v end)
         leftSlider:SetWidth(SLIDER_W)
-        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP, 0)
+        leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
             "Right", -M_RANGE, M_RANGE, NS.MARGIN[key].right, "-" .. M_RANGE, tostring(M_RANGE),
             function(v) pendingMargins[key].right = v end)
         rightSlider:SetWidth(SLIDER_W)
-        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", NS.PADDING.panel.left + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
+        rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
         marginSliderRefs[key] = { top = topSlider, bot = botSlider, left = leftSlider, right = rightSlider }
         prevRow = rowB
