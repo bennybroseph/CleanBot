@@ -78,7 +78,7 @@ local function CB_GetGeometry()
     local contentW = NS.partyContent and NS.partyContent:GetWidth()  or 0
     local contentH = NS.partyContent and NS.partyContent:GetHeight() or 0
     if contentW == 0 then contentW = NS.FRAME_WIDTH - 8 end
-    if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - NS.FOOTER_H - NS.PAD * 2 end
+    if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom) - NS.PAD * 2 end
 
     local modelH   = contentH - NS.EQUIP_WEAPON_PAD
     local modelW   = math.floor(contentW / 3)

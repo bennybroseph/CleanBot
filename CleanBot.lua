@@ -91,7 +91,6 @@ NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
 NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
-NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border margin needed
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- Per-frame padding — space between a frame's border and the content inside it (CSS padding).
@@ -209,6 +208,15 @@ function CleanBot_BuildFrames()
     CleanBotFrame:SetWidth(NS.FRAME_WIDTH)
     CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
 
+    -- Stamp padding fields so child anchors can read CleanBotFrame.paddingXxx
+    -- directly rather than going through the raw NS.PADDING.frame globals.
+    -- CleanBotFrame is XML-defined so CB_CreatePanel never runs on it.
+    local framePad = NS.PADDING.frame
+    CleanBotFrame.paddingTop    = framePad.top
+    CleanBotFrame.paddingBottom = framePad.bottom
+    CleanBotFrame.paddingLeft   = framePad.left
+    CleanBotFrame.paddingRight  = framePad.right
+
     -- ── Top tab bar ────────────────────────────────────────────
     NS.topTabBar = CreateFrame("Frame", "CleanBotTopTabBar", CleanBotFrame)
     NS.topTabBar:SetPoint("TOPLEFT",  CleanBotFrame, "TOPLEFT",  0, -NS.TITLE_H)
@@ -225,7 +233,7 @@ function CleanBot_BuildFrames()
         if prevTopTab then
             NS.CB_AnchorAhead(tab, prevTopTab)
         else
-            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PADDING.frame.left + (tab.marginLeft or 0), 0)
+            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", CleanBotFrame.paddingLeft + (tab.marginLeft or 0), 0)
         end
         prevTopTab  = tab
         NS.topTabs[i] = tab
@@ -233,8 +241,8 @@ function CleanBot_BuildFrames()
 
     -- ── Content frame ──────────────────────────────────────────
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
-    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      NS.PADDING.frame.left, -(NS.TITLE_H + NS.TOP_BAR_H))
-    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
+    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      CleanBotFrame.paddingLeft,   -(NS.TITLE_H + NS.TOP_BAR_H))
+    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -CleanBotFrame.paddingRight,    CleanBotFrame.paddingBottom)
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────

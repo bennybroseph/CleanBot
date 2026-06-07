@@ -237,6 +237,13 @@ local function showSampleLayout()
         NS.CB_ApplyFrameSkin(f, 0)
         NS.CB_ApplyTitleBar(f, "Sample Layout")
 
+        -- Stamp padding fields — f is a raw CreateFrame so CB_CreatePanel never runs on it.
+        local framePad = NS.PADDING.frame
+        f.paddingTop    = framePad.top
+        f.paddingBottom = framePad.bottom
+        f.paddingLeft   = framePad.left
+        f.paddingRight  = framePad.right
+
         local closeBtn = CreateFrame("Button", "CleanBotSampleLayoutClose", f, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
         closeBtn:SetScript("OnClick", function() f:Hide() end)
@@ -244,8 +251,8 @@ local function showSampleLayout()
 
         -- Panel — level 2, mirrors managePanel/partyPanel inside CleanBotFrame.
         local panel = NS.CB_CreatePanel(f, "CleanBotSamplePanel", 2, "panel")
-        panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      NS.PADDING.frame.left, -NS.TITLE_H)
-        panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
+        panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      f.paddingLeft,   -NS.TITLE_H)
+        panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -f.paddingRight,   f.paddingBottom)
         f._panel = panel
 
         -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
