@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotSettingsTab.lua  —  Settings tab content
+-- CleanBotSettingsTab.lua  —  Settings tab panel construction and content
 --
 -- Two nested sub-tabs inside the Settings panel:
 --   • Theme   — scale, transparency, accent colour
@@ -204,7 +204,12 @@ end
 -- Settings tab
 -- ============================================================
 
-NS.CleanBot_BuildSettingsContent = function()
+NS.CleanBot_BuildSettingsTab = function()
+    NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
+    NS.settingsPanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyFrameSkin(NS.settingsPanel, 2)
+    NS.settingsPanel:Hide()
+
     local panel    = NS.settingsPanel
     local SLIDER_W = 200
 

@@ -154,10 +154,13 @@ NS.EQUIP_WEAPON_PAD  = 60
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
-NS.partyPanel    = nil
-NS.botTabBar     = nil
-NS.partyContent  = nil
-NS.managePanel     = nil
+NS.partyPanel      = nil
+NS.botTabBar       = nil
+NS.partyContent    = nil
+NS.partyEmptyLabel = nil
+NS.managePanel      = nil
+NS.manageScrollFrame = nil
+NS.manageScrollChild = nil
 NS.settingsPanel = nil
 
 -- ============================================================
@@ -193,7 +196,8 @@ end
 
 -- ============================================================
 -- Frame construction (called once at PLAYER_LOGIN)
--- NS.CleanBot_BuildManageContent / NS.CleanBot_BuildSettingsContent /
+-- NS.CleanBot_BuildPartyTab / NS.CleanBot_BuildManageTab /
+-- NS.CleanBot_BuildSettingsTab /
 -- NS.CleanBot_RefreshTabs are all defined in the files that load after this one.
 -- They are only ever called at event time (never at load time), so the forward
 -- references are fine.
@@ -232,77 +236,16 @@ function CleanBot_BuildFrames()
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────
-    NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
-    NS.partyPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.partyPanel, 2)
-
-    NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
-    NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
-    NS.botTabBar:SetPoint("TOPRIGHT", NS.partyPanel, "TOPRIGHT", 0, 0)
-    NS.botTabBar:SetHeight(NS.BOT_BAR_H)
-
-    -- Hide the XML-defined text (it's a child of CleanBotFrame and leaks across tabs).
-    -- We use a dedicated label parented to partyPanel instead.
-    CleanBotFrameText:SetText("")
-    CleanBotFrameText:Hide()
-
-    NS.partyEmptyLabel = NS.partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    NS.partyEmptyLabel:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
-    NS.partyEmptyLabel:SetText("")
-
-    NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
-    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT", 0, 0)
+    -- Defined in Party/CleanBotParty.lua (loads after this file).
+    NS.CleanBot_BuildPartyTab()
 
     -- ── Manage panel ───────────────────────────────────────────
-    NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
-    NS.managePanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.managePanel, 2)
-    NS.managePanel:Hide()
-
-    -- Intermediate container between the skinned panel and the scroll frame.
-    -- NS.managePanel has ElvUI's SetTemplate applied, which stamps iborder/oborder
-    -- child frames at specific frame levels. Nesting the scroll frame one level
-    -- deeper isolates it from those template children so content renders correctly.
-    local manageScrollContainer = CreateFrame("Frame", "CleanBotManageScrollContainer",
-        NS.managePanel)
-    manageScrollContainer:SetAllPoints(NS.managePanel)
-
-    -- ScrollFrame that fills the container. A 20px right gap is reserved so
-    -- the UIPanelScrollFrameTemplate scroll bar sits inside the panel padding area
-    -- without overlapping content.
-    NS.manageScrollFrame = CreateFrame("ScrollFrame", "CleanBotManageScrollFrame",
-        manageScrollContainer, "UIPanelScrollFrameTemplate")
-    NS.manageScrollFrame:SetPoint("TOPLEFT",     manageScrollContainer, "TOPLEFT",      0,   0)
-    NS.manageScrollFrame:SetPoint("BOTTOMRIGHT", manageScrollContainer, "BOTTOMRIGHT", -20,  0)
-    NS.manageScrollFrame:EnableMouseWheel(true)
-    NS.manageScrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll()
-        local max     = self:GetVerticalScrollRange()
-        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
-    end)
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleScrollBar(CleanBotManageScrollFrameScrollBar)
-    end
-
-    -- Scroll child: parent for all manage-tab widgets. Width tracks the scroll
-    -- frame via OnSizeChanged; height is updated dynamically after content builds.
-    NS.manageScrollChild = CreateFrame("Frame", "CleanBotManageScrollChild",
-        NS.manageScrollFrame)
-    NS.manageScrollChild:SetHeight(600)  -- placeholder; overwritten by CleanBot_BuildManageContent
-    NS.manageScrollFrame:SetScrollChild(NS.manageScrollChild)
-    NS.manageScrollFrame:SetScript("OnSizeChanged", function(self, w, _)
-        NS.manageScrollChild:SetWidth(w)
-    end)
-
-    NS.CleanBot_BuildManageContent()
+    -- Defined in CleanBotManageTab.lua (loads after this file).
+    NS.CleanBot_BuildManageTab()
 
     -- ── Settings panel ─────────────────────────────────────────
-    NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
-    NS.settingsPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.settingsPanel, 2)
-    NS.settingsPanel:Hide()
-    NS.CleanBot_BuildSettingsContent()
+    -- Defined in CleanBotSettingsTab.lua (loads after this file).
+    NS.CleanBot_BuildSettingsTab()
 
     if NS.ElvUI_S then
         CleanBotFrame:StripTextures()

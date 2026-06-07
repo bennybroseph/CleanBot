@@ -1,5 +1,6 @@
 -- ============================================================
--- CleanBotManageTab.lua  —  Manage tab: add / remove bots
+-- CleanBotManageTab.lua  —  Manage tab: panel construction,
+--                           scroll frame, and bot management UI.
 -- ============================================================
 local NS = CleanBotNS
 
@@ -113,7 +114,45 @@ CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
         NS.CB_Print("Linking account '" .. accountName .. "'...")
     end)
 
-NS.CleanBot_BuildManageContent = function()
+NS.CleanBot_BuildManageTab = function()
+    -- ── Panel, scroll frame, and scroll child ─────────────────────────────────
+    NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
+    NS.managePanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyFrameSkin(NS.managePanel, 2)
+    NS.managePanel:Hide()
+
+    -- Intermediate container isolates the scroll frame from iborder/oborder child
+    -- frames stamped by ElvUI's SetTemplate on managePanel.
+    local manageScrollContainer = CreateFrame("Frame", "CleanBotManageScrollContainer",
+        NS.managePanel)
+    manageScrollContainer:SetAllPoints(NS.managePanel)
+
+    -- 20px right gap reserves space for the UIPanelScrollFrameTemplate scroll bar.
+    NS.manageScrollFrame = CreateFrame("ScrollFrame", "CleanBotManageScrollFrame",
+        manageScrollContainer, "UIPanelScrollFrameTemplate")
+    NS.manageScrollFrame:SetPoint("TOPLEFT",     manageScrollContainer, "TOPLEFT",     0,   0)
+    NS.manageScrollFrame:SetPoint("BOTTOMRIGHT", manageScrollContainer, "BOTTOMRIGHT", -20, 0)
+    NS.manageScrollFrame:EnableMouseWheel(true)
+    NS.manageScrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local max     = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, current - delta * 20)))
+    end)
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleScrollBar(CleanBotManageScrollFrameScrollBar)
+    end
+
+    -- Scroll child: parent for all manage-tab widgets.
+    -- Width tracks the scroll frame; height is set dynamically after content builds.
+    NS.manageScrollChild = CreateFrame("Frame", "CleanBotManageScrollChild",
+        NS.manageScrollFrame)
+    NS.manageScrollChild:SetHeight(600)
+    NS.manageScrollFrame:SetScrollChild(NS.manageScrollChild)
+    NS.manageScrollFrame:SetScript("OnSizeChanged", function(self, w, _)
+        NS.manageScrollChild:SetWidth(w)
+    end)
+
+    -- ── Content ───────────────────────────────────────────────────────────────
     -- All manage-tab widgets parent to the scroll child, not the panel frame itself.
     -- Using a local alias keeps call sites concise and avoids panel confusion.
     local panel = NS.manageScrollChild
