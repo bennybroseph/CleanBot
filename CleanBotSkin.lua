@@ -692,7 +692,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
             -- toggleBtn sits at panel.left already, so subtract only its own left
             -- margin (0) and the right inset to get the remaining available width.
             local pw = parent:GetWidth()
-            self.bg:SetWidth(math.max(pw > 0 and (pw - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1))
+            self.bg:SetWidth(math.max(pw > 0 and (pw - (parent.paddingLeft or 0) - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1))
             self.bg:SetHeight(2000)  -- corrected by UpdateBackground after first render
             self.bg:Show()
         end
@@ -754,8 +754,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         local bgTop  = self.bg:GetTop()
         local lastBt = self.lastWidget:GetBottom()
         if not (bgTop and lastBt) then return end
-        local mar    = NS.MARGIN.section
-        local botGap = (self.lastWidget.marginBottom or 0) + mar.bottom
+        local botGap = (self.lastWidget.marginBottom or 0) + (self.bg.paddingBottom or 0)
         self.bg:SetHeight(math.max(bgTop - lastBt + botGap, 4))
     end
 
