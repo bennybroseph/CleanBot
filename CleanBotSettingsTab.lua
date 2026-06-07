@@ -81,10 +81,9 @@ local function buildSampleContent(panel)
     -- Section sits inside the panel, inset by panel padding.
     -- Leaves room at the bottom for the persistent "Show Overlays" checkbox row.
     local OVERLAY_ROW_H = NS.PADDING.panel.bottom + 20 + NS.PADDING.panel.bottom
-    local section = CreateFrame("Frame", nil, panel)
+    local section = NS.CB_CreatePanel(panel, nil, 4, "section")
     section:SetPoint("TOPLEFT",     panel, "TOPLEFT",     NS.PADDING.panel.left,  -NS.PADDING.panel.top)
     section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, OVERLAY_ROW_H)
-    NS.CB_ApplyFrameSkin(section, 4)
     sampleSection = section
 
     -- First widget: section padding + the widget's own marginTop are both applied
@@ -167,10 +166,9 @@ local function showSampleLayout()
         if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
         -- Panel — level 2, mirrors managePanel/partyPanel inside CleanBotFrame.
-        local panel = CreateFrame("Frame", "CleanBotSamplePanel", f)
+        local panel = NS.CB_CreatePanel(f, "CleanBotSamplePanel", 2, "panel")
         panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      NS.PADDING.frame.left, -NS.TITLE_H)
         panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
-        NS.CB_ApplyFrameSkin(panel, 2)
         f._panel = panel
 
         -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
@@ -241,23 +239,18 @@ NS.CleanBot_BuildSettingsTab = function()
     subTabBar:SetHeight(SUB_TAB_H)
 
     -- ── Content panels ─────────────────────────────────────────
-    local themePanel = CreateFrame("Frame", "CleanBotThemePanel", panel)
+    local themePanel = NS.CB_CreatePanel(panel, "CleanBotThemePanel", 3, "panel")
     themePanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     themePanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyFrameSkin(themePanel, 3)
-    NS.CB_StampPadding(themePanel, "panel")
 
-    local layoutPanel = CreateFrame("Frame", "CleanBotLayoutPanel", panel)
+    local layoutPanel = NS.CB_CreatePanel(panel, "CleanBotLayoutPanel", 3, "panel")
     layoutPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     layoutPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyFrameSkin(layoutPanel, 3)
-    NS.CB_StampPadding(layoutPanel, "panel")
     layoutPanel:Hide()
 
-    local otherPanel = CreateFrame("Frame", "CleanBotOtherPanel", panel)
+    local otherPanel = NS.CB_CreatePanel(panel, "CleanBotOtherPanel", 3, "panel")
     otherPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     otherPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyFrameSkin(otherPanel, 3)
     otherPanel:Hide()
 
     -- ── Sub-tab switching ──────────────────────────────────────
@@ -342,16 +335,17 @@ NS.CleanBot_BuildSettingsTab = function()
     local COL_GAP    = 10
 
     local MARGIN_TYPES = {
+        { key = "panel",    display = "Panel"    },
+        { key = "section",  display = "Section"  },
+        { key = "tab",      display = "Tab"      },
         { key = "header",   display = "Header"   },
         { key = "label",    display = "Label"    },
-        { key = "button",   display = "Button"   },
+        { key = "button",   display = "Button"   },        
         { key = "slider",   display = "Slider"   },
         { key = "dropdown", display = "Dropdown" },
         { key = "checkbox", display = "Checkbox" },
         { key = "swatch",   display = "Swatch"   },
-        { key = "editBox",  display = "Edit Box" },
-        { key = "panel",    display = "Panel"    },
-        { key = "section",  display = "Section"  },
+        { key = "editBox",  display = "Edit Box" },        
     }
 
     local PADDING_TYPES = {

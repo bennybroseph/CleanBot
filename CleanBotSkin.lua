@@ -112,16 +112,19 @@ NS.CB_RefreshTransparency = function(t)
     end
 end
 
--- Stamps a padding role's values directly onto a frame so any helper that creates
--- a child (e.g. CB_CreateScrollFrame) can read parent.paddingLeft/Right/Top/Bottom
--- without reaching into NS.PADDING by role name.
--- Call this once after creating any bordered frame that will act as a parent.
-NS.CB_StampPadding = function(frame, paddingRole)
+-- Panel factory — creates a bordered child frame, applies CB_ApplyFrameSkin for
+-- nestLevel, and stamps paddingTop/Bottom/Left/Right from paddingRole so child
+-- helpers such as CB_CreateScrollFrame can read parent.paddingXxx directly.
+-- Returns the new frame. Caller is responsible for SetPoint / SetAllPoints.
+NS.CB_CreatePanel = function(parent, name, nestLevel, paddingRole)
+    local frame = CreateFrame("Frame", name, parent)
+    NS.CB_ApplyFrameSkin(frame, nestLevel or 1)
     local pad = NS.PADDING[paddingRole] or NS.PADDING.panel
     frame.paddingTop    = pad.top
     frame.paddingBottom = pad.bottom
     frame.paddingLeft   = pad.left
     frame.paddingRight  = pad.right
+    return frame
 end
 
 -- Re-applies scale to every registered root frame.
@@ -605,7 +608,7 @@ end
 -- They are hidden/shown as a group when the section is toggled.
 --
 -- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
--- parent must have paddingRight stamped (via CB_StampPadding) so Apply() can compute
+-- parent must have paddingRight stamped (via CB_CreatePanel) so Apply() can compute
 -- the section background's right edge without guessing the parent's role.
 NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local section = {}
@@ -720,11 +723,9 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     -- Visual background frame. BACKGROUND strata keeps it behind buttons and
     -- labels (which default to MEDIUM/HIGH) without touching their FrameLevel.
     -- Hidden until UpdateBackground is called after the first layout pass.
-    local bg = CreateFrame("Frame", "CleanBotSection_" .. key .. "_BG", parent)
+    local bg = NS.CB_CreatePanel(parent, "CleanBotSection_" .. key .. "_BG", nestLevel or 3, "section")
     bg:SetFrameStrata("BACKGROUND")
     bg:Hide()
-    NS.CB_ApplyFrameSkin(bg, nestLevel or 3)
-    NS.CB_StampPadding(bg, "section")
     section.bg = bg
 
     -- Corrects the bg height to exactly wrap the section's content area.
@@ -911,8 +912,10 @@ NS.CB_CreateTab = function(parent, name, text, onClick)
         end
     end
 
-    tab.marginLeft  = NS.MARGIN.button.left
-    tab.marginRight = NS.COLUMN_GAP
+    tab.marginTop    = NS.MARGIN.tab.top
+    tab.marginBottom = NS.MARGIN.tab.bottom
+    tab.marginLeft   = NS.MARGIN.tab.left
+    tab.marginRight  = NS.MARGIN.tab.right
     tab:SetActive(false)  -- start inactive
     return tab
 end

@@ -9,9 +9,8 @@ local NS = CleanBotNS
 -- Panel construction (called once at PLAYER_LOGIN via CleanBot_BuildFrames)
 -- ============================================================
 NS.CleanBot_BuildPartyTab = function()
-    NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
+    NS.partyPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotPartyPanel", 2, "panel")
     NS.partyPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.partyPanel, 2)
 
     NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
     NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)

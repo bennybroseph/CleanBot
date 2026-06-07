@@ -115,6 +115,7 @@ NS.MARGIN_DEFAULTS = {
     header   = { top = 10, bottom = 4, left = 0, right = 0 },
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
+    tab      = { top = 2,  bottom = 2, left = 0, right = 4 },
     slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
     dropdown = { top = 2,  bottom = 2, left = -12, right = 0 },
     checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },

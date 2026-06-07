@@ -116,9 +116,8 @@ CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
 
 NS.CleanBot_BuildManageTab = function()
     -- ── Panel, scroll frame, and scroll child ─────────────────────────────────
-    NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
+    NS.managePanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotManagePanel", 2, "panel")
     NS.managePanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyFrameSkin(NS.managePanel, 2)
     NS.managePanel:Hide()
 
     -- Intermediate container isolates the scroll frame from iborder/oborder child
@@ -126,7 +125,11 @@ NS.CleanBot_BuildManageTab = function()
     local manageScrollContainer = CreateFrame("Frame", "CleanBotManageScrollContainer",
         NS.managePanel)
     manageScrollContainer:SetAllPoints(NS.managePanel)
-    NS.CB_StampPadding(manageScrollContainer, "panel")
+    -- Padding mirrors managePanel so CB_CreateScrollFrame can inset correctly.
+    manageScrollContainer.paddingTop    = NS.managePanel.paddingTop
+    manageScrollContainer.paddingBottom = NS.managePanel.paddingBottom
+    manageScrollContainer.paddingLeft   = NS.managePanel.paddingLeft
+    manageScrollContainer.paddingRight  = NS.managePanel.paddingRight
 
     NS.manageScrollFrame, NS.manageScrollChild = NS.CB_CreateScrollFrame(
         manageScrollContainer, "CleanBotManageScrollFrame")
