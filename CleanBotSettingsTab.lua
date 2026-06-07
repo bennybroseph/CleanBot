@@ -17,8 +17,11 @@ local NS = CleanBotNS
 local overlayFrames  = {}
 local overlayVisible = true
 
--- Green overlay on widget bounds; yellow overlays for margins.
--- Overlay frames are parented to 'parent' above its children.
+-- Visualises the margin space around a widget. Green = positive margin, red = negative.
+-- These frames intentionally bypass the CB_AnchorBelow / CB_AnchorAhead helpers and the
+-- margin/padding model entirely — using those helpers would be circular, since the gaps
+-- they produce are derived from the very margin values being visualised here. Raw SetPoint
+-- against specific reference frames is the only correct approach.
 local function applyDebugOverlay(parent, widget)
     local mTop    = widget.marginTop    or 0
     local mBottom = widget.marginBottom or 0
@@ -38,6 +41,8 @@ local function applyDebugOverlay(parent, widget)
         return f
     end
 
+    -- Top/bottom: show this widget's contribution to the gap above/below it.
+    -- Height = the margin value; anchored flush to the widget's top or bottom edge.
     if mTop ~= 0 then
         local top = mTop > 0 and makeOverlay(0, 1, 0) or makeOverlay(1, 0, 0)
         top:SetPoint("BOTTOMLEFT",  widget, "TOPLEFT",  0, 0)
@@ -52,18 +57,81 @@ local function applyDebugOverlay(parent, widget)
         bot:SetHeight(math.abs(mBottom))
     end
 
+    -- Left: CSS-style — spans between the parent's content left edge (parent.paddingLeft)
+    -- and the widget's left edge. For positive marginLeft the widget sits to the right of
+    -- the content edge; for negative it encroaches into the padding, so the span reverses.
     if mLeft ~= 0 then
         local left = mLeft > 0 and makeOverlay(0, 1, 0) or makeOverlay(1, 0, 0)
-        left:SetPoint("TOPRIGHT",    widget, "TOPLEFT",    0, 0)
-        left:SetPoint("BOTTOMRIGHT", widget, "BOTTOMLEFT", 0, 0)
-        left:SetWidth(math.abs(mLeft))
+        if mLeft > 0 then
+            left:SetPoint("TOPRIGHT",    widget, "TOPLEFT",    0, 0)
+            left:SetPoint("BOTTOMRIGHT", widget, "BOTTOMLEFT", 0, 0)
+            left:SetPoint("LEFT",        parent, "LEFT",       (parent.paddingLeft or 0), 0)
+        else
+            left:SetPoint("TOPLEFT",    widget, "TOPLEFT",    0, 0)
+            left:SetPoint("BOTTOMLEFT", widget, "BOTTOMLEFT", 0, 0)
+            left:SetPoint("RIGHT",      parent, "LEFT",       (parent.paddingLeft or 0), 0)
+        end
     end
 
+    -- Right: marginRight has no parent-wall reference in vertical flow (it is only the
+    -- right half of the gap in CB_AnchorAhead). Show reserved space to the right of the
+    -- widget by the margin amount — the most accurate representation in both flow contexts.
     if mRight ~= 0 then
         local right = mRight > 0 and makeOverlay(0, 1, 0) or makeOverlay(1, 0, 0)
         right:SetPoint("TOPLEFT",    widget, "TOPRIGHT",    0, 0)
         right:SetPoint("BOTTOMLEFT", widget, "BOTTOMRIGHT", 0, 0)
         right:SetWidth(math.abs(mRight))
+    end
+end
+
+-- Visualises the padding insets of a frame. Blue overlays mark each of the 4 padding strips.
+-- Same intentional raw-SetPoint bypass as applyDebugOverlay — these exist to show
+-- the padding space, not participate in it.
+local function applyPaddingOverlay(frame)
+    local pTop    = frame.paddingTop    or 0
+    local pBottom = frame.paddingBottom or 0
+    local pLeft   = frame.paddingLeft   or 0
+    local pRight  = frame.paddingRight  or 0
+    local level   = frame:GetFrameLevel() + 10
+
+    local function makePad()
+        local f = CreateFrame("Frame", nil, frame)
+        f:SetFrameLevel(level)
+        local tex = f:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        tex:SetVertexColor(0, 0.5, 1, 0.25)
+        overlayFrames[#overlayFrames + 1] = f
+        if not overlayVisible then f:Hide() end
+        return f
+    end
+
+    if pTop ~= 0 then
+        local top = makePad()
+        top:SetPoint("TOPLEFT",  frame, "TOPLEFT",  0, 0)
+        top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+        top:SetHeight(pTop)
+    end
+
+    if pBottom ~= 0 then
+        local bot = makePad()
+        bot:SetPoint("BOTTOMLEFT",  frame, "BOTTOMLEFT",  0, 0)
+        bot:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        bot:SetHeight(pBottom)
+    end
+
+    if pLeft ~= 0 then
+        local left = makePad()
+        left:SetPoint("TOPLEFT",    frame, "TOPLEFT",    0, 0)
+        left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+        left:SetWidth(pLeft)
+    end
+
+    if pRight ~= 0 then
+        local right = makePad()
+        right:SetPoint("TOPRIGHT",    frame, "TOPRIGHT",    0, 0)
+        right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        right:SetWidth(pRight)
     end
 end
 
@@ -74,17 +142,22 @@ local sampleGenCount = 0
 -- The section demonstrates section padding; widgets inside it demonstrate margins.
 local function buildSampleContent(panel)
     if sampleSection then sampleSection:Hide() end
+    for _, f in ipairs(overlayFrames) do f:Hide() end
     overlayFrames  = {}
     sampleGenCount = sampleGenCount + 1
     local gen = sampleGenCount
 
+    applyPaddingOverlay(panel)
+
     -- Section sits inside the panel, inset by panel padding.
     -- Leaves room at the bottom for the persistent "Show Overlays" checkbox row.
-    local OVERLAY_ROW_H = (panel.paddingBottom or 0) + 20 + (panel.paddingBottom or 0)
+    -- Row height = section bottom padding + checkbox margins + checkbox height + panel bottom padding.
+    local OVERLAY_ROW_H = NS.PADDING.section.bottom + NS.MARGIN.checkbox.bottom + panel._overlayCB:GetHeight() + NS.MARGIN.checkbox.top + (panel.paddingBottom or 0)
     local section = NS.CB_CreatePanel(panel, nil, 4, "section")
     section:SetPoint("TOPLEFT",     panel, "TOPLEFT",      (panel.paddingLeft  or 0), -(panel.paddingTop   or 0))
     section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(panel.paddingRight or 0),   OVERLAY_ROW_H)
     sampleSection = section
+    applyPaddingOverlay(section)
 
     -- First widget: section padding + the widget's own marginTop are both applied
     -- explicitly so the header's top margin is visible when tuning in Settings.
@@ -144,6 +217,11 @@ end
 local sampleLayoutFrame = nil
 
 local function showSampleLayout()
+    if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
+        sampleLayoutFrame:Hide()
+        return
+    end
+
     if not sampleLayoutFrame then
         local f = CreateFrame("Frame", "CleanBotSampleLayoutFrame", UIParent)
         NS.CB_RegisterRootFrame(f)
@@ -171,7 +249,9 @@ local function showSampleLayout()
         f._panel = panel
 
         -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
+        -- Stored on the panel so buildSampleContent can query its height for OVERLAY_ROW_H.
         local overlayCB = NS.CB_CreateCheckBox(panel, "CleanBotSampleLayoutOverlayCB")
+        panel._overlayCB = overlayCB
         overlayCB:SetChecked(overlayVisible)
         overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
             (panel.paddingLeft   or 0) + (overlayCB.marginLeft   or 0),
@@ -185,6 +265,10 @@ local function showSampleLayout()
             for _, overlay in ipairs(overlayFrames) do
                 if checked then overlay:Show() else overlay:Hide() end
             end
+        end)
+
+        CleanBotFrame:HookScript("OnHide", function()
+            if sampleLayoutFrame then sampleLayoutFrame:Hide() end
         end)
 
         sampleLayoutFrame = f
@@ -208,8 +292,9 @@ NS.CleanBot_BuildSettingsTab = function()
     local panel    = NS.settingsPanel
     local SLIDER_W = 200
 
-    local BTN_ROW_H = (panel.paddingBottom or 0) + NS.MARGIN.button.bottom + 22 + NS.MARGIN.button.top + (panel.paddingBottom or 0)
     local SUB_TAB_H = NS.TOP_BAR_H
+    -- Forward declaration — syncPendingToUI is defined later but called only at click time.
+    local syncPendingToUI
 
     -- ── Pending values ─────────────────────────────────────────
     local pendingScale        = NS.scale
@@ -228,6 +313,125 @@ NS.CleanBot_BuildSettingsTab = function()
     for k, v in pairs(NS.PADDING) do
         pendingPadding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
     end
+
+    -- ── Action buttons ─────────────────────────────────────────
+    -- Created first so BTN_ROW_H can query the actual rendered height.
+    local defaultsBtn = NS.CB_CreateButton(panel, "CleanBotDefaultsSettings", "Defaults", 80, 22, function()
+        pendingScale        = NS.THEME_DEFAULTS.scale
+        pendingTransparency = NS.THEME_DEFAULTS.transparency
+        pendingAccentR      = NS.THEME_DEFAULTS.accentColor.r
+        pendingAccentG      = NS.THEME_DEFAULTS.accentColor.g
+        pendingAccentB      = NS.THEME_DEFAULTS.accentColor.b
+        pendingAccentA      = NS.THEME_DEFAULTS.accentColor.a
+        for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
+            pendingMargins[k].top    = defaults.top
+            pendingMargins[k].bottom = defaults.bottom
+            pendingMargins[k].left   = defaults.left
+            pendingMargins[k].right  = defaults.right
+        end
+        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
+            pendingPadding[k].top    = defaults.top
+            pendingPadding[k].bottom = defaults.bottom
+            pendingPadding[k].left   = defaults.left
+            pendingPadding[k].right  = defaults.right
+        end
+        syncPendingToUI()
+    end)
+    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        (panel.paddingLeft   or 0) + (defaultsBtn.marginLeft   or 0),
+        (panel.paddingBottom or 0) + (defaultsBtn.marginBottom or 0))
+
+    local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
+        pendingScale        = NS.scale
+        pendingTransparency = NS.transparency
+        pendingAccentR      = NS.accentColor.r
+        pendingAccentG      = NS.accentColor.g
+        pendingAccentB      = NS.accentColor.b
+        pendingAccentA      = NS.accentColor.a
+        local savedMargins  = CleanBot_SavedVars and CleanBot_SavedVars.margins
+        for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
+            local s = savedMargins and savedMargins[k]
+            if type(s) == "table" then
+                pendingMargins[k].top    = type(s.top)    == "number" and s.top    or defaults.top
+                pendingMargins[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
+                pendingMargins[k].left   = type(s.left)   == "number" and s.left   or defaults.left
+                pendingMargins[k].right  = type(s.right)  == "number" and s.right  or defaults.right
+            else
+                pendingMargins[k].top    = defaults.top
+                pendingMargins[k].bottom = defaults.bottom
+                pendingMargins[k].left   = defaults.left
+                pendingMargins[k].right  = defaults.right
+            end
+        end
+        local savedPadding = CleanBot_SavedVars and CleanBot_SavedVars.padding
+        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
+            local s = savedPadding and savedPadding[k]
+            if type(s) == "table" then
+                pendingPadding[k].top    = type(s.top)    == "number" and s.top    or defaults.top
+                pendingPadding[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
+                pendingPadding[k].left   = type(s.left)   == "number" and s.left   or defaults.left
+                pendingPadding[k].right  = type(s.right)  == "number" and s.right  or defaults.right
+            else
+                pendingPadding[k].top    = defaults.top
+                pendingPadding[k].bottom = defaults.bottom
+                pendingPadding[k].left   = defaults.left
+                pendingPadding[k].right  = defaults.right
+            end
+        end
+        syncPendingToUI()
+    end)
+    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -((panel.paddingRight  or 0) + (cancelBtn.marginRight  or 0)),
+        (panel.paddingBottom   or 0) + (cancelBtn.marginBottom or 0))
+
+    local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
+        -- Scale
+        NS.scale = pendingScale
+        NS.CB_RefreshScale(NS.scale)
+        CleanBot_SavedVars.scale = NS.scale
+
+        -- Transparency (backdrop alpha only — does not cascade to children)
+        NS.transparency = pendingTransparency
+        NS.CB_RefreshTransparency(NS.transparency)
+        CleanBot_SavedVars.transparency = NS.transparency
+
+        -- Accent Color (border colour on all skinned frames, ElvUI and non-ElvUI)
+        NS.accentColor.r = pendingAccentR
+        NS.accentColor.g = pendingAccentG
+        NS.accentColor.b = pendingAccentB
+        NS.accentColor.a = pendingAccentA
+        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
+        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
+
+        -- Margins
+        if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
+        for k, v in pairs(pendingMargins) do
+            NS.MARGIN[k].top    = v.top
+            NS.MARGIN[k].bottom = v.bottom
+            NS.MARGIN[k].left   = v.left
+            NS.MARGIN[k].right  = v.right
+            CleanBot_SavedVars.margins[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+        end
+
+        -- Padding
+        if type(CleanBot_SavedVars.padding) ~= "table" then CleanBot_SavedVars.padding = {} end
+        for k, v in pairs(pendingPadding) do
+            NS.PADDING[k].top    = v.top
+            NS.PADDING[k].bottom = v.bottom
+            NS.PADDING[k].left   = v.left
+            NS.PADDING[k].right  = v.right
+            CleanBot_SavedVars.padding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+        end
+
+        if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
+            buildSampleContent(sampleLayoutFrame._panel)
+        end
+        NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
+    end)
+    applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
+        -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)
+
+    local BTN_ROW_H = (panel.paddingBottom or 0) + NS.MARGIN.button.bottom + defaultsBtn:GetHeight() + NS.MARGIN.button.top + (panel.paddingBottom or 0)
 
     -- ── Sub-tab bar ────────────────────────────────────────────
     local subTabBar = CreateFrame("Frame", "CleanBotSettingsSubTabBar", panel)
@@ -532,7 +736,7 @@ NS.CleanBot_BuildSettingsTab = function()
     end)
 
     -- ── Sync helper ────────────────────────────────────────────
-    local function syncPendingToUI()
+    syncPendingToUI = function()
         scaleSlider:SetValue(pendingScale)
         transSlider:SetValue(pendingTransparency)
         colorSwatch:setColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
@@ -549,122 +753,6 @@ NS.CleanBot_BuildSettingsTab = function()
             refs.right:SetValue(pendingPadding[key].right)
         end
     end
-
-    -- ── Action buttons ─────────────────────────────────────────
-    local defaultsBtn = NS.CB_CreateButton(panel, "CleanBotDefaultsSettings", "Defaults", 80, 22, function()
-        pendingScale        = NS.THEME_DEFAULTS.scale
-        pendingTransparency = NS.THEME_DEFAULTS.transparency
-        pendingAccentR      = NS.THEME_DEFAULTS.accentColor.r
-        pendingAccentG      = NS.THEME_DEFAULTS.accentColor.g
-        pendingAccentB      = NS.THEME_DEFAULTS.accentColor.b
-        pendingAccentA      = NS.THEME_DEFAULTS.accentColor.a
-        for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
-            pendingMargins[k].top    = defaults.top
-            pendingMargins[k].bottom = defaults.bottom
-            pendingMargins[k].left   = defaults.left
-            pendingMargins[k].right  = defaults.right
-        end
-        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
-            pendingPadding[k].top    = defaults.top
-            pendingPadding[k].bottom = defaults.bottom
-            pendingPadding[k].left   = defaults.left
-            pendingPadding[k].right  = defaults.right
-        end
-        syncPendingToUI()
-    end)
-    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        (panel.paddingLeft   or 0) + (defaultsBtn.marginLeft   or 0),
-        (panel.paddingBottom or 0) + (defaultsBtn.marginBottom or 0))
-
-    local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
-        pendingScale        = NS.scale
-        pendingTransparency = NS.transparency
-        pendingAccentR      = NS.accentColor.r
-        pendingAccentG      = NS.accentColor.g
-        pendingAccentB      = NS.accentColor.b
-        pendingAccentA      = NS.accentColor.a
-        local savedMargins  = CleanBot_SavedVars and CleanBot_SavedVars.margins
-        for k, defaults in pairs(NS.MARGIN_DEFAULTS) do
-            local s = savedMargins and savedMargins[k]
-            if type(s) == "table" then
-                pendingMargins[k].top    = type(s.top)    == "number" and s.top    or defaults.top
-                pendingMargins[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
-                pendingMargins[k].left   = type(s.left)   == "number" and s.left   or defaults.left
-                pendingMargins[k].right  = type(s.right)  == "number" and s.right  or defaults.right
-            else
-                pendingMargins[k].top    = defaults.top
-                pendingMargins[k].bottom = defaults.bottom
-                pendingMargins[k].left   = defaults.left
-                pendingMargins[k].right  = defaults.right
-            end
-        end
-        local savedPadding = CleanBot_SavedVars and CleanBot_SavedVars.padding
-        for k, defaults in pairs(NS.PADDING_DEFAULTS) do
-            local s = savedPadding and savedPadding[k]
-            if type(s) == "table" then
-                pendingPadding[k].top    = type(s.top)    == "number" and s.top    or defaults.top
-                pendingPadding[k].bottom = type(s.bottom) == "number" and s.bottom or defaults.bottom
-                pendingPadding[k].left   = type(s.left)   == "number" and s.left   or defaults.left
-                pendingPadding[k].right  = type(s.right)  == "number" and s.right  or defaults.right
-            else
-                pendingPadding[k].top    = defaults.top
-                pendingPadding[k].bottom = defaults.bottom
-                pendingPadding[k].left   = defaults.left
-                pendingPadding[k].right  = defaults.right
-            end
-        end
-        syncPendingToUI()
-    end)
-    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -((panel.paddingRight  or 0) + (cancelBtn.marginRight  or 0)),
-        (panel.paddingBottom   or 0) + (cancelBtn.marginBottom or 0))
-
-    local applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
-        -- Scale
-        NS.scale = pendingScale
-        NS.CB_RefreshScale(NS.scale)
-        CleanBot_SavedVars.scale = NS.scale
-
-        -- Transparency (backdrop alpha only — does not cascade to children)
-        NS.transparency = pendingTransparency
-        NS.CB_RefreshTransparency(NS.transparency)
-        CleanBot_SavedVars.transparency = NS.transparency
-
-        -- Accent Color (border colour on all skinned frames, ElvUI and non-ElvUI)
-        NS.accentColor.r = pendingAccentR
-        NS.accentColor.g = pendingAccentG
-        NS.accentColor.b = pendingAccentB
-        NS.accentColor.a = pendingAccentA
-        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
-        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
-
-        -- Margins
-        if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
-        for k, v in pairs(pendingMargins) do
-            NS.MARGIN[k].top    = v.top
-            NS.MARGIN[k].bottom = v.bottom
-            NS.MARGIN[k].left   = v.left
-            NS.MARGIN[k].right  = v.right
-            CleanBot_SavedVars.margins[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
-        end
-
-        -- Padding
-        if type(CleanBot_SavedVars.padding) ~= "table" then CleanBot_SavedVars.padding = {} end
-        for k, v in pairs(pendingPadding) do
-            NS.PADDING[k].top    = v.top
-            NS.PADDING[k].bottom = v.bottom
-            NS.PADDING[k].left   = v.left
-            NS.PADDING[k].right  = v.right
-            CleanBot_SavedVars.padding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
-        end
-
-        if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
-            buildSampleContent(sampleLayoutFrame._panel)
-        end
-        NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
-    end)
-    applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
-        -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)
 
     selectSubTab(1)
 end

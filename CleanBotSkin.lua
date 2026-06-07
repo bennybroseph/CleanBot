@@ -399,25 +399,33 @@ local function CB_ApplyInnerSkin(frame)
 end
 
 -- ============================================================
--- Layout helper — anchors widget directly below above using their
--- combined margins as the gap (above.marginBottom + widget.marginTop).
--- Horizontal position is inherited from the chain (BOTTOMLEFT → TOPLEFT).
--- Horizontal margins do not apply here — they apply at wall-anchor time.
+-- Layout helper — anchors widget directly below above (vertical flow).
+-- Gap (Y axis) = above.marginBottom + widget.marginTop.
+-- X position is CSS-style: parent.paddingLeft + widget.marginLeft,
+-- applied relative to the parent frame's left edge so each widget
+-- in the chain positions itself independently (not inherited from above).
 -- ============================================================
 NS.CB_AnchorBelow = function(widget, above)
-    local gap = (above.marginBottom or 0) + (widget.marginTop or 0)
-    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -gap)
+    local gap    = (above.marginBottom or 0) + (widget.marginTop or 0)
+    local parent = widget:GetParent()
+    local xLeft  = (parent and parent.paddingLeft or 0) + (widget.marginLeft or 0)
+    widget:ClearAllPoints()
+    widget:SetPoint("TOP",  above,  "BOTTOM", 0,    -gap)
+    widget:SetPoint("LEFT", parent, "LEFT",   xLeft,  0)
 end
 
 -- ============================================================
 -- Layout helper — anchors widget directly ahead (to the right) of
--- before using their combined margins as the gap
--- (before.marginRight + widget.marginLeft).
--- Vertical position is inherited from the chain (TOPRIGHT → TOPLEFT).
--- Vertical margins do not apply here — they apply at wall-anchor time.
+-- before (horizontal flow).
+-- Gap (X axis) = before.marginRight + widget.marginLeft.
+-- Y position is inherited from before's top edge so the widget stays
+-- on the same implicit row regardless of where that row sits in a
+-- vertical chain. (CSS-style parent-relative Y is intentionally not
+-- used here — it would snap mid-chain rows to the parent's top edge.)
 -- ============================================================
 NS.CB_AnchorAhead = function(widget, before)
     local gap = (before.marginRight or 0) + (widget.marginLeft or 0)
+    widget:ClearAllPoints()
     widget:SetPoint("TOPLEFT", before, "TOPRIGHT", gap, 0)
 end
 
