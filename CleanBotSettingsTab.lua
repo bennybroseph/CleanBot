@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotSettingsTab.lua  —  Settings tab content
+-- CleanBotSettingsTab.lua  —  Settings tab panel construction and content
 --
 -- Two nested sub-tabs inside the Settings panel:
 --   • Theme   — scale, transparency, accent colour
@@ -84,7 +84,7 @@ local function buildSampleContent(panel)
     local section = CreateFrame("Frame", nil, panel)
     section:SetPoint("TOPLEFT",     panel, "TOPLEFT",     NS.PADDING.panel.left,  -NS.PADDING.panel.top)
     section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, OVERLAY_ROW_H)
-    NS.CB_ApplyPanelSkin(section, 3)
+    NS.CB_ApplyFrameSkin(section, 4)
     sampleSection = section
 
     -- First widget: section padding + the widget's own marginTop are both applied
@@ -158,7 +158,7 @@ local function showSampleLayout()
         f:SetScript("OnDragStart", f.StartMoving)
         f:SetScript("OnDragStop",  f.StopMovingOrSizing)
         if NS.ElvUI_S then f:StripTextures() end
-        NS.CB_ApplyOuterFrameSkin(f)
+        NS.CB_ApplyFrameSkin(f, 0)
         NS.CB_ApplyTitleBar(f, "Sample Layout")
 
         local closeBtn = CreateFrame("Button", "CleanBotSampleLayoutClose", f, "UIPanelCloseButton")
@@ -166,11 +166,11 @@ local function showSampleLayout()
         closeBtn:SetScript("OnClick", function() f:Hide() end)
         if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
-        -- Panel — level 1, mirrors managePanel/partyPanel inside CleanBotFrame.
+        -- Panel — level 2, mirrors managePanel/partyPanel inside CleanBotFrame.
         local panel = CreateFrame("Frame", "CleanBotSamplePanel", f)
         panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      NS.PADDING.frame.left, -NS.TITLE_H)
         panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
-        NS.CB_ApplyPanelSkin(panel, 1)
+        NS.CB_ApplyFrameSkin(panel, 2)
         f._panel = panel
 
         -- "Show Overlays" checkbox lives on the panel outside the rebuilt section.
@@ -204,7 +204,12 @@ end
 -- Settings tab
 -- ============================================================
 
-NS.CleanBot_BuildSettingsContent = function()
+NS.CleanBot_BuildSettingsTab = function()
+    NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
+    NS.settingsPanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyFrameSkin(NS.settingsPanel, 2)
+    NS.settingsPanel:Hide()
+
     local panel    = NS.settingsPanel
     local SLIDER_W = 200
 
@@ -239,18 +244,18 @@ NS.CleanBot_BuildSettingsContent = function()
     local themePanel = CreateFrame("Frame", "CleanBotThemePanel", panel)
     themePanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     themePanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyPanelSkin(themePanel, 2)
+    NS.CB_ApplyFrameSkin(themePanel, 3)
 
     local layoutPanel = CreateFrame("Frame", "CleanBotLayoutPanel", panel)
     layoutPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     layoutPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyPanelSkin(layoutPanel, 2)
+    NS.CB_ApplyFrameSkin(layoutPanel, 3)
     layoutPanel:Hide()
 
     local otherPanel = CreateFrame("Frame", "CleanBotOtherPanel", panel)
     otherPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
     otherPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
-    NS.CB_ApplyPanelSkin(otherPanel, 2)
+    NS.CB_ApplyFrameSkin(otherPanel, 3)
     otherPanel:Hide()
 
     -- ── Sub-tab switching ──────────────────────────────────────

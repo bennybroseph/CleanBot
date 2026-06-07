@@ -52,7 +52,7 @@ NS.CB_GetWowheadPopup = function()
     popup:RegisterForDrag("LeftButton")
     popup:SetScript("OnDragStart", popup.StartMoving)
     popup:SetScript("OnDragStop",  popup.StopMovingOrSizing)
-    NS.CB_ApplyPanelSkin(popup)
+    NS.CB_ApplyFrameSkin(popup, 1)
     popup:Hide()
 
     local label = NS.CB_CreateLabel(popup, "Wowhead  (Ctrl+C to copy, then open in browser)")

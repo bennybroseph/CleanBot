@@ -1,8 +1,36 @@
 -- ============================================================
--- CleanBotParty.lua  —  character tab state, tab management,
---                        strategy section builders, RefreshTabs
+-- CleanBotParty.lua  —  party tab panel construction, character
+--                        tab state, tab management, strategy
+--                        section builders, and RefreshTabs.
 -- ============================================================
 local NS = CleanBotNS
+
+-- ============================================================
+-- Panel construction (called once at PLAYER_LOGIN via CleanBot_BuildFrames)
+-- ============================================================
+NS.CleanBot_BuildPartyTab = function()
+    NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
+    NS.partyPanel:SetAllPoints(NS.contentFrame)
+    NS.CB_ApplyFrameSkin(NS.partyPanel, 2)
+
+    NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
+    NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
+    NS.botTabBar:SetPoint("TOPRIGHT", NS.partyPanel, "TOPRIGHT", 0, 0)
+    NS.botTabBar:SetHeight(NS.BOT_BAR_H)
+
+    -- The XML-defined CleanBotFrameText is a child of CleanBotFrame and would
+    -- bleed through across tabs. Hide it and use a partyPanel-parented label instead.
+    CleanBotFrameText:SetText("")
+    CleanBotFrameText:Hide()
+
+    NS.partyEmptyLabel = NS.partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    NS.partyEmptyLabel:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
+    NS.partyEmptyLabel:SetText("")
+
+    NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
+    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT", 0,  0)
+end
 
 -- ============================================================
 -- Tab slot pool and selection state
@@ -72,7 +100,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     NS.CB_AnchorBelow(section, anchor)
     section:SetPoint("RIGHT", ctrl, "RIGHT", -NS.PADDING.panel.right, 0)
     section:SetHeight(#strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom))
-    NS.CB_ApplyPanelSkin(section, 3)
+    NS.CB_ApplyFrameSkin(section, 4)
 
     local controls = {}
     local yOffset  = NS.PADDING.section.top
@@ -575,7 +603,7 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local contentBg = CreateFrame("Frame", nil, container)
     contentBg:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
     contentBg:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
-    NS.CB_ApplyPanelSkin(contentBg, 2)
+    NS.CB_ApplyFrameSkin(contentBg, 3)
 
     local combatContent = CreateFrame("Frame", nil, container)
     combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)

@@ -110,6 +110,7 @@ end
 -- Per-element margins — each widget declares the space it needs above and below.
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
+    -- Widget types — space a widget reserves around itself within a flow.
     header   = { top = 10, bottom = 4, left = 0, right = 0 },
     label    = { top = 6,  bottom = 2, left = 0, right = 0 },
     button   = { top = 2,  bottom = 2, left = 0, right = 0 },
@@ -118,6 +119,10 @@ NS.MARGIN_DEFAULTS = {
     checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
     swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
     editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+    -- Frame types — extra breathing room a child frame adds on top of its
+    -- parent's padding when placed via CB_CreateInnerFrame.
+    panel    = { top = 0, bottom = 0, left = 0, right = 0 },
+    section  = { top = 0, bottom = 0, left = 0, right = 0 },
 }
 -- Canonical defaults for theme settings — read by the Defaults button.
 -- accentColor.a is set to the skin-appropriate value at PLAYER_LOGIN (after ElvUI detection):
@@ -149,10 +154,13 @@ NS.EQUIP_WEAPON_PAD  = 60
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
-NS.partyPanel    = nil
-NS.botTabBar     = nil
-NS.partyContent  = nil
-NS.managePanel     = nil
+NS.partyPanel      = nil
+NS.botTabBar       = nil
+NS.partyContent    = nil
+NS.partyEmptyLabel = nil
+NS.managePanel      = nil
+NS.manageScrollFrame = nil
+NS.manageScrollChild = nil
 NS.settingsPanel = nil
 
 -- ============================================================
@@ -188,7 +196,8 @@ end
 
 -- ============================================================
 -- Frame construction (called once at PLAYER_LOGIN)
--- NS.CleanBot_BuildManageContent / NS.CleanBot_BuildSettingsContent /
+-- NS.CleanBot_BuildPartyTab / NS.CleanBot_BuildManageTab /
+-- NS.CleanBot_BuildSettingsTab /
 -- NS.CleanBot_RefreshTabs are all defined in the files that load after this one.
 -- They are only ever called at event time (never at load time), so the forward
 -- references are fine.
@@ -224,50 +233,25 @@ function CleanBot_BuildFrames()
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
     NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      NS.PADDING.frame.left, -(NS.TITLE_H + NS.TOP_BAR_H))
     NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
-    NS.CB_ApplyPanelSkin(NS.contentFrame, 0)
+    NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────
-    NS.partyPanel = CreateFrame("Frame", "CleanBotPartyPanel", NS.contentFrame)
-    NS.partyPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.partyPanel, 1)
-
-    NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
-    NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
-    NS.botTabBar:SetPoint("TOPRIGHT", NS.partyPanel, "TOPRIGHT", 0, 0)
-    NS.botTabBar:SetHeight(NS.BOT_BAR_H)
-
-    -- Hide the XML-defined text (it's a child of CleanBotFrame and leaks across tabs).
-    -- We use a dedicated label parented to partyPanel instead.
-    CleanBotFrameText:SetText("")
-    CleanBotFrameText:Hide()
-
-    NS.partyEmptyLabel = NS.partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    NS.partyEmptyLabel:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
-    NS.partyEmptyLabel:SetText("")
-
-    NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
-    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT", 0, 0)
+    -- Defined in Party/CleanBotParty.lua (loads after this file).
+    NS.CleanBot_BuildPartyTab()
 
     -- ── Manage panel ───────────────────────────────────────────
-    NS.managePanel = CreateFrame("Frame", "CleanBotManagePanel", NS.contentFrame)
-    NS.managePanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.managePanel, 1)
-    NS.managePanel:Hide()
-    NS.CleanBot_BuildManageContent()
+    -- Defined in CleanBotManageTab.lua (loads after this file).
+    NS.CleanBot_BuildManageTab()
 
     -- ── Settings panel ─────────────────────────────────────────
-    NS.settingsPanel = CreateFrame("Frame", "CleanBotSettingsPanel", NS.contentFrame)
-    NS.settingsPanel:SetAllPoints(NS.contentFrame)
-    NS.CB_ApplyPanelSkin(NS.settingsPanel, 1)
-    NS.settingsPanel:Hide()
-    NS.CleanBot_BuildSettingsContent()
+    -- Defined in CleanBotSettingsTab.lua (loads after this file).
+    NS.CleanBot_BuildSettingsTab()
 
     if NS.ElvUI_S then
         CleanBotFrame:StripTextures()
         NS.ElvUI_S:HandleCloseButton(CleanBotFrameCloseButton)
     end
-    NS.CB_ApplyOuterFrameSkin(CleanBotFrame)
+    NS.CB_ApplyFrameSkin(CleanBotFrame, 0)
     -- Hide the XML-defined ARTWORK FontString — CB_ApplyTitleBar creates its own
     -- OVERLAY replacement so it renders above the ornament texture.
     CleanBotFrameTitle:Hide()
@@ -297,7 +281,9 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
-        if type(CleanBot_SavedVars.favoriteBots) ~= "table" then CleanBot_SavedVars.favoriteBots = {} end
+        if type(CleanBot_SavedVars.favoriteBots)        ~= "table" then CleanBot_SavedVars.favoriteBots        = {} end
+        if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
+        if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
 
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
@@ -347,7 +333,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         CleanBot_BuildFrames()
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent colour is baked in during CB_ApplyPanelSkin/InnerSkin calls inside
+        -- Accent colour is baked in during CB_ApplyFrameSkin calls inside
         -- CleanBot_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end

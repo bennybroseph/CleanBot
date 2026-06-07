@@ -335,7 +335,7 @@ NS.CB_GetInventoryFrame = function(key, botName)
     f:SetScript("OnDragStop",  f.StopMovingOrSizing)
     if NS.ElvUI_S then
         f:StripTextures()
-        NS.CB_ApplyOuterFrameSkin(f)
+        NS.CB_ApplyFrameSkin(f, 0)
     else
         NS.CB_ApplyContainerFrameSkin(f)
     end
