@@ -293,8 +293,9 @@ NS.CleanBot_BuildSettingsTab = function()
     local SLIDER_W = 200
 
     local SUB_TAB_H = NS.TOP_BAR_H
-    -- Forward declaration — syncPendingToUI is defined later but called only at click time.
+    -- Forward declarations — both are defined later but called only at interaction time.
     local syncPendingToUI
+    local syncApplyBtn
 
     -- ── Pending values ─────────────────────────────────────────
     local pendingScale        = NS.scale
@@ -426,10 +427,12 @@ NS.CleanBot_BuildSettingsTab = function()
         if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
             buildSampleContent(sampleLayoutFrame._panel)
         end
+        applyBtn:Disable()
         NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
     end)
     applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
         -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)
+    applyBtn:Disable()
 
     local BTN_ROW_H = (panel.paddingBottom or 0) + NS.MARGIN.button.bottom + defaultsBtn:GetHeight() + NS.MARGIN.button.top + (panel.paddingBottom or 0)
 
@@ -500,7 +503,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- ── Scale ──────────────────────────────────────────────────
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
-        50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v end)
+        50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v; syncApplyBtn() end)
     scaleSlider:SetWidth(SLIDER_W)
     scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT",
         (themeChild.paddingLeft or 0) + (scaleSlider.marginLeft or 0),
@@ -508,7 +511,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
-        0, 100, pendingTransparency, "0%", "100%", function(v) pendingTransparency = v end)
+        0, 100, pendingTransparency, "0%", "100%", function(v) pendingTransparency = v; syncApplyBtn() end)
     transSlider:SetWidth(SLIDER_W)
     NS.CB_AnchorBelow(transSlider, scaleSlider)
 
@@ -517,6 +520,7 @@ NS.CleanBot_BuildSettingsTab = function()
         NS.accentColor.r, NS.accentColor.g, NS.accentColor.b,
         function(r, g, b, a)
             pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA = r, g, b, a
+            syncApplyBtn()
         end,
         true, NS.accentColor.a)
     NS.CB_AnchorBelow(colorSwatch, transSlider)
@@ -591,13 +595,13 @@ NS.CleanBot_BuildSettingsTab = function()
         local P_MIN, P_MAX = 0, 40
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Top",
             "Top", P_MIN, P_MAX, NS.PADDING[key].top, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].top = v end)
+            function(v) pendingPadding[key].top = v; syncApplyBtn() end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Bot",
             "Bot", P_MIN, P_MAX, NS.PADDING[key].bottom, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].bottom = v end)
+            function(v) pendingPadding[key].bottom = v; syncApplyBtn() end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -609,13 +613,13 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Left",
             "Left", P_MIN, P_MAX, NS.PADDING[key].left, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].left = v end)
+            function(v) pendingPadding[key].left = v; syncApplyBtn() end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotPadding_" .. key .. "_Right",
             "Right", P_MIN, P_MAX, NS.PADDING[key].right, tostring(P_MIN), tostring(P_MAX),
-            function(v) pendingPadding[key].right = v end)
+            function(v) pendingPadding[key].right = v; syncApplyBtn() end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -657,13 +661,13 @@ NS.CleanBot_BuildSettingsTab = function()
         local M_RANGE = 20
         local topSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Top",
             "Top", -M_RANGE, M_RANGE, NS.MARGIN[key].top, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].top = v end)
+            function(v) pendingMargins[key].top = v; syncApplyBtn() end)
         topSlider:SetWidth(SLIDER_W)
         topSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local botSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Bot",
             "Bot", -M_RANGE, M_RANGE, NS.MARGIN[key].bottom, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].bottom = v end)
+            function(v) pendingMargins[key].bottom = v; syncApplyBtn() end)
         botSlider:SetWidth(SLIDER_W)
         botSlider:SetPoint("TOPLEFT", rowA, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -676,13 +680,13 @@ NS.CleanBot_BuildSettingsTab = function()
 
         local leftSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Left",
             "Left", -M_RANGE, M_RANGE, NS.MARGIN[key].left, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].left = v end)
+            function(v) pendingMargins[key].left = v; syncApplyBtn() end)
         leftSlider:SetWidth(SLIDER_W)
         leftSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP, 0)
 
         local rightSlider = NS.CB_CreateSlider(layoutChild, "CleanBotMargin_" .. key .. "_Right",
             "Right", -M_RANGE, M_RANGE, NS.MARGIN[key].right, "-" .. M_RANGE, tostring(M_RANGE),
-            function(v) pendingMargins[key].right = v end)
+            function(v) pendingMargins[key].right = v; syncApplyBtn() end)
         rightSlider:SetWidth(SLIDER_W)
         rightSlider:SetPoint("TOPLEFT", rowB, "TOPLEFT", COL_BASE + COL_TYPE_W + COL_GAP + SLIDER_W + COL_GAP, 0)
 
@@ -752,6 +756,35 @@ NS.CleanBot_BuildSettingsTab = function()
             refs.left:SetValue(pendingPadding[key].left)
             refs.right:SetValue(pendingPadding[key].right)
         end
+        syncApplyBtn()
+    end
+
+    syncApplyBtn = function()
+        local dirty = pendingScale ~= NS.scale
+            or pendingTransparency ~= NS.transparency
+            or pendingAccentR ~= NS.accentColor.r
+            or pendingAccentG ~= NS.accentColor.g
+            or pendingAccentB ~= NS.accentColor.b
+            or pendingAccentA ~= NS.accentColor.a
+        if not dirty then
+            for k, v in pairs(pendingMargins) do
+                local m = NS.MARGIN[k]
+                if m and (v.top ~= m.top or v.bottom ~= m.bottom or v.left ~= m.left or v.right ~= m.right) then
+                    dirty = true
+                    break
+                end
+            end
+        end
+        if not dirty then
+            for k, v in pairs(pendingPadding) do
+                local p = NS.PADDING[k]
+                if p and (v.top ~= p.top or v.bottom ~= p.bottom or v.left ~= p.left or v.right ~= p.right) then
+                    dirty = true
+                    break
+                end
+            end
+        end
+        if dirty then applyBtn:Enable() else applyBtn:Disable() end
     end
 
     selectSubTab(1)
