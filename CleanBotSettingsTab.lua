@@ -80,18 +80,18 @@ local function buildSampleContent(panel)
 
     -- Section sits inside the panel, inset by panel padding.
     -- Leaves room at the bottom for the persistent "Show Overlays" checkbox row.
-    local OVERLAY_ROW_H = NS.PADDING.panel.bottom + 20 + NS.PADDING.panel.bottom
+    local OVERLAY_ROW_H = (panel.paddingBottom or 0) + 20 + (panel.paddingBottom or 0)
     local section = NS.CB_CreatePanel(panel, nil, 4, "section")
-    section:SetPoint("TOPLEFT",     panel, "TOPLEFT",     NS.PADDING.panel.left,  -NS.PADDING.panel.top)
-    section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -NS.PADDING.panel.right, OVERLAY_ROW_H)
+    section:SetPoint("TOPLEFT",     panel, "TOPLEFT",      (panel.paddingLeft  or 0), -(panel.paddingTop   or 0))
+    section:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(panel.paddingRight or 0),   OVERLAY_ROW_H)
     sampleSection = section
 
     -- First widget: section padding + the widget's own marginTop are both applied
     -- explicitly so the header's top margin is visible when tuning in Settings.
     local header = NS.CB_CreateHeader(section, "Lorem Ipsum")
     header:SetPoint("TOPLEFT", section, "TOPLEFT",
-        NS.PADDING.section.left + (header.marginLeft or 0),
-        -(NS.PADDING.section.top + (header.marginTop or 0)))
+        (section.paddingLeft or 0) + (header.marginLeft or 0),
+        -((section.paddingTop or 0) + (header.marginTop or 0)))
     applyDebugOverlay(section, header)
 
     local lbl = NS.CB_CreateLabel(section, "Lorem Ipsum")
@@ -174,8 +174,8 @@ local function showSampleLayout()
         local overlayCB = NS.CB_CreateCheckBox(panel, "CleanBotSampleLayoutOverlayCB")
         overlayCB:SetChecked(overlayVisible)
         overlayCB:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        NS.PADDING.panel.left    + (overlayCB.marginLeft   or 0),
-        NS.PADDING.panel.bottom  + (overlayCB.marginBottom or 0))
+            (panel.paddingLeft   or 0) + (overlayCB.marginLeft   or 0),
+            (panel.paddingBottom or 0) + (overlayCB.marginBottom or 0))
         local overlayCBLbl = NS.CB_CreateLabel(panel, "Show Overlays")
         overlayCBLbl:SetPoint("LEFT", overlayCB, "RIGHT", 2, 0)
         overlayCB:SetScript("OnClick", function(self)
