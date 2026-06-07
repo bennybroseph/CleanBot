@@ -248,7 +248,6 @@ NS.CleanBot_BuildManageTab = function()
             if not target then return end
             SendChatMessage(".playerbots bot add " .. target, "SAY")
         end)
-    loginTargetBtn.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(loginTargetBtn, inviteTargetBtn)
 
     local logoutTargetBtn = NS.CB_CreateButton(targetSection.bg, "CleanBotManageLogoutTargetBtn",
@@ -257,13 +256,13 @@ NS.CleanBot_BuildManageTab = function()
             if not target then return end
             SendChatMessage(".playerbots bot remove " .. target, "SAY")
         end)
-    NS.CB_AnchorBelow(logoutTargetBtn, loginTargetBtn)
+    NS.CB_AnchorAhead(logoutTargetBtn, uninviteTargetBtn)
 
     local logoutAllBtn = NS.CB_CreateButton(targetSection.bg, "CleanBotManageLogoutAllBtn",
         "Logout All", 120, 24, function()
             SendChatMessage(".playerbots bot remove *", "SAY")
         end)
-    NS.CB_AnchorBelow(logoutAllBtn, logoutTargetBtn)
+    NS.CB_AnchorAhead(logoutAllBtn, uninviteAllBtn)
 
     targetSection:Finalize(uninviteAllBtn)  -- deepest col-1 widget; col-2 is same depth
 
@@ -296,12 +295,11 @@ NS.CleanBot_BuildManageTab = function()
 
     local reviveBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageReviveBtn",
         "Revive", 120, 24, function() CB_SendGroupCommand("revive") end)
-    reviveBtn.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(reviveBtn, summonBtn)
 
     local releaseBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageReleaseBtn",
         "Release", 120, 24, function() CB_SendGroupCommand("release") end)
-    NS.CB_AnchorBelow(releaseBtn, reviveBtn)
+    NS.CB_AnchorAhead(releaseBtn, maintenanceBtn)
 
     partyRaidSection:Finalize(eatDrinkBtn)  -- col-1 is deeper
 
