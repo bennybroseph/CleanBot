@@ -714,7 +714,6 @@ NS.CB_GetQuestFrame = function(key, botName)
     for i = 1, 12 do
         local slotName = "CleanBotRewardSlot_" .. key .. "_" .. i
         local slot = NS.CB_CreateQuestRewardItem(dsc, slotName)
-        NS.CB_ApplyQualityBackdrop(slot)
         slot:Hide()
         f.rewardSlots[i] = slot
     end

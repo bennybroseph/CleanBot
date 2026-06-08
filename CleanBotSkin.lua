@@ -749,10 +749,11 @@ end
 NS.CB_CreateQuestRewardItem = function(parent, name)
     local btn = CreateFrame("Button", name, parent, "LargeItemButtonTemplate")
 
+    local bName   = btn:GetName()
+    local iconTex = bName and _G[bName .. "IconTexture"]
+
     if NS.ElvUI_S then
-        local bName   = btn:GetName()
-        local iconTex = bName and _G[bName .. "IconTexture"]
-        local nameFS  = bName and _G[bName .. "Name"]
+        local nameFS = bName and _G[bName .. "Name"]
 
         btn:StripTextures()
         btn:SetTemplate("Default")
@@ -778,6 +779,21 @@ NS.CB_CreateQuestRewardItem = function(parent, name)
             nameFS:SetPoint("TOP",    btn,     "TOP",    0, -2)
             nameFS:SetPoint("BOTTOM", btn,     "BOTTOM", 0,  2)
         end
+    end
+
+    -- Vanilla only: quality border scoped to the icon, not the full button.
+    -- ElvUI uses SetBackdropBorderColor on the button itself via CB_SetQualityBorder.
+    if not NS.ElvUI_S and iconTex then
+        local qf = CreateFrame("Frame", nil, btn)
+        qf:SetAllPoints(iconTex)
+        qf:SetFrameLevel(btn:GetFrameLevel() + 2)
+        qf:SetBackdrop({
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets   = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        qf:SetBackdropBorderColor(0, 0, 0, 0)
+        btn.qualityFrame = qf
     end
 
     btn:SetScript("OnEnter", function(self)
