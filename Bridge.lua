@@ -1,17 +1,33 @@
 -- ============================================================
--- CleanBotBridge.lua  —  MBOT bridge / playerbot protocol layer.
+-- Bridge.lua  —  MBOT bridge / playerbot protocol layer.
 --
 -- Owns the handshake, debounced sync, no-bridge whisper discovery,
--- linked-account fetch, inventory fetch, quest fetch, and the event
+-- linked-account fetch, inventory fetch, quest fetch, the event
 -- handler that parses ROSTER~ / DETAIL~ / STATE~ / INV_* / QUESTS_*
--- addon messages plus the co?/nc? whisper replies.
+-- addon messages plus the co?/nc? whisper replies, and the item-link
+-- cleaning helper used before sending links over bot commands.
 -- ============================================================
 local NS = CleanBotNS
 
 -- URL-decode a percent-encoded string (e.g. quest names from the bridge).
 -- Converts %XX hex sequences to their ASCII characters.
+---@param s string  Percent-encoded string.
+---@return string   The decoded string.
 local function CB_UrlDecode(s)
     return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
+end
+
+-- Returns the clean API item link for a raw item link (which may carry colour
+-- codes and extra enchant/gem fields that confuse the server-side parser).
+-- Strips to the item ID and re-fetches a canonical link from the client cache via
+-- GetItemInfo, falling back to the raw link on a cache miss.
+-- Use this before sending any item link over a bot command (give/equip/etc.).
+---@param rawLink string  The raw item link (may carry extra fields).
+---@return string         The canonical client-cache link, or rawLink on a cache miss.
+NS.CB_CleanItemLink = function(rawLink)
+    local itemId = strmatch(rawLink, "item:(%d+)")
+    local _, apiLink = GetItemInfo(tonumber(itemId) or 0)
+    return apiLink or rawLink
 end
 
 -- ============================================================
@@ -142,6 +158,8 @@ local BRIDGE_RTI_ICONS = {
     ["SKULL"]    = true,
 }
 
+---@param command string  The bot command being routed.
+---@return string|nil      The bridge opcode ("COMBAT"/"POSITION"/"LOOT"/"RTI") or nil to whisper.
 local function CB_GetBridgeOpcode(command)
     -- COMBAT: static set
     if BRIDGE_COMBAT_CMDS[strupper(command)] then return "COMBAT" end
@@ -178,6 +196,8 @@ end
 -- to a whisper for everything else or when bridge is absent. Safe to use for
 -- all commands including queries — unlisted commands always whisper, so
 -- replies still arrive normally via CHAT_MSG_WHISPER.
+---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
+---@param command string  The command text to run.
 NS.CB_SendBotCommand = function(botName, command)
     if NS.bridgeState == "present" then
         local opcode = CB_GetBridgeOpcode(command)
@@ -207,7 +227,8 @@ NS.CB_RequestSync = function()
     end)
 end
 
-function CleanBot_RequestRosterThenRefresh()
+--- Convenience wrapper: kicks off a debounced roster/details/states sync.
+NS.CB_RequestRosterThenRefresh = function()
     NS.CB_RequestSync()
 end
 
@@ -241,6 +262,8 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
     end
 end)
 
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper/bridge target).
 NS.CB_FetchInventory = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
@@ -258,6 +281,8 @@ NS.CB_FetchInventory = function(key, botName)
     end
 end
 
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper/bridge target).
 NS.CB_RequestInventory = function(key, botName)
     NS.CB_FetchInventory(key, botName)
     NS.CB_ToggleInventory(key, botName)
@@ -267,6 +292,8 @@ end
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
 -- CHAT_MSG_ADDON block. Whisper fallback sends "quests" — structured parsing
 -- of the whisper reply is not yet implemented.
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper/bridge target).
 NS.CB_FetchQuests = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end

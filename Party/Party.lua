@@ -1,13 +1,14 @@
 -- ============================================================
--- CleanBotParty.lua  —  party tab panel construction, character
+-- Party.lua  —  party tab panel construction, character
 --                        tab state, tab management, strategy
 --                        section builders, and RefreshTabs.
 -- ============================================================
 local NS = CleanBotNS
 
 -- ============================================================
--- Panel construction (called once at PLAYER_LOGIN via CleanBot_BuildFrames)
+-- Panel construction (called once at PLAYER_LOGIN via NS.CB_BuildFrames)
 -- ============================================================
+--- Builds the Party tab: the model/strategy panels and the per-bot slot pool.
 NS.CleanBot_BuildPartyTab = function()
     NS.partyPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotPartyPanel", 2, "panel")
     NS.partyPanel:SetAllPoints(NS.contentFrame)
@@ -135,6 +136,7 @@ NS.botRegistries = {
 -- ============================================================
 -- Geometry helper — single source of truth for layout constants
 -- ============================================================
+---@return table  Layout geometry (slot sizes, gaps, column widths) from the live model size.
 local function CB_GetGeometry()
     local contentW = NS.partyContent and NS.partyContent:GetWidth()  or 0
     local contentH = NS.partyContent and NS.partyContent:GetHeight() or 0
@@ -156,6 +158,13 @@ end
 -- entry.nonCombat, or a classData section); nil leaves boxes unchecked.
 -- Returns (sectionFrame, checkboxes) where checkboxes is keyed by field name.
 -- ============================================================
+---@param ctrl        table   Container frame the section is built into.
+---@param anchor       table   Widget the section's first row anchors below.
+---@param strategies   table   Strategy definitions to render as toggles.
+---@param slot         table   The bound slot (resolves the live bot).
+---@param tag          string  Disambiguating tag for frame names.
+---@param onClickFn    fun()   Handler invoked when a strategy toggle is clicked.
+---@param sourceTable  table   State table the toggles read/write.
 local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable)
     local section = CreateFrame("Frame", nil, ctrl)
     NS.CB_AnchorBelow(section, anchor)
@@ -271,6 +280,11 @@ end
 -- Applies a mutually-exclusive strategy selection: whispers a single
 -- "cmd +sel,-other,-other..." toggle list and mirrors the choice into
 -- dataTable (entry.combat or a classData section), if supplied.
+---@param strategies    table   The mutually-exclusive strategy group.
+---@param selectedField string  Field of the chosen strategy (others are cleared).
+---@param cmd           string  Bot command prefix to send for the selection.
+---@param slot          table   The bound slot (resolves the live bot).
+---@param dataTable     table   State table updated to reflect the selection.
 local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, dataTable)
     local parts = {}
     for _, rs in ipairs(strategies) do
@@ -291,6 +305,15 @@ end
 -- prevBottom=nil anchors the header to parent's TOPLEFT; otherwise to prevBottom.
 -- Returns the Set Talents button, which becomes the next prevBottom.
 -- ============================================================
+---@param parent     table   Container frame the group is built into.
+---@param prevBottom table   Widget the group anchors below.
+---@param group      table   The talent/strategy group definition.
+---@param slot       table   The bound slot (resolves the live bot).
+---@param tag        string  Disambiguating tag for frame names.
+---@param gi         number  Group index within the column.
+---@param registry   table   Widget registry the created controls register into.
+---@param getSource  fun()   Returns the state table the controls read/write.
+---@return table             The bottommost widget of the built group.
 local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, registry, getSource)
     local strategies  = group.strategies
     local specWhisper = group.whisper
@@ -399,6 +422,15 @@ end
 -- getSource = function(entry) -> mutable data table to read/write
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
+---@param col       table   The column frame to build into.
+---@param groups    table   Array of group definitions for this column.
+---@param cmd       string  Bot command prefix for the column's toggles.
+---@param slot      table   The bound slot (resolves the live bot).
+---@param tag       string  Disambiguating tag for frame names.
+---@param startGi   number  Group index of the first group in this column.
+---@param registry  table   Widget registry the created controls register into.
+---@param getSource fun()   Returns the state table the controls read/write.
+---@return table            The bottommost widget of the built column.
 local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, registry, getSource)
     local entry      = CleanBot_PartyBots[slot.key]
     local prevBottom = nil
@@ -576,6 +608,10 @@ end
 -- ============================================================
 -- Class tab content builder
 -- ============================================================
+---@param classContent table   The class sub-tab content frame to build into.
+---@param class        string  Class token (e.g. "WARRIOR").
+---@param slot         table   The bound slot (resolves the live bot).
+---@param tag          string  Disambiguating tag for frame names.
 local function CB_BuildClassTabContent(classContent, class, slot, tag)
     local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
 
@@ -629,6 +665,13 @@ end
 
 -- Splits groups by `column` field and renders them into two side-by-side
 -- columns inside `parent`. Groups without a column field go left by default.
+---@param parent    table   Container frame split into two columns.
+---@param groups    table   Array of group definitions to distribute across columns.
+---@param cmd       string  Bot command prefix for the toggles.
+---@param slot      table   The bound slot (resolves the live bot).
+---@param tag       string  Disambiguating tag for frame names.
+---@param registry  table   Widget registry the created controls register into.
+---@param getSource fun()   Returns the state table the controls read/write.
 local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry, getSource)
     local leftGroups, rightGroups = {}, {}
     for _, grp in ipairs(groups) do
@@ -667,6 +710,10 @@ end
 -- bot of the same class. Returns a content handle holding the widget
 -- registries; the caller repoints the per-key registries to it on bind.
 -- ============================================================
+---@param container table   The bot content container to build into.
+---@param slot      table   The bound slot (resolves the live bot).
+---@param class     string  Class token (e.g. "WARRIOR").
+---@param tag       string  Disambiguating tag for frame names.
 local function CB_BuildBotContent(container, slot, class, tag)
     local entry = CleanBot_PartyBots[slot.key]
 
@@ -785,6 +832,8 @@ end
 -- ============================================================
 
 -- Build the container frames for a new pool slot (once per slot index).
+---@param index number  1-based pool index for naming the slot's frames.
+---@return table         The created (unbound) slot table.
 local function CB_CreateSlot(index)
     local contentW, contentH, modelH, eqColW, modelW = CB_GetGeometry()
     local slot = { index = index, contentByClass = {}, active = false }
@@ -827,6 +876,7 @@ local function CB_CreateSlot(index)
 end
 
 -- Returns a free slot from the pool, growing the pool if all are in use.
+---@return table  A free pool slot, creating a new one if none are available.
 local function CB_AcquireSlot()
     for _, slot in ipairs(NS.tabPool) do
         if not slot.active then return slot end
@@ -837,6 +887,8 @@ local function CB_AcquireSlot()
 end
 
 -- Builds (once) and returns the content handle for a class in this slot.
+---@param slot  table   The slot whose content should be built if missing.
+---@param class string  Class token used to build class-specific content.
 local function CB_EnsureContent(slot, class)
     local content = slot.contentByClass[class]
     if content then return content end
@@ -848,6 +900,7 @@ local function CB_EnsureContent(slot, class)
 end
 
 -- Repoints all per-key registries at the slot's active frames.
+---@param slot table  The slot whose per-key widget registries are repointed.
 local function CB_BindRegistries(slot)
     local k = slot.key
     local c = slot.activeContent
@@ -859,6 +912,7 @@ end
 
 -- Frees a slot: clears its key registries and hides its frames. The container
 -- frames and per-class content persist on the slot for the next bind.
+---@param slot table  The slot to unbind from its current bot and hide.
 local function CB_UnbindSlot(slot)
     if slot.key then
         for _, reg in ipairs(NS.botRegistries) do reg[slot.key] = nil end
@@ -876,6 +930,8 @@ end
 
 -- Binds a slot to a bot: rebinds the model, swaps in the class content,
 -- repoints registries, and syncs all widget state from the bot's data.
+---@param slot table  The pool slot to bind.
+---@param info table  The bot roster entry (name, class, unit, key) to bind to the slot.
 local function CB_BindSlot(slot, info)
     if slot.key and slot.key ~= info.key then
         for _, reg in ipairs(NS.botRegistries) do reg[slot.key] = nil end
@@ -914,6 +970,7 @@ end
 -- CleanBotFrame. No slot relayout is needed because each panel (model and
 -- strategy) tracks its own anchors independently.
 -- ============================================================
+--- Toggles the party strategy panel's expanded/collapsed state and resizes the frame.
 NS.CB_TogglePartyExpand = function()
     NS.partyExpanded = not NS.partyExpanded
     if CleanBot_SavedVars then
@@ -938,6 +995,7 @@ end
 -- RefreshTabs — assigns desired party bots to pooled slots,
 -- binding/rebinding/freeing only what changed.
 -- ============================================================
+--- Rebuilds the visible bot slots from the current roster, binding/unbinding pool slots.
 NS.CleanBot_RefreshTabs = function()
     -- ── 1. Compute desired tab list ────────────────────────────
     local desired    = {}
@@ -1044,6 +1102,7 @@ end
 -- from CleanBot_PartyBots[key] without touching layout.
 -- Call after any code that modifies a bot's combat/nonCombat data.
 -- ============================================================
+---@param key string  Bot name-key whose bound slot should refresh its displayed data.
 NS.CB_UpdateTabData = function(key)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end

@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotMinimap.lua  —  Minimap button
+-- Minimap.lua  —  Minimap button
 -- ============================================================
 local NS = CleanBotNS
 
@@ -23,6 +23,7 @@ border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 border:SetSize(53, 53)
 border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
 
+--- Repositions the minimap button along its fixed-radius orbit around the minimap.
 local function UpdatePosition()
     local rad = math.rad(angle)
     btn:SetPoint("CENTER", Minimap, "CENTER",

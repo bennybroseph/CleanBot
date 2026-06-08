@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotSettingsTab.lua  —  Settings tab panel construction and content
+-- SettingsTab.lua  —  Settings tab panel construction and content
 --
 -- Two nested sub-tabs inside the Settings panel:
 --   • Theme   — scale, transparency, accent colour
@@ -22,6 +22,8 @@ local overlayVisible = true
 -- margin/padding model entirely — using those helpers would be circular, since the gaps
 -- they produce are derived from the very margin values being visualised here. Raw SetPoint
 -- against specific reference frames is the only correct approach.
+---@param parent table  Frame the debug overlay is anchored to.
+---@param widget table  The widget being annotated with its debug overlay.
 local function applyDebugOverlay(parent, widget)
     local mTop    = widget.marginTop    or 0
     local mBottom = widget.marginBottom or 0
@@ -87,6 +89,7 @@ end
 -- Visualises the padding insets of a frame. Blue overlays mark each of the 4 padding strips.
 -- Same intentional raw-SetPoint bypass as applyDebugOverlay — these exist to show
 -- the padding space, not participate in it.
+---@param frame table  Frame to draw the padding-visualisation overlay on.
 local function applyPaddingOverlay(frame)
     local pTop    = frame.paddingTop    or 0
     local pBottom = frame.paddingBottom or 0
@@ -140,6 +143,7 @@ local sampleGenCount = 0
 
 -- Tears down the previous section and rebuilds inside 'panel'.
 -- The section demonstrates section padding; widgets inside it demonstrate margins.
+---@param panel table  The sample-layout panel to populate with demo widgets.
 local function buildSampleContent(panel)
     if sampleSection then sampleSection:Hide() end
     for _, f in ipairs(overlayFrames) do f:Hide() end
@@ -216,6 +220,7 @@ end
 -- Opens the singleton Sample Layout window, creating it on first call.
 local sampleLayoutFrame = nil
 
+--- Opens (creating once) the sample-layout preview window used to tune spacing.
 local function showSampleLayout()
     if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
         sampleLayoutFrame:Hide()
@@ -291,6 +296,7 @@ end
 -- Settings tab
 -- ============================================================
 
+--- Builds the Settings tab: the nested sub-tabs and all their option widgets.
 NS.CleanBot_BuildSettingsTab = function()
     NS.settingsPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotSettingsPanel", 2, "panel")
     NS.settingsPanel:SetAllPoints(NS.contentFrame)

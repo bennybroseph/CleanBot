@@ -1,10 +1,11 @@
 -- ============================================================
--- CleanBotManageTab.lua  —  Manage tab: panel construction,
+-- ManageTab.lua  —  Manage tab: panel construction,
 --                           scroll frame, and bot management UI.
 -- ============================================================
 local NS = CleanBotNS
 
 -- ── Shared popup helpers ──────────────────────────────────────────────────────
+---@param self table  The popup frame to position on screen.
 local function CB_PositionPopup(self)
     self:ClearAllPoints()
     self:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
@@ -19,6 +20,9 @@ end
 -- onAccept(dialog, data) is called when the user clicks Yes.
 -- Pass context to the dialog via StaticPopup_Show(key, nil, nil, data) and
 -- read it back as the second argument in onAccept.
+---@param key      string  Unique popup key (StaticPopupDialogs entry name).
+---@param text      string  Confirmation prompt text.
+---@param onAccept  fun()   Called when the user confirms.
 NS.CB_RegisterConfirmPopup = function(key, text, onAccept)
     StaticPopupDialogs[key] = {
         text         = text,
@@ -32,6 +36,9 @@ NS.CB_RegisterConfirmPopup = function(key, text, onAccept)
     }
 end
 
+---@param key      string             Unique popup key (StaticPopupDialogs entry name).
+---@param text      string             Prompt text shown above the edit box.
+---@param onAccept  fun(value:string)  Called with the entered text on confirm.
 local function CB_RegisterEditPopup(key, text, onAccept)
     StaticPopupDialogs[key] = {
         text         = text,
@@ -114,6 +121,7 @@ CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
         NS.CB_Print("Linking account '" .. accountName .. "'...")
     end)
 
+--- Builds the Manage tab panel: scroll frame, sections, and bot management controls.
 NS.CleanBot_BuildManageTab = function()
     -- ── Panel, scroll frame, and scroll child ─────────────────────────────────
     NS.managePanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotManagePanel", 2, "panel")

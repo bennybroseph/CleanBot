@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotQuest.lua  —  Per-bot quest log.
+-- Quest.lua  —  Per-bot quest log.
 -- ============================================================
 
 local NS = CleanBotNS
@@ -64,6 +64,8 @@ local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12|t"
 local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:12:12|t"
 local COPPER_ICON = "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12|t"
 
+---@param copper number  Amount of money in copper.
+---@return string         Money string with inline g/s/c coin-icon texture codes.
 local function CB_FormatMoney(copper)
     local g = math.floor(copper / 10000)
     local s = math.floor((copper % 10000) / 100)
@@ -76,8 +78,14 @@ local function CB_FormatMoney(copper)
     return table.concat(parts, "  ")
 end
 
--- Populates a pre-created QuestInfoItemTemplate button with item data.
+-- Populates a pre-created LargeItemButtonTemplate reward button with item data.
 -- Accesses children by name ($parentIconTexture, $parentName, $parentCount).
+---@param slot     table    The reward slot button (from CB_CreateQuestRewardItem).
+---@param tex      string   Item icon texture path.
+---@param itemName string   Item name to display.
+---@param count    number   Stack count (count > 1 shows the count text).
+---@param link     string   Item link for the hover tooltip.
+---@param quality  number   Item quality 0–6 (drives name/border colour).
 local function CB_PopulateRewardSlot(slot, tex, itemName, count, link, quality)
     local bName   = slot:GetName()
     local iconTex = bName and _G[bName .. "IconTexture"]
@@ -104,6 +112,15 @@ end
 -- Lays out items from `items` (array of {tex,name,count,link}) into a 2-column grid.
 -- Each slot is sized to itemSlotW. Rows of 2; odd remainders get a lone slot on the
 -- last row. Returns the updated prevFS (first slot of the last row) and slotIdx.
+---@param items       table   Array of { tex, name, count, link, quality } reward items.
+---@param count       number  Number of items to lay out.
+---@param rewardSlots table   Pre-created reward slot pool to populate.
+---@param slotIdx     number  Next free index into rewardSlots.
+---@param itemSlotW   number  Width to size each slot to.
+---@param prevFS      table   Widget the first row anchors below.
+---@param detailFrames table  Frame list the shown slots are appended to.
+---@return table              prevFS — first slot of the last row.
+---@return number             slotIdx — next free slot index.
 local function CB_LayoutRewardGrid(items, count, rewardSlots, slotIdx, itemSlotW, prevFS, detailFrames)
     local prevSlot = nil
     for i = 1, count do
@@ -158,6 +175,14 @@ end
 -- Creates a header button (expand/collapse) and a row per quest when expanded.
 -- Appends all created frames to framePool so CB_RenderQuests can hide them
 -- on the next render pass. Returns the new yOffset after all rows.
+---@param sc        table   Scroll child the group is rendered into.
+---@param framePool table   Frame pool the created header/rows are appended to.
+---@param key       string  Bot name-key (for the collapse-state key).
+---@param statusKey string  Status group key ("I"/"C"/"F").
+---@param info      table   Status display metadata (label, colour).
+---@param quests    table   Array of quests in this status group.
+---@param yOffset   number  Current vertical offset within the scroll child.
+---@return number           The new yOffset after the group's rows.
 local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, yOffset)
     local collapseKey = key .. "~" .. statusKey
     local isCollapsed = questGroupCollapsed[collapseKey]
@@ -280,6 +305,8 @@ end
 -- Looks the quest up in the player's own log for description and objective
 -- data. If the quest isn't in the player's log (bot-only quest), renders
 -- the name and a "details unavailable" note instead.
+---@param key     string  Bot name-key whose quest detail pane is shown.
+---@param questID number  Quest ID to render the detail for.
 NS.CB_RenderQuestDetail = function(key, questID)
     local f = NS.botQuestFrames and NS.botQuestFrames[key]
     if not f then return end
@@ -536,10 +563,11 @@ NS.CB_RenderQuestDetail = function(key, questID)
     end)
 end
 
--- ── Render the quest list for a bot (called by CleanBotBridge on QUESTS_END) ─
+-- ── Render the quest list for a bot (called by Bridge.lua on QUESTS_END) ─
 -- Clears the previous render pass, groups entry.quests by status, and stamps
 -- one collapsible group per non-empty status into the left scroll pane.
 -- entry.quests = { { id, name, status } ... }  (status "I"/"C"/"F")
+---@param key string  Bot name-key whose quest list should be (re)rendered.
 NS.CB_RenderQuests = function(key)
     local f = NS.botQuestFrames and NS.botQuestFrames[key]
     if not f then return end
@@ -595,6 +623,7 @@ end
 -- ── Apply QuestLogFrame dual-pane background (Blizz path) ────────────────
 -- Replicates QuestLogFrame's texture layout exactly: two DualPane textures
 -- in the BORDER layer tile perfectly across the 682px frame width.
+---@param f table  The quest frame to skin (mirrors QuestLogFrame chrome).
 local function CB_ApplyQuestFrameSkin(f)
     local left = f:CreateTexture(nil, "BORDER")
     left:SetTexture("Interface\\QuestFrame\\UI-QuestLogDualPane-Left")
@@ -617,6 +646,14 @@ end
 -- ── Build a zero-padding scroll container at explicit pixel bounds ────────
 -- Used on the Blizz path where the two panes are manually positioned over
 -- the parchment areas rather than derived from a panel's padding fields.
+---@param parent table   Parent frame the scroll container is inset within.
+---@param name   string  Global name; the scroll bar derives from it.
+---@param left   number  Left inset from the parent.
+---@param top    number  Top inset from the parent.
+---@param right  number  Right inset from the parent.
+---@param bottom number  Bottom inset from the parent.
+---@return table          scrollFrame  The created ScrollFrame.
+---@return table          scrollChild  The scroll child Frame.
 local function CB_MakeScrollContainer(parent, name, left, top, right, bottom)
     local c = CreateFrame("Frame", name, parent)
     c:SetPoint("TOPLEFT",     parent, "TOPLEFT",      left,  -top)
@@ -627,6 +664,9 @@ local function CB_MakeScrollContainer(parent, name, left, top, right, bottom)
 end
 
 -- ── Get or create quest frame for a bot ──────────────────────────────────
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (used in the title bar).
+---@return table           The bot's quest frame, created lazily on first call.
 NS.CB_GetQuestFrame = function(key, botName)
     if NS.botQuestFrames[key] then return NS.botQuestFrames[key] end
 
@@ -779,6 +819,8 @@ NS.CB_GetQuestFrame = function(key, botName)
 end
 
 -- ── Show / fetch quests ──────────────────────────────────────────────────
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
 NS.CB_ShowQuests = function(key, botName)
     local f = NS.CB_GetQuestFrame(key, botName)
     f:ClearAllPoints()
@@ -788,6 +830,8 @@ NS.CB_ShowQuests = function(key, botName)
 end
 
 -- ── Toggle quests open/closed ────────────────────────────────────────────
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
 NS.CB_ToggleQuests = function(key, botName)
     local f = NS.CB_GetQuestFrame(key, botName)
     if f:IsShown() then
@@ -798,6 +842,10 @@ NS.CB_ToggleQuests = function(key, botName)
 end
 
 -- ── Quest button for the model viewer ───────────────────────────────────
+---@param slot     table   The pool slot the button belongs to (resolves the live bot).
+---@param model    table   The model frame the button anchors against.
+---@param slotSize number  Equip-slot size used for relative positioning.
+---@param gapX     number  Horizontal gap from the adjacent equip slot.
 NS.CB_CreateQuestButton = function(slot, model, slotSize, gapX)
     local btnName = "CleanBotQuestBtn_" .. slot.index
     local btn = CreateFrame("Button", btnName, model)

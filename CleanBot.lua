@@ -3,9 +3,9 @@
 --                  constants, frame shell, top-tab management,
 --                  and login init.
 --
--- ElvUI/skinning lives in CleanBotSkin.lua, the bridge/protocol
--- layer in CleanBotBridge.lua, and the debug popup in
--- CleanBotDebug.lua.
+-- ElvUI/skinning lives in the Skinning\ folder, the bridge/protocol
+-- layer in Bridge.lua, and the debug popup in
+-- Debug.lua.
 -- ============================================================
 
 CleanBotNS = {}
@@ -16,6 +16,7 @@ local NS = CleanBotNS
 -- ============================================================
 
 -- Chat output with the standard CleanBot tag.
+---@param msg string  Message to print to the default chat frame.
 NS.CB_Print = function(msg)
     print("|cffffcc00CleanBot|r: " .. msg)
 end
@@ -43,6 +44,9 @@ timerFrame:SetScript("OnUpdate", function(self, dt)
     end
 end)
 
+--- Runs `fn` once after `delay` seconds via a shared one-shot OnUpdate timer.
+---@param delay number  Seconds to wait before firing.
+---@param fn    fun()   Callback to run when the delay elapses.
 NS.CB_After = function(delay, fn)
     timers[{ elapsed = 0, delay = delay, fn = fn }] = true
 end
@@ -51,6 +55,9 @@ end
 -- time (model rotation or an inventory item drag), so a single reusable frame
 -- absorbs mouse events for the duration. The caller supplies the OnUpdate and
 -- an onStop(button) handler; CB_EndCapture tears them down and hides the frame.
+---@param onUpdate fun()              Called every frame while the capture is active.
+---@param onStop   fun(button:string) Called on mouse-up with the button name.
+---@return table                      The reusable capture frame.
 NS.CB_BeginCapture = function(onUpdate, onStop)
     local cap = NS.dragCapture
     if not cap then
@@ -67,6 +74,7 @@ NS.CB_BeginCapture = function(onUpdate, onStop)
     return cap
 end
 
+--- Tears down the shared mouse-capture frame started by CB_BeginCapture.
 NS.CB_EndCapture = function()
     local cap = NS.dragCapture
     if cap then
@@ -152,7 +160,7 @@ end
 NS.EQUIP_WEAPON_PAD  = 60
 
 -- ============================================================
--- Persistent sub-frame references (assigned in CleanBot_BuildFrames)
+-- Persistent sub-frame references (assigned in NS.CB_BuildFrames)
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
@@ -179,6 +187,7 @@ NS.topTabs           = {}
 -- Resizes CleanBotFrame to `width`, re-anchoring from TOPLEFT first so the
 -- frame grows/shrinks from its right edge rather than from its center.
 -- Falls back to SetWidth-only if GetLeft/GetTop return nil (frame never shown).
+---@param width number  New frame width in pixels.
 NS.CB_ResizeFrame = function(width)
     local left = CleanBotFrame:GetLeft()
     local top  = CleanBotFrame:GetTop()
@@ -189,6 +198,8 @@ NS.CB_ResizeFrame = function(width)
     CleanBotFrame:SetWidth(width)
 end
 
+--- Selects the top-level tab at `index`, showing its panel and deactivating the rest.
+---@param index number  1-based index of the tab to activate.
 NS.CleanBot_SelectTopTab = function(index)
     if NS.activeTopTabIndex == index then return end
     NS.activeTopTabIndex = index
@@ -229,7 +240,8 @@ end
 -- They are only ever called at event time (never at load time), so the forward
 -- references are fine.
 -- ============================================================
-function CleanBot_BuildFrames()
+--- Builds the main CleanBot window and all its tab panels. Called once at PLAYER_LOGIN.
+NS.CB_BuildFrames = function()
     -- Static frame size — shrunk to collapsed width after BuildFrames if needed
     CleanBotFrame:SetWidth(NS.EXPANDED_WIDTH)
     CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
@@ -272,15 +284,15 @@ function CleanBot_BuildFrames()
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────
-    -- Defined in Party/CleanBotParty.lua (loads after this file).
+    -- Defined in Party/Party.lua (loads after this file).
     NS.CleanBot_BuildPartyTab()
 
     -- ── Manage panel ───────────────────────────────────────────
-    -- Defined in CleanBotManageTab.lua (loads after this file).
+    -- Defined in ManageTab.lua (loads after this file).
     NS.CleanBot_BuildManageTab()
 
     -- ── Settings panel ─────────────────────────────────────────
-    -- Defined in CleanBotSettingsTab.lua (loads after this file).
+    -- Defined in SettingsTab.lua (loads after this file).
     NS.CleanBot_BuildSettingsTab()
 
     if NS.ElvUI_S then
@@ -380,7 +392,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
 
         NS.CB_RegisterRootFrame(CleanBotFrame)
-        CleanBot_BuildFrames()
+        NS.CB_BuildFrames()
         -- SelectTopTab(1) inside BuildFrames already sized the frame to COLLAPSED_WIDTH.
         -- Apply saved expand state visibility: hide the strategy panel unless expanded.
         if NS.partyStratPanel and not NS.partyExpanded then
@@ -392,7 +404,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
         -- Accent colour is baked in during CB_ApplyFrameSkin calls inside
-        -- CleanBot_BuildFrames, which read NS.accentColor at build time.
+        -- NS.CB_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

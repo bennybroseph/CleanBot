@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotInventory.lua  —  Per-bot inventory bag frame.
+-- Inventory.lua  —  Per-bot inventory bag frame.
 -- ============================================================
 local NS = CleanBotNS
 
@@ -26,6 +26,10 @@ local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:0|t"
 local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:0|t"
 local COPPER_ICON = "|TInterface\\MoneyFrame\\UI-CopperIcon:0|t"
 
+---@param gold   number  Gold amount.
+---@param silver number  Silver amount (0–99).
+---@param copper number  Copper amount (0–99).
+---@return string         Money string with inline coin-icon texture codes.
 local function FormatMoney(gold, silver, copper)
     if gold == 0 and silver == 0 and copper == 0 then return "0" .. COPPER_ICON end
     local parts = {}
@@ -40,12 +44,16 @@ local function FormatMoney(gold, silver, copper)
 end
 
 -- ── URL decode (bridge sends UrlEncodeField output) ───────────────────────
+---@param s string  Percent-encoded string.
+---@return string   The decoded string.
 local function UrlDecode(s)
     return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
 end
 
 -- ── Parse a single INV_ITEM / whisper line into {link, count} ────────────
 -- The server appends " (soulbound)" and/or " xN" after the closing |r.
+---@param raw string  One raw item line from the bot's "items" whisper reply.
+---@return table|nil   Parsed item fields, or nil if the line could not be parsed.
 local function ParseItemLine(raw)
     local decoded = UrlDecode(raw)
     local link    = decoded:match("(|c%x+|Hitem:[^|]+|h%[.-%]|h|r)")
@@ -59,6 +67,9 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 -- Whispers the equip command and, after a short delay so the server can
 -- apply the change, re-queries inventory. Shared by the right-click menu
 -- and drag-and-drop paths.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (command target).
+---@param link    string  Item link to equip.
 local function CB_EquipItem(key, botName, link)
     NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
     NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
@@ -67,6 +78,8 @@ end
 -- ── Inventory cell right-click context menu ──────────────────────────────
 local invMenu = CreateFrame("Frame", "CleanBotInvMenu", UIParent, "UIDropDownMenuTemplate")
 
+---@param cell table   The inventory cell button the context menu opens from.
+---@param key  string  Bot name-key the cell belongs to.
 local function CB_ShowInvMenu(cell, key)
     if not cell.itemLink then return end
     local _, _, _, _, _, itemType, _, _, equipLoc = GetItemInfo(cell.itemLink)
@@ -147,6 +160,9 @@ local EQUIP_LOC_SLOTS = {
     INVTYPE_RELIC          = { [18] = true },
 }
 
+---@param link   string  Item link to test.
+---@param slotId number  Equipment slot ID to test against.
+---@return boolean        Whether the item can be equipped in that slot.
 local function CB_ItemFitsSlot(link, slotId)
     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(link)
     if not equipLoc or equipLoc == "" then return false end
@@ -154,12 +170,17 @@ local function CB_ItemFitsSlot(link, slotId)
     return valid ~= nil and valid[slotId] == true
 end
 
+---@param btn table   The equip slot button to tint.
+---@param r   number  Red 0–1.
+---@param g   number  Green 0–1.
+---@param b   number  Blue 0–1.
 local function CB_SetSlotTint(btn, r, g, b)
     local bgTex = btn.bgTex or btn.bg  -- bgTex = equip slot (bg is a Frame); bg = inv cell (bg is a Texture)
     if bgTex then bgTex:SetVertexColor(r, g, b) end
     if btn.icon and btn.icon:IsShown() then btn.icon:SetVertexColor(r, g, b) end
 end
 
+---@param btn table  The equip slot button whose drag-tint is reset.
 local function CB_ResetSlotTint(btn)
     local bgTex = btn.bgTex or btn.bg
     if bgTex then bgTex:SetVertexColor(1, 1, 1) end
@@ -167,6 +188,7 @@ local function CB_ResetSlotTint(btn)
 end
 
 -- ── Drag stop (shared by cell OnMouseUp and capture frame OnMouseUp) ─────
+--- Ends an inventory item drag, clearing slot tints and releasing the capture frame.
 local function CB_StopDrag()
     if not NS.dragging then return end
 if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
@@ -257,6 +279,7 @@ NS.CB_StopDrag = CB_StopDrag
 -- Runs while the shared capture frame (NS.CB_BeginCapture) is active during
 -- an item drag: highlights whichever equip slot or empty inventory cell the
 -- cursor is over and records it as the drop target.
+--- OnUpdate handler during an item drag: hit-tests slots/trade overlays and tints them.
 local function CB_DragOnUpdate()
     if not NS.dragging then return end
     local scale = UIParent:GetEffectiveScale()
@@ -355,6 +378,7 @@ end
 
 -- Begins an item drag: shows the shared capture frame wired to track the
 -- drop target and finish on left-button release.
+--- Begins an inventory item drag using the shared mouse-capture frame.
 local function CB_BeginItemDrag()
     NS.CB_BeginCapture(CB_DragOnUpdate, function(btn)
         if btn == "LeftButton" then CB_StopDrag() end
@@ -362,6 +386,9 @@ local function CB_BeginItemDrag()
 end
 
 -- ── Build or fetch the inventory frame for one bot ───────────────────────
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (used in the title bar).
+---@return table           The bot's inventory frame, created lazily on first call.
 NS.CB_GetInventoryFrame = function(key, botName)
     if NS.botInventoryFrames[key] then return NS.botInventoryFrames[key] end
 
@@ -446,6 +473,7 @@ local SLOT_ORDER = {
     INVTYPE_RELIC           = 18,
 }
 
+---@param items table  Array of parsed item entries; sorted in place by quality/slot.
 local function CB_SortInventory(items)
     local enriched = {}
     for i, item in ipairs(items) do
@@ -491,6 +519,11 @@ end
 -- Diffs current visual cell state against fresh raw items by item ID.
 -- Blanks cells whose item was removed, fills new items into empty cells,
 -- updates stack counts for items that remain.
+---@param f        table   The inventory frame to populate.
+---@param rawItems table   Array of raw item lines from the bot's reply.
+---@param bagTotal number  Total bag slots.
+---@param bagUsed  number  Used bag slots.
+---@param entry    table   The bot roster entry (for money/header data).
 local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
     -- Build visual map: itemId → { cell, ... }
     -- Use cell.itemLink directly — IsShown() is unreliable when the parent frame is hidden.
@@ -585,6 +618,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
 end
 
 -- ── Render / re-render the grid from entry.inventory ─────────────────────
+---@param key string  Bot name-key whose inventory frame should be (re)rendered.
 NS.CB_RenderInventory = function(key)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
@@ -753,6 +787,9 @@ end
 -- ── Open the inventory frame (always shows, never toggles) ───────────────
 -- anchor is an optional frame to position relative to. When provided the
 -- inventory is placed to its right; otherwise it defaults to CleanBotFrame's left.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
+---@param anchor  table?  Optional frame to anchor the window beside (e.g. TradeFrame).
 NS.CB_ShowInventory = function(key, botName, anchor)
     local f = NS.CB_GetInventoryFrame(key, botName)
     f:ClearAllPoints()
@@ -767,6 +804,9 @@ end
 
 -- ── Toggle the inventory frame open/closed ────────────────────────────────
 -- anchor is forwarded to CB_ShowInventory when opening.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
+---@param anchor  table?  Optional frame to anchor the window beside.
 NS.CB_ToggleInventory = function(key, botName, anchor)
     local f = NS.CB_GetInventoryFrame(key, botName)
     if f:IsShown() then
