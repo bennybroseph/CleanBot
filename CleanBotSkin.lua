@@ -112,16 +112,19 @@ NS.CB_RefreshTransparency = function(t)
     end
 end
 
--- Stamps a padding role's values directly onto a frame so any helper that creates
--- a child (e.g. CB_CreateScrollFrame) can read parent.paddingLeft/Right/Top/Bottom
--- without reaching into NS.PADDING by role name.
--- Call this once after creating any bordered frame that will act as a parent.
-NS.CB_StampPadding = function(frame, paddingRole)
+-- Panel factory — creates a bordered child frame, applies CB_ApplyFrameSkin for
+-- nestLevel, and stamps paddingTop/Bottom/Left/Right from paddingRole so child
+-- helpers such as CB_CreateScrollFrame can read parent.paddingXxx directly.
+-- Returns the new frame. Caller is responsible for SetPoint / SetAllPoints.
+NS.CB_CreatePanel = function(parent, name, nestLevel, paddingRole)
+    local frame = CreateFrame("Frame", name, parent)
+    NS.CB_ApplyFrameSkin(frame, nestLevel or 1)
     local pad = NS.PADDING[paddingRole] or NS.PADDING.panel
     frame.paddingTop    = pad.top
     frame.paddingBottom = pad.bottom
     frame.paddingLeft   = pad.left
     frame.paddingRight  = pad.right
+    return frame
 end
 
 -- Re-applies scale to every registered root frame.
@@ -366,7 +369,7 @@ NS.CB_ApplyFrameSkin = function(frame, nestLevel)
         local ac         = NS.accentColor or { r = 0.3, g = 0.3, b = 0.3, a = 1 }
         local alpha      = (NS.transparency or 100) / 100
         local depth      = level - 1
-        local brightness = NS.ElvUI_S and math.max(0, 0.10 - depth * 0.05) or (depth * 0.05)
+        local brightness = NS.ElvUI_S and math.max(0, 0.10 - depth * 0.02) or (depth * 0.05)
         if NS.ElvUI_S then
             frame:StripTextures()
             frame:SetTemplate("Default")
@@ -396,25 +399,33 @@ local function CB_ApplyInnerSkin(frame)
 end
 
 -- ============================================================
--- Layout helper — anchors widget directly below above using their
--- combined margins as the gap (above.marginBottom + widget.marginTop).
--- Horizontal position is inherited from the chain (BOTTOMLEFT → TOPLEFT).
--- Horizontal margins do not apply here — they apply at wall-anchor time.
+-- Layout helper — anchors widget directly below above (vertical flow).
+-- Gap (Y axis) = above.marginBottom + widget.marginTop.
+-- X position is CSS-style: parent.paddingLeft + widget.marginLeft,
+-- applied relative to the parent frame's left edge so each widget
+-- in the chain positions itself independently (not inherited from above).
 -- ============================================================
 NS.CB_AnchorBelow = function(widget, above)
-    local gap = (above.marginBottom or 0) + (widget.marginTop or 0)
-    widget:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -gap)
+    local gap    = (above.marginBottom or 0) + (widget.marginTop or 0)
+    local parent = widget:GetParent()
+    local xLeft  = (parent and parent.paddingLeft or 0) + (widget.marginLeft or 0)
+    widget:ClearAllPoints()
+    widget:SetPoint("TOP",  above,  "BOTTOM", 0,    -gap)
+    widget:SetPoint("LEFT", parent, "LEFT",   xLeft,  0)
 end
 
 -- ============================================================
 -- Layout helper — anchors widget directly ahead (to the right) of
--- before using their combined margins as the gap
--- (before.marginRight + widget.marginLeft).
--- Vertical position is inherited from the chain (TOPRIGHT → TOPLEFT).
--- Vertical margins do not apply here — they apply at wall-anchor time.
+-- before (horizontal flow).
+-- Gap (X axis) = before.marginRight + widget.marginLeft.
+-- Y position is inherited from before's top edge so the widget stays
+-- on the same implicit row regardless of where that row sits in a
+-- vertical chain. (CSS-style parent-relative Y is intentionally not
+-- used here — it would snap mid-chain rows to the parent's top edge.)
 -- ============================================================
 NS.CB_AnchorAhead = function(widget, before)
     local gap = (before.marginRight or 0) + (widget.marginLeft or 0)
+    widget:ClearAllPoints()
     widget:SetPoint("TOPLEFT", before, "TOPRIGHT", gap, 0)
 end
 
@@ -592,20 +603,23 @@ end
 
 -- Creates a collapsible section for the Manage tab.
 --
--- All widgets — the toggle button, the title label, and all content widgets —
--- are direct children of parent. No container frames are used, which guarantees
--- visibility in WoW 3.3.5a regardless of frame-level or clipping behaviour.
+-- The toggle button and title label are children of parent (scroll child, MEDIUM
+-- strata). The visual bg frame is also a child of parent but forced to BACKGROUND
+-- strata so it renders behind everything else.
+--
+-- IMPORTANT: In WoW 3.3.5a child frames INHERIT their parent's strata. section.bg
+-- defaults to MEDIUM (no explicit SetFrameStrata call), so content widgets parented
+-- to it are also MEDIUM and remain mouse-interactive. Do NOT call SetFrameStrata on bg.
 --
 -- section.frame starts as the toggle button. Call section:Finalize(lastWidget)
 -- once all content widgets are added; this sets section.frame to lastWidget so
 -- the next section can chain its CB_AnchorBelow off the correct anchor point.
 --
--- Content widgets must be registered via:
---   section.contentWidgets[#section.contentWidgets + 1] = widget
--- They are hidden/shown as a group when the section is toggled.
+-- Content widgets are children of bg and hide/show automatically with it — no
+-- manual contentWidgets registration needed.
 --
 -- Collapsed state is persisted in CleanBot_SavedVars.collapsedSections[key].
--- parent must have paddingRight stamped (via CB_StampPadding) so Apply() can compute
+-- parent must have paddingRight stamped (via CB_CreatePanel) so Apply() can compute
 -- the section background's right edge without guessing the parent's role.
 NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local section = {}
@@ -645,13 +659,12 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
 
     -- Load saved collapse state.
     local saved = CleanBot_SavedVars and CleanBot_SavedVars.collapsedSections
-    section.collapsed      = saved and saved[key] == true or false
-    section.key            = key
-    section.toggleBtn      = toggleBtn   -- always the section header; never hidden
-    section.lastWidget     = nil         -- set by Finalize; deepest content widget
-    section.frame          = toggleBtn   -- updated to lastWidget in Finalize
-    section.contentWidgets = {}
-    section.onToggle       = nil         -- optional callback fired after each toggle
+    section.collapsed  = saved and saved[key] == true or false
+    section.key        = key
+    section.toggleBtn  = toggleBtn   -- always the section header; never hidden
+    section.lastWidget = nil         -- set by Finalize; deepest content widget
+    section.frame      = toggleBtn   -- updated to lastWidget in Finalize
+    section.onToggle   = nil         -- optional callback fired after each toggle
 
     -- Returns the bottommost currently-visible widget for this section.
     -- Collapsed → header toggle button only; expanded → last content widget.
@@ -660,13 +673,21 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         return self.collapsed and self.toggleBtn or (self.lastWidget or self.toggleBtn)
     end
 
+    -- Shared width calculation used by both Apply and the OnSizeChanged hook.
+    local function calcBgWidth()
+        local mar        = NS.MARGIN.section
+        local rightInset = (parent.paddingRight or 0) + mar.right
+        local pw         = parent:GetWidth()
+        return math.max(pw > 0 and (pw - (parent.paddingLeft or 0) - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1)
+    end
+
     section.Apply = function(self)
+        -- Content widgets are children of bg and hide/show automatically with it.
         if self.collapsed then
             self.bg:Hide()
         else
-            local mar        = NS.MARGIN.section
-            local topGap     = (toggleBtn.marginBottom or 0) + mar.top
-            local rightInset = (parent.paddingRight or 0) + mar.right
+            local mar    = NS.MARGIN.section
+            local topGap = (toggleBtn.marginBottom or 0) + mar.top
             -- Anchor TOPLEFT to toggleBtn BOTTOMLEFT so bg tracks the toggle when
             -- reflow moves it. toggleBtn is already at panel.left from the panel wall,
             -- so only the section margin delta is needed as an X offset — not leftX
@@ -674,16 +695,21 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
             self.bg:ClearAllPoints()
             self.bg:SetPoint("TOPLEFT", toggleBtn, "BOTTOMLEFT",
                 mar.left - (toggleBtn.marginLeft or 0), -topGap)
-            -- Width spans from toggleBtn's left edge to the panel right inset.
-            -- toggleBtn sits at panel.left already, so subtract only its own left
-            -- margin (0) and the right inset to get the remaining available width.
-            local pw = parent:GetWidth()
-            self.bg:SetWidth(math.max(pw > 0 and (pw - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1))
+            self.bg:SetWidth(calcBgWidth())
             self.bg:SetHeight(2000)  -- corrected by UpdateBackground after first render
             self.bg:Show()
         end
         toggleBtn:SetText(self.collapsed and "+" or "-")
     end
+
+    -- Re-sync bg width whenever the parent (scroll child) changes size — e.g. when
+    -- the frame collapses or expands on tab switch. Only updates width; height is
+    -- managed separately by UpdateBackground to avoid resetting the 2000px placeholder.
+    parent:HookScript("OnSizeChanged", function()
+        if not section.collapsed and section.bg:IsShown() then
+            section.bg:SetWidth(calcBgWidth())
+        end
+    end)
 
     section.Toggle = function(self)
         self.collapsed = not self.collapsed
@@ -717,14 +743,14 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     toggleBtn.marginLeft   = NS.MARGIN.label.left
     toggleBtn.marginRight  = NS.MARGIN.label.right
 
-    -- Visual background frame. BACKGROUND strata keeps it behind buttons and
-    -- labels (which default to MEDIUM/HIGH) without touching their FrameLevel.
-    -- Hidden until UpdateBackground is called after the first layout pass.
-    local bg = CreateFrame("Frame", "CleanBotSection_" .. key .. "_BG", parent)
-    bg:SetFrameStrata("BACKGROUND")
+    -- Visual background frame. Stays at MEDIUM strata (default) so that child
+    -- content widgets inherit MEDIUM and remain mouse-interactive. WoW 3.3.5a
+    -- renders same-strata same-level frames in creation order, so subsequent
+    -- sections' toggle buttons (created later) always render on top of this bg
+    -- even during the height=2000 expansion phase.
+    -- Hidden until Apply() shows it on first expand.
+    local bg = NS.CB_CreatePanel(parent, "CleanBotSection_" .. key .. "_BG", nestLevel or 3, "section")
     bg:Hide()
-    NS.CB_ApplyFrameSkin(bg, nestLevel or 3)
-    NS.CB_StampPadding(bg, "section")
     section.bg = bg
 
     -- Corrects the bg height to exactly wrap the section's content area.
@@ -740,8 +766,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         local bgTop  = self.bg:GetTop()
         local lastBt = self.lastWidget:GetBottom()
         if not (bgTop and lastBt) then return end
-        local mar    = NS.MARGIN.section
-        local botGap = (self.lastWidget.marginBottom or 0) + mar.bottom
+        local botGap = (self.lastWidget.marginBottom or 0) + (self.bg.paddingBottom or 0)
         self.bg:SetHeight(math.max(bgTop - lastBt + botGap, 4))
     end
 
@@ -764,22 +789,30 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     -- Outer bordered container. CB_ApplyInnerSkin gives it the panel-inset look
     -- without registering it for theme-refresh (the list colour is fixed art).
     local container = CreateFrame("Frame", name, parent)
-    container:SetSize(width, height)
+    -- width is the content area; add 20px (2px left inset + 18px scrollbar) for the container.
+    container:SetSize(width + 20, height)
     CB_ApplyInnerSkin(container)
 
-    -- ScrollFrame inset 2px from the container walls; 18px right gap for the bar.
+    -- ScrollFrame inset 2px from the container walls; 20px right gap keeps the
+    -- scrollbar (18px) plus a 2px mirror of the left inset inside the container border.
     local sf = CreateFrame("ScrollFrame", name .. "SF", container,
         "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     container, "TOPLEFT",      2,  -2)
-    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -18,  2)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -20,  2)
     sf:EnableMouseWheel(true)
     sf:SetScript("OnMouseWheel", function(self, delta)
         local cur = self:GetVerticalScroll()
         local max = self:GetVerticalScrollRange()
         self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * ROW_H)))
     end)
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleScrollBar(_G[name .. "SFScrollBar"])
+    -- Re-anchor the scrollbar explicitly so it sits inside the container's right
+    -- zone rather than floating to the right of the scroll frame (template default).
+    local scrollBar = _G[name .. "SFScrollBar"]
+    if scrollBar then
+        scrollBar:ClearAllPoints()
+        scrollBar:SetPoint("TOPLEFT",    container, "TOPRIGHT",    -20, -20)
+        scrollBar:SetPoint("BOTTOMLEFT", container, "BOTTOMRIGHT", -20,  20)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(scrollBar) end
     end
 
     local content = CreateFrame("Frame", name .. "Content", sf)
@@ -868,7 +901,46 @@ end
 NS.CB_CreateDropdown = function(parent, name, width)
     local dd = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
     if width then UIDropDownMenu_SetWidth(dd, width) end
-    if NS.ElvUI_S then NS.ElvUI_S:HandleDropDownBox(dd, width) end
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleDropDownBox(dd, width)
+
+        -- Reparent the button and text to dd.backdrop, mirroring ElvUI's own Ace3
+        -- dropdown skin. HandleDropDownBox leaves the button as a child of dd, where
+        -- it is obscured inside a ScrollFrame. Moving it to dd.backdrop (which sits
+        -- at the same frame level as dd) resolves the rendering order issue.
+        local backdrop = dd.backdrop
+        if backdrop then
+            local btn  = _G[name .. "Button"]
+            local text = _G[name .. "Text"]
+
+            -- HandleDropDownBox anchors backdrop BOTTOMRIGHT to the button, which
+            -- creates a circular dependency when we then try to anchor the button to
+            -- the backdrop. Re-anchor backdrop to dd directly first to break the cycle.
+            backdrop:ClearAllPoints()
+            backdrop:SetPoint("TOPLEFT",     dd, "TOPLEFT",     20,  0)
+            backdrop:SetPoint("BOTTOMRIGHT", dd, "BOTTOMRIGHT", -8,  8)
+
+            if btn then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT",     backdrop, "TOPRIGHT",    -22, -2)
+                btn:SetPoint("BOTTOMRIGHT", backdrop, "BOTTOMRIGHT",  -2,  2)
+                btn:SetParent(backdrop)
+                -- After reparenting, self:GetParent() is the unnamed backdrop frame,
+                -- breaking UIDropDownMenu's name-based lookup. Reference dd directly.
+                btn:SetScript("OnClick", function()
+                    ToggleDropDownMenu(1, nil, dd)
+                end)
+            end
+
+            if text then
+                text:ClearAllPoints()
+                text:SetJustifyH("RIGHT")
+                text:SetPoint("RIGHT", btn,      "LEFT",  -3, 0)
+                text:SetPoint("LEFT",  backdrop, "LEFT",   2, 0)
+                text:SetParent(backdrop)
+            end
+        end
+    end
     dd.marginTop    = NS.MARGIN.dropdown.top
     dd.marginBottom = NS.MARGIN.dropdown.bottom
     dd.marginLeft   = NS.MARGIN.dropdown.left
@@ -911,8 +983,10 @@ NS.CB_CreateTab = function(parent, name, text, onClick)
         end
     end
 
-    tab.marginLeft  = NS.MARGIN.button.left
-    tab.marginRight = NS.COLUMN_GAP
+    tab.marginTop    = NS.MARGIN.tab.top
+    tab.marginBottom = NS.MARGIN.tab.bottom
+    tab.marginLeft   = NS.MARGIN.tab.left
+    tab.marginRight  = NS.MARGIN.tab.right
     tab:SetActive(false)  -- start inactive
     return tab
 end
@@ -1067,6 +1141,36 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     -- Proxy SetValue/GetValue so callers treat the wrapper like a slider.
     wrapper.SetValue = function(self, v) s:SetValue(v) end
     wrapper.GetValue = function(self) return s:GetValue() end
+
+    -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame
+    -- so ElvUI's thumb replacement is already in place.
+    local thumbTex                    = s:GetThumbTexture()
+    local thumbR, thumbG, thumbB      = thumbTex:GetVertexColor()
+    local labelR, labelG, labelB      = label and label:GetTextColor()
+    local lowR,   lowG,   lowB        = lowLabel  and lowLabel:GetTextColor()
+    local highR,  highG,  highB       = highLabel and highLabel:GetTextColor()
+    local boxR,   boxG,   boxB        = box:GetTextColor()
+    local GREY                        = 0.5
+
+    wrapper.Disable = function(self)
+        if label    then label:SetTextColor(GREY, GREY, GREY) end
+        if lowLabel  then lowLabel:SetTextColor(GREY, GREY, GREY) end
+        if highLabel then highLabel:SetTextColor(GREY, GREY, GREY) end
+        box:SetTextColor(GREY, GREY, GREY)
+        thumbTex:SetVertexColor(GREY, GREY, GREY)
+        s:EnableMouse(false)
+        box:EnableMouse(false)
+    end
+
+    wrapper.Enable = function(self)
+        if label    then label:SetTextColor(labelR, labelG, labelB) end
+        if lowLabel  then lowLabel:SetTextColor(lowR, lowG, lowB) end
+        if highLabel then highLabel:SetTextColor(highR, highG, highB) end
+        box:SetTextColor(boxR, boxG, boxB)
+        thumbTex:SetVertexColor(thumbR, thumbG, thumbB)
+        s:EnableMouse(true)
+        box:EnableMouse(true)
+    end
 
     wrapper.label     = label
     wrapper.slider    = s

@@ -11,9 +11,9 @@ local NS = CleanBotNS
 -- Stores slot.updateStar (star refresh) and slot.equipSlots (paperdoll).
 -- Rotation drag uses the shared capture frame (NS.CB_BeginCapture).
 -- Returns the model frame; the caller positions it.
-NS.CB_CreateModel = function(slot, parent, contentW, contentH)
+NS.CB_CreateModel = function(slot, parent, modelW, modelH)
     local model = CreateFrame("DressUpModel", "CleanBotModel" .. slot.index, parent)
-    model:SetSize(contentW / 3, contentH)
+    model:SetSize(modelW, modelH)
     model:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     model:Hide()
 
@@ -59,9 +59,45 @@ NS.CB_CreateModel = function(slot, parent, contentW, contentH)
     starTex:SetAllPoints()
     starTex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
 
+    -- Favorites are stored as presets["Favorites"] — an array of display-name strings.
+    -- These helpers keep the star button decoupled from the array internals.
+    local function IsFavorite(key)
+        if not key or not CleanBot_SavedVars then return false end
+        local favs = CleanBot_SavedVars.presets and CleanBot_SavedVars.presets["Favorites"]
+        if not favs then return false end
+        local lkey = strlower(key)
+        for _, v in ipairs(favs) do
+            if strlower(v) == lkey then return true end
+        end
+        return false
+    end
+
+    local function AddFavorite(key)
+        if not CleanBot_SavedVars or not CleanBot_SavedVars.presets then return end
+        if not CleanBot_SavedVars.presets["Favorites"] then
+            CleanBot_SavedVars.presets["Favorites"] = {}
+        end
+        if IsFavorite(key) then return end
+        local name = key:sub(1, 1):upper() .. key:sub(2)
+        local favs = CleanBot_SavedVars.presets["Favorites"]
+        favs[#favs + 1] = name
+    end
+
+    local function RemoveFavorite(key)
+        if not CleanBot_SavedVars or not CleanBot_SavedVars.presets then return end
+        local favs = CleanBot_SavedVars.presets["Favorites"]
+        if not favs then return end
+        local lkey = strlower(key)
+        for i, v in ipairs(favs) do
+            if strlower(v) == lkey then
+                table.remove(favs, i)
+                return
+            end
+        end
+    end
+
     local function UpdateStar()
-        local favs = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots
-        if slot.key and favs and favs[slot.key] then
+        if slot.key and IsFavorite(slot.key) then
             starTex:SetVertexColor(1, 0.82, 0)
         else
             starTex:SetVertexColor(0.4, 0.4, 0.4)
@@ -72,18 +108,16 @@ NS.CB_CreateModel = function(slot, parent, contentW, contentH)
 
     starBtn:SetScript("OnClick", function()
         if not slot.key or not CleanBot_SavedVars then return end
-        if not CleanBot_SavedVars.favoriteBots then CleanBot_SavedVars.favoriteBots = {} end
-        if CleanBot_SavedVars.favoriteBots[slot.key] then
-            CleanBot_SavedVars.favoriteBots[slot.key] = nil
+        if IsFavorite(slot.key) then
+            RemoveFavorite(slot.key)
         else
-            CleanBot_SavedVars.favoriteBots[slot.key] = true
+            AddFavorite(slot.key)
         end
         UpdateStar()
     end)
     starBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        local favs  = CleanBot_SavedVars and CleanBot_SavedVars.favoriteBots
-        local isFav = slot.key and favs and favs[slot.key]
+        local isFav = IsFavorite(slot.key)
         GameTooltip:AddLine(isFav and "Remove from Favorites" or "Add to Favorites", 1, 1, 1)
         GameTooltip:Show()
     end)

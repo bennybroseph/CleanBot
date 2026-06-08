@@ -84,14 +84,14 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- ============================================================
 -- Layout constants
 -- ============================================================
-NS.FRAME_WIDTH       = 850
+NS.EXPANDED_WIDTH    = 850
 NS.FRAME_HEIGHT      = 560
 NS.TAB_WIDTH         = 88
 NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
 NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
-NS.FOOTER_H          = NS.PAD  -- close button at top-right X; only a border margin needed
+NS.MODEL_GAP         = 25  -- gap between the model panel and the strategy panel in the Party tab
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- Per-frame padding — space between a frame's border and the content inside it (CSS padding).
@@ -112,14 +112,15 @@ end
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
     -- Widget types — space a widget reserves around itself within a flow.
-    header   = { top = 10, bottom = 4, left = 0, right = 0 },
-    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
-    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
-    dropdown = { top = 2,  bottom = 2, left = -12, right = 0 },
-    checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
-    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+    header   = { top = 10, bottom = 4, left = 0,   right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0,   right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0,   right = 2 },
+    tab      = { top = 2,  bottom = 2, left = 0,   right = 4 },
+    slider   = { top = 2,  bottom = 4, left = 4,   right = 4 },
+    dropdown = { top = 2,  bottom = 2, left = -16, right = 2 },
+    checkbox = { top = 2,  bottom = 2, left = 0,   right = 2 },
+    swatch   = { top = 2,  bottom = 2, left = 4,   right = 2 },
+    editBox  = { top = 2,  bottom = 2, left = 4,   right = 2 },
     -- Frame types — extra breathing room a child frame adds on top of its
     -- parent's padding when placed via CB_CreateInnerFrame.
     panel    = { top = 0, bottom = 0, left = 0, right = 0 },
@@ -155,10 +156,15 @@ NS.EQUIP_WEAPON_PAD  = 60
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
-NS.partyPanel      = nil
-NS.botTabBar       = nil
-NS.partyContent    = nil
-NS.partyEmptyLabel = nil
+NS.partyPanel        = nil
+NS.botTabBar         = nil
+NS.partyContent      = nil
+NS.partyModelPanel   = nil
+NS.partyStratPanel   = nil
+NS.partyExpandBtn    = nil
+NS.partyEmptyLabel   = nil
+NS.partyExpanded     = false
+NS.COLLAPSED_WIDTH   = nil  -- computed in CleanBot_BuildPartyTab after geometry is known
 NS.managePanel      = nil
 NS.manageScrollFrame = nil
 NS.manageScrollChild = nil
@@ -169,6 +175,19 @@ NS.settingsPanel = nil
 -- ============================================================
 NS.activeTopTabIndex = 0
 NS.topTabs           = {}
+
+-- Resizes CleanBotFrame to `width`, re-anchoring from TOPLEFT first so the
+-- frame grows/shrinks from its right edge rather than from its center.
+-- Falls back to SetWidth-only if GetLeft/GetTop return nil (frame never shown).
+NS.CB_ResizeFrame = function(width)
+    local left = CleanBotFrame:GetLeft()
+    local top  = CleanBotFrame:GetTop()
+    if left and top then
+        CleanBotFrame:ClearAllPoints()
+        CleanBotFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+    end
+    CleanBotFrame:SetWidth(width)
+end
 
 NS.CleanBot_SelectTopTab = function(index)
     if NS.activeTopTabIndex == index then return end
@@ -181,6 +200,13 @@ NS.CleanBot_SelectTopTab = function(index)
     if NS.managePanel     then if index == 1 then NS.managePanel:Show()     else NS.managePanel:Hide()     end end
     if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
+    if NS.partyExpandBtn then if index == 2 then NS.partyExpandBtn:Show() else NS.partyExpandBtn:Hide() end end
+
+    -- Resize the frame: Party tab restores saved expand state; all other tabs use collapsed width.
+    if NS.COLLAPSED_WIDTH then
+        local targetW = (index == 2) and (NS.partyExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH) or NS.COLLAPSED_WIDTH
+        NS.CB_ResizeFrame(targetW)
+    end
 
     if index == 2 then
         for i, info in ipairs(NS.tabList or {}) do
@@ -204,9 +230,18 @@ end
 -- references are fine.
 -- ============================================================
 function CleanBot_BuildFrames()
-    -- Static frame size — never shrinks/grows based on party state
-    CleanBotFrame:SetWidth(NS.FRAME_WIDTH)
+    -- Static frame size — shrunk to collapsed width after BuildFrames if needed
+    CleanBotFrame:SetWidth(NS.EXPANDED_WIDTH)
     CleanBotFrame:SetHeight(NS.FRAME_HEIGHT)
+
+    -- Stamp padding fields so child anchors can read CleanBotFrame.paddingXxx
+    -- directly rather than going through the raw NS.PADDING.frame globals.
+    -- CleanBotFrame is XML-defined so CB_CreatePanel never runs on it.
+    local framePad = NS.PADDING.frame
+    CleanBotFrame.paddingTop    = framePad.top
+    CleanBotFrame.paddingBottom = framePad.bottom
+    CleanBotFrame.paddingLeft   = framePad.left
+    CleanBotFrame.paddingRight  = framePad.right
 
     -- ── Top tab bar ────────────────────────────────────────────
     NS.topTabBar = CreateFrame("Frame", "CleanBotTopTabBar", CleanBotFrame)
@@ -224,7 +259,7 @@ function CleanBot_BuildFrames()
         if prevTopTab then
             NS.CB_AnchorAhead(tab, prevTopTab)
         else
-            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", NS.PADDING.frame.left + (tab.marginLeft or 0), 0)
+            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", CleanBotFrame.paddingLeft + (tab.marginLeft or 0), 0)
         end
         prevTopTab  = tab
         NS.topTabs[i] = tab
@@ -232,8 +267,8 @@ function CleanBot_BuildFrames()
 
     -- ── Content frame ──────────────────────────────────────────
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
-    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      NS.PADDING.frame.left, -(NS.TITLE_H + NS.TOP_BAR_H))
-    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -NS.PADDING.frame.right, NS.FOOTER_H)
+    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      CleanBotFrame.paddingLeft,   -(NS.TITLE_H + NS.TOP_BAR_H))
+    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -CleanBotFrame.paddingRight,    CleanBotFrame.paddingBottom)
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Party panel ────────────────────────────────────────────
@@ -282,14 +317,28 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         -- Initialise saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
-        if type(CleanBot_SavedVars.favoriteBots)        ~= "table" then CleanBot_SavedVars.favoriteBots        = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
         if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
+
+        -- Seed the protected "Favorites" preset, migrating the old favoriteBots set
+        -- (format: { [lowercaseName] = true }) into the preset array format on first run.
+        if type(CleanBot_SavedVars.presets["Favorites"]) ~= "table" then
+            local migrated = {}
+            if type(CleanBot_SavedVars.favoriteBots) == "table" then
+                for key in pairs(CleanBot_SavedVars.favoriteBots) do
+                    migrated[#migrated + 1] = key:sub(1, 1):upper() .. key:sub(2)
+                end
+                table.sort(migrated)
+            end
+            CleanBot_SavedVars.presets["Favorites"] = migrated
+        end
+        CleanBot_SavedVars.favoriteBots = nil  -- drop old storage key after migration
 
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
             NS.botEmotes = CleanBot_SavedVars.botEmotes
         end
+        NS.partyExpanded = CleanBot_SavedVars.partyExpanded == true
 
         -- Restore theme values.
         if type(CleanBot_SavedVars.scale) == "number" then
@@ -332,6 +381,14 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         NS.CB_RegisterRootFrame(CleanBotFrame)
         CleanBot_BuildFrames()
+        -- SelectTopTab(1) inside BuildFrames already sized the frame to COLLAPSED_WIDTH.
+        -- Apply saved expand state visibility: hide the strategy panel unless expanded.
+        if NS.partyStratPanel and not NS.partyExpanded then
+            NS.partyStratPanel:Hide()
+        end
+        if NS.partyExpandBtn then
+            NS.partyExpandBtn:SetText(NS.partyExpanded and "<" or ">")
+        end
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
         -- Accent colour is baked in during CB_ApplyFrameSkin calls inside

@@ -110,6 +110,44 @@ function CleanBot_ShowDebugKnownBots()
 end
 
 -- ============================================================
+-- /cbframes  — hover over a stuck widget then run this to see
+--              which frame is capturing the mouse and why.
+-- ============================================================
+SLASH_CBFRAMES1 = "/cbframes"
+SlashCmdList["CBFRAMES"] = function()
+    local focus = GetMouseFocus and GetMouseFocus()
+    if focus then
+        print(string.format("MouseFocus: %s  strata=%s  level=%d  mouseEnabled=%s",
+            tostring(focus:GetName() or "(unnamed)"),
+            tostring(focus:GetFrameStrata()),
+            focus:GetFrameLevel(),
+            tostring(focus:IsMouseEnabled())))
+    else
+        print("MouseFocus: nil (mouse not over any mouse-enabled frame)")
+    end
+
+    -- Report key manage-tab frame states.
+    local function fr(label, f)
+        if not f then print(label .. ": nil"); return end
+        print(string.format("  %s: strata=%s level=%d mouseEnabled=%s visible=%s",
+            label, tostring(f:GetFrameStrata()), f:GetFrameLevel(),
+            tostring(f:IsMouseEnabled()), tostring(f:IsVisible())))
+    end
+    print("-- Manage tab frames --")
+    fr("managePanel",          NS.managePanel)
+    fr("managePanel.iborder",  NS.managePanel and NS.managePanel.iborder)
+    fr("managePanel.oborder",  NS.managePanel and NS.managePanel.oborder)
+    fr("manageScrollFrame",    NS.manageScrollFrame)
+    fr("manageScrollChild",    NS.manageScrollChild)
+    local sf = NS.manageScrollFrame
+    if sf then
+        local bar = _G["CleanBotManageScrollFrameScrollBar"]
+        fr("ScrollBar",        bar)
+    end
+
+end
+
+-- ============================================================
 -- /cbdebug  — quick party/cache dump to chat
 -- ============================================================
 SLASH_CBDEBUG1 = "/cbdebug"
