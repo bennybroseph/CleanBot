@@ -266,6 +266,32 @@ NS.CB_RenderQuestDetail = function(key, questID)
         titleText = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
     end
 
+    -- ── Wire the Abandon button to this quest ──────────────────────────────
+    -- Resolve the quest name from the bridge packet (most reliable — present
+    -- even for quests the player doesn't have). Fall back to the name cache.
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local abandonName = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
+
+    if f.abandonBtn then
+        f.abandonBtn:Enable()
+        f.abandonBtn:SetScript("OnClick", function()
+            if not entry then return end
+            NS.CB_SendBotCommand(entry.name, "drop " .. abandonName)
+            -- Disable the button and wait 2 seconds before re-fetching.
+            -- The bot processes the command server-side; there is no structured
+            -- response packet, so a fixed timeout is the reliable refresh trigger.
+            f.abandonBtn:Disable()
+            local elapsed = 0
+            f:SetScript("OnUpdate", function(self, dt)
+                elapsed = elapsed + dt
+                if elapsed >= 2 then
+                    self:SetScript("OnUpdate", nil)
+                    NS.CB_FetchQuests(key, entry.name)
+                end
+            end)
+        end)
+    end
+
     local contentW = dsc:GetWidth() - DPAD * 2
 
     -- ── Title ──────────────────────────────────────────────────────────────
@@ -568,6 +594,7 @@ NS.CB_GetQuestFrame = function(key, botName)
         closeActionBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -BLIZZ_CLOSE_BTN_X, BLIZZ_BTN_Y)
     end
 
+    abandonBtn:Disable()
     shareBtn:Disable()
     trackBtn:Disable()
     closeActionBtn:SetScript("OnClick", function() f:Hide() end)

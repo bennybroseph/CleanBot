@@ -609,13 +609,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local _,      r3        = NS.CB_SplitOnce(r2,   "~")  -- skip token
             local _,      r4        = NS.CB_SplitOnce(r3,   "~")  -- skip mode
             local status, r5        = NS.CB_SplitOnce(r4,   "~")
-            local questID, questName = NS.CB_SplitOnce(r5,  "~")
+            local questID = NS.CB_SplitOnce(r5, "~")
             local key   = strlower(name)
             local entry = CleanBot_PartyBots[key]
             if entry and entry.quests then
                 entry.quests[#entry.quests + 1] = {
                     id     = tonumber(questID),
-                    name   = CB_UrlDecode(questName or ""),
                     status = status,
                 }
             end
