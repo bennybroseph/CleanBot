@@ -297,7 +297,7 @@ NS.CleanBot_BuildSettingsTab = function()
     NS.settingsPanel:Hide()
 
     local panel    = NS.settingsPanel
-    local SLIDER_W = 200
+    local SLIDER_W = 130
 
     local SUB_TAB_H = NS.TOP_BAR_H
     -- Forward declarations — both are defined later but called only at interaction time.

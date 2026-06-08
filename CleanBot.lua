@@ -111,15 +111,15 @@ end
 -- Gap between two elements = above.marginBottom + below.marginTop (additive, like CSS margins).
 NS.MARGIN_DEFAULTS = {
     -- Widget types — space a widget reserves around itself within a flow.
-    header   = { top = 10, bottom = 4, left = 0, right = 0 },
-    label    = { top = 6,  bottom = 2, left = 0, right = 0 },
-    button   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    tab      = { top = 2,  bottom = 2, left = 0, right = 4 },
-    slider   = { top = 2,  bottom = 4, left = 4, right = 4 },
-    dropdown = { top = 2,  bottom = 2, left = -12, right = 0 },
-    checkbox = { top = 2,  bottom = 2, left = 0, right = 0 },
-    swatch   = { top = 2,  bottom = 2, left = 0, right = 0 },
-    editBox  = { top = 2,  bottom = 2, left = 0, right = 0 },
+    header   = { top = 10, bottom = 4, left = 0,   right = 0 },
+    label    = { top = 6,  bottom = 2, left = 0,   right = 0 },
+    button   = { top = 2,  bottom = 2, left = 0,   right = 2 },
+    tab      = { top = 2,  bottom = 2, left = 0,   right = 4 },
+    slider   = { top = 2,  bottom = 4, left = 4,   right = 4 },
+    dropdown = { top = 2,  bottom = 2, left = -16, right = 2 },
+    checkbox = { top = 2,  bottom = 2, left = 0,   right = 2 },
+    swatch   = { top = 2,  bottom = 2, left = 4,   right = 2 },
+    editBox  = { top = 2,  bottom = 2, left = 4,   right = 2 },
     -- Frame types — extra breathing room a child frame adds on top of its
     -- parent's padding when placed via CB_CreateInnerFrame.
     panel    = { top = 0, bottom = 0, left = 0, right = 0 },
