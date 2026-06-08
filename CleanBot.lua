@@ -175,6 +175,19 @@ NS.settingsPanel = nil
 NS.activeTopTabIndex = 0
 NS.topTabs           = {}
 
+-- Resizes CleanBotFrame to `width`, re-anchoring from TOPLEFT first so the
+-- frame grows/shrinks from its right edge rather than from its center.
+-- Falls back to SetWidth-only if GetLeft/GetTop return nil (frame never shown).
+NS.CB_ResizeFrame = function(width)
+    local left = CleanBotFrame:GetLeft()
+    local top  = CleanBotFrame:GetTop()
+    if left and top then
+        CleanBotFrame:ClearAllPoints()
+        CleanBotFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+    end
+    CleanBotFrame:SetWidth(width)
+end
+
 NS.CleanBot_SelectTopTab = function(index)
     if NS.activeTopTabIndex == index then return end
     NS.activeTopTabIndex = index
@@ -187,6 +200,12 @@ NS.CleanBot_SelectTopTab = function(index)
     if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
     if NS.partyExpandBtn then if index == 2 then NS.partyExpandBtn:Show() else NS.partyExpandBtn:Hide() end end
+
+    -- Resize the frame: Party tab restores saved expand state; all other tabs use collapsed width.
+    if NS.COLLAPSED_WIDTH then
+        local targetW = (index == 2) and (NS.partyExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH) or NS.COLLAPSED_WIDTH
+        NS.CB_ResizeFrame(targetW)
+    end
 
     if index == 2 then
         for i, info in ipairs(NS.tabList or {}) do
@@ -361,11 +380,10 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         NS.CB_RegisterRootFrame(CleanBotFrame)
         CleanBot_BuildFrames()
-        -- Apply saved party expand state now that COLLAPSED_WIDTH is known.
-        -- BuildFrames always starts at EXPANDED_WIDTH; collapse it here if needed.
-        if not NS.partyExpanded and NS.COLLAPSED_WIDTH then
-            CleanBotFrame:SetWidth(NS.COLLAPSED_WIDTH)
-            if NS.partyStratPanel then NS.partyStratPanel:Hide() end
+        -- SelectTopTab(1) inside BuildFrames already sized the frame to COLLAPSED_WIDTH.
+        -- Apply saved expand state visibility: hide the strategy panel unless expanded.
+        if NS.partyStratPanel and not NS.partyExpanded then
+            NS.partyStratPanel:Hide()
         end
         if NS.partyExpandBtn then
             NS.partyExpandBtn:SetText(NS.partyExpanded and "<" or ">")
