@@ -13,6 +13,7 @@ Party\CleanBotPartyData.lua
 Party\CleanBotClassData.lua
 Party\CleanBotEquipData.lua
 Party\CleanBotInventory.lua
+Party\CleanBotQuest.lua
 Party\CleanBotEquip.lua
 Party\CleanBotModel.lua
 Party\CleanBotParty.lua

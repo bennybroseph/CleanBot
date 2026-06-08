@@ -337,6 +337,8 @@ NS.CB_CreateEquipSlots = function(slot, model)
         GameTooltip:Show()
     end)
     bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    NS.CB_CreateQuestButton(slot, model, slotSize, gapX)
 end
 
 -- ── Equipment refresh via InspectUnit chain ───────────────────────────────
