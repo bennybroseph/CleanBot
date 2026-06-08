@@ -2,11 +2,17 @@
 -- CleanBotBridge.lua  —  MBOT bridge / playerbot protocol layer.
 --
 -- Owns the handshake, debounced sync, no-bridge whisper discovery,
--- linked-account fetch, inventory fetch, and the event handler that
--- parses ROSTER~ / DETAIL~ / STATE~ / INV_* addon messages plus the
--- co?/nc? whisper replies.
+-- linked-account fetch, inventory fetch, quest fetch, and the event
+-- handler that parses ROSTER~ / DETAIL~ / STATE~ / INV_* / QUESTS_*
+-- addon messages plus the co?/nc? whisper replies.
 -- ============================================================
 local NS = CleanBotNS
+
+-- URL-decode a percent-encoded string (e.g. quest names from the bridge).
+-- Converts %XX hex sequences to their ASCII characters.
+local function CB_UrlDecode(s)
+    return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
+end
 
 -- ============================================================
 -- Bridge / handshake state
@@ -255,6 +261,23 @@ end
 NS.CB_RequestInventory = function(key, botName)
     NS.CB_FetchInventory(key, botName)
     NS.CB_ToggleInventory(key, botName)
+end
+
+-- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
+-- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
+-- CHAT_MSG_ADDON block. Whisper fallback sends "quests" — structured parsing
+-- of the whisper reply is not yet implemented.
+NS.CB_FetchQuests = function(key, botName)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    entry.quests = {}
+
+    if NS.bridgeState == "present" then
+        SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", "PARTY")
+    else
+        -- Whisper fallback — reply parsing not yet implemented.
+        NS.CB_SendBotCommand(botName, "quests")
+    end
 end
 
 -- ============================================================
@@ -563,6 +586,46 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local f    = NS.botInventoryFrames and NS.botInventoryFrames[key]
             if f and f:IsShown() then
                 NS.CB_RenderInventory(key)
+            end
+
+        -- ── Quest log packets ────────────────────────────────────────────
+        -- Request: GET~QUESTS~ALL~botName~quests
+        -- Packets: QUESTS_BEGIN~name~token~mode
+        --          QUESTS_ITEM~name~token~mode~status~questID~questName
+        --          QUESTS_END~name~token~mode
+        -- status = "C" (complete) or "I" (incomplete). questName is URL-encoded.
+        elseif msg and strsub(msg, 1, 13) == "QUESTS_BEGIN~" then
+            local rest  = strsub(msg, 14)
+            local name  = NS.CB_SplitOnce(rest, "~")
+            local key   = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.quests = {}
+            end
+
+        elseif msg and strsub(msg, 1, 12) == "QUESTS_ITEM~" then
+            local rest              = strsub(msg, 13)
+            local name,   r2        = NS.CB_SplitOnce(rest, "~")
+            local _,      r3        = NS.CB_SplitOnce(r2,   "~")  -- skip token
+            local _,      r4        = NS.CB_SplitOnce(r3,   "~")  -- skip mode
+            local status, r5        = NS.CB_SplitOnce(r4,   "~")
+            local questID = NS.CB_SplitOnce(r5, "~")
+            local key   = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry and entry.quests then
+                entry.quests[#entry.quests + 1] = {
+                    id     = tonumber(questID),
+                    status = status,
+                }
+            end
+
+        elseif msg and strsub(msg, 1, 11) == "QUESTS_END~" then
+            local rest = strsub(msg, 12)
+            local name = NS.CB_SplitOnce(rest, "~")
+            local key  = strlower(name)
+            local f    = NS.botQuestFrames and NS.botQuestFrames[key]
+            if f and f:IsShown() then
+                if NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
             end
         end
 
