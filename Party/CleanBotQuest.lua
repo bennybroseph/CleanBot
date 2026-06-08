@@ -95,14 +95,9 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
     headerBtn:SetHeight(QUEST_HEADER_H)
     headerBtn:SetPoint("TOPLEFT",  sc, "TOPLEFT",  0, yOffset)
     headerBtn:SetPoint("TOPRIGHT", sc, "TOPRIGHT", 0, yOffset)
-    headerBtn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
 
-    local arrow = headerBtn:CreateTexture(nil, "OVERLAY")
-    arrow:SetSize(16, 16)
+    local arrow = NS.CB_CreateCollapseButton(headerBtn, isCollapsed)
     arrow:SetPoint("LEFT", headerBtn, "LEFT", 2, 0)
-    arrow:SetTexture(isCollapsed
-        and "Interface\\Buttons\\UI-PlusButton-Up"
-        or  "Interface\\Buttons\\UI-MinusButton-Up")
 
     local headerLabel = headerBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     headerLabel:SetPoint("LEFT",  headerBtn, "LEFT",  20, 0)
@@ -112,9 +107,16 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
     headerLabel:SetText(info.label .. " (" .. #quests .. ")")
 
     -- Toggle collapse state and re-render the full list.
+    -- Hover brightens the label to white; leave restores the status colour.
     headerBtn:SetScript("OnClick", function()
         questGroupCollapsed[collapseKey] = not questGroupCollapsed[collapseKey]
         NS.CB_RenderQuests(key)
+    end)
+    headerBtn:SetScript("OnEnter", function()
+        headerLabel:SetTextColor(1, 1, 1)
+    end)
+    headerBtn:SetScript("OnLeave", function()
+        headerLabel:SetTextColor(info.r, info.g, info.b)
     end)
 
     framePool[#framePool + 1] = headerBtn
@@ -133,7 +135,16 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
             rowBtn:SetHeight(QUEST_ROW_H)
             rowBtn:SetPoint("TOPLEFT",  sc, "TOPLEFT",  QUEST_INDENT, yOffset)
             rowBtn:SetPoint("TOPRIGHT", sc, "TOPRIGHT", 0, yOffset)
-            rowBtn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            -- Selection highlight: persistent texture shown on the active row.
+            -- Tinted to the quest's status colour so the selection reads as
+            -- part of the status group rather than a neutral highlight.
+            -- Hidden by default; shown and re-tinted on click.
+            local selTex = rowBtn:CreateTexture(nil, "BACKGROUND")
+            selTex:SetAllPoints()
+            selTex:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
+            selTex:SetBlendMode("ADD")
+            selTex:SetVertexColor(info.r, info.g, info.b)
+            selTex:Hide()
 
             local nameText = rowBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             nameText:SetPoint("LEFT",  rowBtn, "LEFT",  0, 0)
@@ -142,18 +153,47 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
             nameText:SetTextColor(info.r, info.g, info.b)
             nameText:SetText(displayName)
 
+            -- Capture these for the closures below.
+            local questID   = quest.id
+            local statusR   = info.r
+            local statusG   = info.g
+            local statusB   = info.b
+
             -- Click selects this quest and renders its details in the right pane.
-            -- Hover shows the client's cached quest tooltip.
-            local questID = quest.id
+            -- Deselects the previous row by hiding its selection texture and
+            -- restoring its status colour. Hover brightens the label to white.
             rowBtn:SetScript("OnClick", function()
+                local f = NS.botQuestFrames and NS.botQuestFrames[key]
+                if f and f.selectedRowText and f.selectedRowText ~= nameText then
+                    local sr, sg, sb = f.selectedRowColor.r, f.selectedRowColor.g, f.selectedRowColor.b
+                    f.selectedRowText:SetTextColor(sr, sg, sb)
+                    if f.selectedRowTex then f.selectedRowTex:Hide() end
+                end
+                if f then
+                    f.selectedRowText  = nameText
+                    f.selectedRowTex   = selTex
+                    f.selectedRowColor = { r = statusR, g = statusG, b = statusB }
+                end
+                selTex:Show()
+                nameText:SetTextColor(1, 1, 1)  -- white when selected
                 NS.CB_RenderQuestDetail(key, questID)
             end)
             rowBtn:SetScript("OnEnter", function(self)
+                local f = NS.botQuestFrames and NS.botQuestFrames[key]
+                if not (f and f.selectedRowText == nameText) then
+                    nameText:SetTextColor(1, 1, 1)  -- white on hover
+                end
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink("quest:" .. (questID or 0) .. ":60")
                 GameTooltip:Show()
             end)
-            rowBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            rowBtn:SetScript("OnLeave", function()
+                local f = NS.botQuestFrames and NS.botQuestFrames[key]
+                if not (f and f.selectedRowText == nameText) then
+                    nameText:SetTextColor(statusR, statusG, statusB)  -- restore status colour
+                end
+                GameTooltip:Hide()
+            end)
 
             framePool[#framePool + 1] = rowBtn
             yOffset = yOffset - QUEST_ROW_H - QUEST_GAP
@@ -201,44 +241,49 @@ NS.CB_RenderQuestDetail = function(key, questID)
     end
     local hasData = logIndex ~= nil
 
-    local titleText  = ""
-    local desc       = ""
-    local objectives = {}
+    local titleText   = ""
+    local questDesc   = ""   -- NPC flavor text (1st return of GetQuestLogQuestText)
+    local questObj    = ""   -- "Bring X to Y" instructions (2nd return)
+    local leaderboard = {}   -- { text, finished } per GetQuestLogLeaderBoard entry
 
     if hasData then
         -- Briefly select the quest so the text / leaderboard APIs return its data.
         -- Restore the previous selection immediately after to avoid disturbing
         -- what the player has open in their own quest log UI.
-        local prevSel = GetQuestLogSelection()
+        local prevSel    = GetQuestLogSelection()
         SelectQuestLogEntry(logIndex)
         titleText        = GetQuestLogTitle(logIndex) or ""
-        desc             = GetQuestLogQuestText()     or ""
-        local numObj     = GetNumQuestLeaderBoards()
-        for i = 1, numObj do
+        local d, o       = GetQuestLogQuestText()
+        questDesc        = d or ""
+        questObj         = o or ""
+        local numEntries = GetNumQuestLeaderBoards()
+        for i = 1, numEntries do
             local text, _, finished = GetQuestLogLeaderBoard(i)
-            objectives[#objectives + 1] = { text = text or "", finished = finished }
+            leaderboard[#leaderboard + 1] = { text = text or "", finished = finished }
         end
         SelectQuestLogEntry(prevSel or 0)
     else
         titleText = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
     end
 
+    local contentW = dsc:GetWidth() - DPAD * 2
+
     -- ── Title ──────────────────────────────────────────────────────────────
-    -- QuestTitleFont: WoW's built-in golden quest title font.
-    local titleFS = dsc:CreateFontString(nil, "OVERLAY", "QuestTitleFont")
-    titleFS:SetPoint("TOPLEFT", dsc, "TOPLEFT",  DPAD, -DPAD)
-    titleFS:SetPoint("RIGHT",   dsc, "RIGHT",   -DPAD, 0)
-    titleFS:SetJustifyH("LEFT")
-    titleFS:SetFont(titleFS:GetFont(), 22)  -- one step larger than QuestTitleFont default
+    -- Intentionally anchored flush to the top-left with no padding or margin.
+    -- The quest title acts as a full-bleed header; content below it provides
+    -- its own visual separation via CB_AnchorBelow spacing.
+    local titleFS = NS.CB_CreateQuestHeader(dsc)
+    titleFS:SetPoint("TOPLEFT", dsc, "TOPLEFT", 0, -DPAD)
+    titleFS:SetWidth(dsc:GetWidth())
     titleFS:SetText(titleText)
     f.detailFrames[#f.detailFrames + 1] = titleFS
 
+    local prevFS = titleFS
+
     -- ── No-data fallback ───────────────────────────────────────────────────
     if not hasData then
-        local noDataFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noDataFS:SetPoint("TOPLEFT", titleFS, "BOTTOMLEFT",  0, -8)
-        noDataFS:SetPoint("RIGHT",   dsc,     "RIGHT",      -DPAD, 0)
-        noDataFS:SetJustifyH("LEFT")
+        local noDataFS = NS.CB_CreateQuestParagraph(dsc)
+        NS.CB_AnchorBelow(noDataFS, prevFS)
         noDataFS:SetText("Details unavailable.\nYou do not have this quest.")
         f.detailFrames[#f.detailFrames + 1] = noDataFS
 
@@ -246,51 +291,58 @@ NS.CB_RenderQuestDetail = function(key, questID)
         return
     end
 
-    -- ── Description ────────────────────────────────────────────────────────
-    -- QuestFont: WoW's built-in body text font for quest descriptions.
-    local prevFS = titleFS
+    -- ── Quest objectives text ───────────────────────────────────────────────
+    -- The instructional line(s) from the quest giver: "Bring X to Y."
+    -- Distinct from the leaderboard progress counters below.
+    if questObj ~= "" then
+        local objTextFS = NS.CB_CreateQuestParagraph(dsc)
+        NS.CB_AnchorBelow(objTextFS, prevFS)
+        objTextFS:SetWidth(contentW)
+        objTextFS:SetText(questObj)
+        f.detailFrames[#f.detailFrames + 1] = objTextFS
+        prevFS = objTextFS
+    end
 
-    if desc ~= "" then
-        local descFS = dsc:CreateFontString(nil, "OVERLAY", "QuestFont")
-        descFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT",  0, -10)
-        descFS:SetPoint("RIGHT",   dsc,    "RIGHT",      -DPAD, 0)
-        descFS:SetJustifyH("LEFT")
-        descFS:SetTextColor(0.180, 0.122, 0.059)  -- #2e1f0f
-        descFS:SetText(desc)
+    -- ── Leaderboard progress items ──────────────────────────────────────────
+    -- Each entry shows current count toward one objective, e.g. "Wolves slain: 3/10".
+    -- Finished entries are coloured green; in-progress entries stay white.
+    for _, lbEntry in ipairs(leaderboard) do
+        local entryFS = NS.CB_CreateObjectiveText(dsc, lbEntry.finished)
+        NS.CB_AnchorBelow(entryFS, prevFS)
+        entryFS:SetWidth(contentW)
+        local entryLabel = lbEntry.finished and (lbEntry.text .. " (Complete)") or lbEntry.text
+        entryFS:SetText(entryLabel)
+        f.detailFrames[#f.detailFrames + 1] = entryFS
+        prevFS = entryFS
+    end
+
+    -- ── Description header + body ───────────────────────────────────────────
+    -- The NPC flavor text that introduces the quest's story context.
+    if questDesc ~= "" then
+        local descLabelFS = NS.CB_CreateQuestHeader(dsc)
+        NS.CB_AnchorBelow(descLabelFS, prevFS)
+        descLabelFS:SetText("Description")
+        f.detailFrames[#f.detailFrames + 1] = descLabelFS
+        prevFS = descLabelFS
+
+        local descFS = NS.CB_CreateQuestParagraph(dsc)
+        NS.CB_AnchorBelow(descFS, prevFS)
+        descFS:SetWidth(contentW)
+        descFS:SetText(questDesc)
         f.detailFrames[#f.detailFrames + 1] = descFS
         prevFS = descFS
     end
 
-    -- ── Objectives ─────────────────────────────────────────────────────────
-    if #objectives > 0 then
-        local objLabelFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        objLabelFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT", 0, -10)
-        objLabelFS:SetJustifyH("LEFT")
-        objLabelFS:SetText("Objectives:")
-        f.detailFrames[#f.detailFrames + 1] = objLabelFS
-        prevFS = objLabelFS
-
-        for _, obj in ipairs(objectives) do
-            local objFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            objFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT",  6, -2)
-            objFS:SetPoint("RIGHT",   dsc,    "RIGHT",      -DPAD, 0)
-            objFS:SetJustifyH("LEFT")
-            -- Complete objectives match our status green; incomplete stay white.
-            if obj.finished then
-                objFS:SetTextColor(0.251, 0.749, 0.251)
-            end
-            objFS:SetText(obj.text)
-            f.detailFrames[#f.detailFrames + 1] = objFS
-            prevFS = objFS
-        end
-    end
+    -- ── Rewards (TODO) ──────────────────────────────────────────────────────
+    -- Will use: GetNumQuestLogRewards, GetQuestLogRewardInfo, GetQuestLogRewardMoney,
+    --           GetQuestLogRewardXP, GetNumQuestLogChoices, GetQuestLogChoiceInfo
 
     -- ── Deferred height: measure after layout resolves ─────────────────────
     -- GetBottom() on FontStrings needs one rendered frame to return valid values.
     dsc:SetScript("OnUpdate", function(self)
         self:SetScript("OnUpdate", nil)
-        local dsTop    = dsc:GetTop()
-        local lowestY  = dsTop
+        local dsTop   = dsc:GetTop()
+        local lowestY = dsTop
         for _, fr in ipairs(f.detailFrames) do
             local b = fr:GetBottom()
             if b and b < lowestY then lowestY = b end
@@ -473,33 +525,30 @@ NS.CB_GetQuestFrame = function(key, botName)
     f.detailScrollChild = dsc
 
     -- ── Action buttons ────────────────────────────────────────────────────
-    -- Blizz: UIPanelButtonTemplate, manually placed. Tweak BLIZZ_BTN_* at the
-    --        top of this file to adjust positions.
-    -- ElvUI: CB_CreateButton skinned; Abandon anchored BOTTOMLEFT then
-    --        CB_AnchorAhead for the chain; Close independent at BOTTOMRIGHT.
+    -- Creation and positioning differ per skin; behaviour is shared after.
+    -- ElvUI: CB_CreateButton; Abandon at BOTTOMLEFT, chain via CB_AnchorAhead,
+    --        Close independent at BOTTOMRIGHT.
+    -- Blizz: UIPanelButtonTemplate, fixed BLIZZ_BTN_* positions.
+    local abandonBtn, shareBtn, trackBtn, closeActionBtn
+
     if NS.ElvUI_S then
         local pad = NS.PADDING.frame
 
-        local abandonBtn = NS.CB_CreateButton(f, "CleanBotQuestAbandon_" .. key, "Abandon", 90, BLIZZ_BTN_H)
+        abandonBtn = NS.CB_CreateButton(f, "CleanBotQuestAbandon_" .. key, "Abandon", 90, BLIZZ_BTN_H)
         abandonBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT",
-            pad.left  + (abandonBtn.marginLeft   or 0),
+            pad.left   + (abandonBtn.marginLeft   or 0),
             pad.bottom + (abandonBtn.marginBottom or 0))
 
-        local shareBtn = NS.CB_CreateButton(f, "CleanBotQuestShare_" .. key, "Share", 90, BLIZZ_BTN_H)
+        shareBtn = NS.CB_CreateButton(f, "CleanBotQuestShare_" .. key, "Share", 90, BLIZZ_BTN_H)
         NS.CB_AnchorAhead(shareBtn, abandonBtn)
 
-        local trackBtn = NS.CB_CreateButton(f, "CleanBotQuestTrack_" .. key, "Track", 90, BLIZZ_BTN_H)
+        trackBtn = NS.CB_CreateButton(f, "CleanBotQuestTrack_" .. key, "Track", 90, BLIZZ_BTN_H)
         NS.CB_AnchorAhead(trackBtn, shareBtn)
 
-        local closeActionBtn = NS.CB_CreateButton(f, "CleanBotQuestCloseAction_" .. key, "Close", 90, BLIZZ_BTN_H)
+        closeActionBtn = NS.CB_CreateButton(f, "CleanBotQuestCloseAction_" .. key, "Close", 90, BLIZZ_BTN_H)
         closeActionBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",
             -((pad.right or 0) + (closeActionBtn.marginRight or 0)),
             pad.bottom + (closeActionBtn.marginBottom or 0))
-
-        f.abandonBtn     = abandonBtn
-        f.shareBtn       = shareBtn
-        f.trackBtn       = trackBtn
-        f.closeActionBtn = closeActionBtn
     else
         local function makeBtn(name, label, w)
             local btn = CreateFrame("Button", name, f, "UIPanelButtonTemplate")
@@ -508,22 +557,25 @@ NS.CB_GetQuestFrame = function(key, botName)
             return btn
         end
 
-        -- Blizz button anchors — adjust BLIZZ_BTN_* constants at top of file.
-        local abandonBtn     = makeBtn("CleanBotQuestAbandon_"      .. key, "Abandon", BLIZZ_ABANDON_W)
-        local shareBtn       = makeBtn("CleanBotQuestShare_"        .. key, "Share",   BLIZZ_SHARE_W)
-        local trackBtn       = makeBtn("CleanBotQuestTrack_"        .. key, "Track",   BLIZZ_TRACK_W)
-        local closeActionBtn = makeBtn("CleanBotQuestCloseAction_"  .. key, "Close",   BLIZZ_CLOSE_BTN_W)
+        abandonBtn     = makeBtn("CleanBotQuestAbandon_"     .. key, "Abandon", BLIZZ_ABANDON_W)
+        shareBtn       = makeBtn("CleanBotQuestShare_"       .. key, "Share",   BLIZZ_SHARE_W)
+        trackBtn       = makeBtn("CleanBotQuestTrack_"       .. key, "Track",   BLIZZ_TRACK_W)
+        closeActionBtn = makeBtn("CleanBotQuestCloseAction_" .. key, "Close",   BLIZZ_CLOSE_BTN_W)
 
         abandonBtn:SetPoint(    "BOTTOMLEFT",  f, "BOTTOMLEFT",  BLIZZ_ABANDON_X,    BLIZZ_BTN_Y)
         shareBtn:SetPoint(      "BOTTOMLEFT",  f, "BOTTOMLEFT",  BLIZZ_SHARE_X,      BLIZZ_BTN_Y)
         trackBtn:SetPoint(      "BOTTOMLEFT",  f, "BOTTOMLEFT",  BLIZZ_TRACK_X,      BLIZZ_BTN_Y)
         closeActionBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -BLIZZ_CLOSE_BTN_X, BLIZZ_BTN_Y)
-
-        f.abandonBtn     = abandonBtn
-        f.shareBtn       = shareBtn
-        f.trackBtn       = trackBtn
-        f.closeActionBtn = closeActionBtn
     end
+
+    shareBtn:Disable()
+    trackBtn:Disable()
+    closeActionBtn:SetScript("OnClick", function() f:Hide() end)
+
+    f.abandonBtn     = abandonBtn
+    f.shareBtn       = shareBtn
+    f.trackBtn       = trackBtn
+    f.closeActionBtn = closeActionBtn
 
     f.questList = {}
     f:Hide()
