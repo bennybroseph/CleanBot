@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotEquip.lua  —  Paperdoll equipment slot buttons.
+-- Equip.lua  —  Paperdoll equipment slot buttons.
 --
 -- All geometry is derived proportionally from the live model
 -- frame dimensions so the layout scales correctly if the model
@@ -24,6 +24,8 @@ local NS = CleanBotNS
 -- Plain-text URL in a selectable EditBox — Ctrl+C works fine on regular text.
 -- Populates `info` with the Wowhead menu entry for `itemLink` and adds it.
 -- Reusable across any UIDropDownMenu that has an item link in scope.
+---@param info     table   UIDropDownMenu button info table to populate and add.
+---@param itemLink string  The item link the Wowhead entry should point to.
 NS.CB_AddWowheadMenuButton = function(info, itemLink)
     info.text         = "Open on Wowhead"
     info.notCheckable = true
@@ -75,6 +77,7 @@ end
 -- ── Shared right-click context menu ──────────────────────────────────────
 local equipMenu = CreateFrame("Frame", "CleanBotEquipMenu", UIParent, "UIDropDownMenuTemplate")
 
+---@param btn table  The equipment slot button the context menu is opened from.
 local function CB_ShowEquipMenu(btn)
     if not btn.itemLink then return end
     UIDropDownMenu_Initialize(equipMenu, function()
@@ -175,6 +178,8 @@ local function CB_BeginUnequipDrag()
     end)
 end
 
+---@param slot  table  The pool slot table (bound bot resolved live via slot.key/unit).
+---@param model table  The DressUpModel the paperdoll slots anchor around.
 NS.CB_CreateEquipSlots = function(slot, model)
     slot.equipSlots = {}
 
@@ -369,12 +374,16 @@ local function cancelWait()
     end
 end
 
+---@param key  string  Bot name-key being refreshed.
+---@param unit string  Unit token to inspect (e.g. "party1").
 local function doRefreshAndNext(key, unit)
     cancelWait()
     NS.CB_RefreshEquipSlots(key, unit)
     processNextInspect()
 end
 
+---@param key  string  Bot name-key being refreshed.
+---@param unit string  Unit token to inspect (e.g. "party1").
 local function startWait(key, unit)
     local elapsed = 0
     waitFrame = CreateFrame("Frame")
@@ -404,6 +413,7 @@ processNextInspect = function()
 end
 
 -- Called from RefreshTabs after all bot tabs are built.
+---@param botList table  Array of { key = string, unit = string } bots to refresh in turn.
 NS.CB_QueueEquipRefresh = function(botList)
     cancelWait()
     NS.pendingInspects = {}
@@ -418,6 +428,7 @@ end
 -- Populates slots early if the server responds before INSPECT_WAIT expires,
 -- but does NOT chain to the next NotifyInspect — the waitFrame timer does that,
 -- ensuring we always respect the throttle window between requests.
+---@param guid string  GUID from the INSPECT_READY event for the inspected unit.
 NS.CB_OnInspectReady = function(guid)
     local info = NS.pendingInspects[guid]
     if info then
@@ -429,6 +440,8 @@ NS.CB_OnInspectReady = function(guid)
 end
 
 -- Refreshes slot icons and the DressUpModel for one bot from live inventory data.
+---@param key  string  Bot name-key whose equip slots are being refreshed.
+---@param unit string  Unit token to read equipped items from (e.g. "party1").
 NS.CB_RefreshEquipSlots = function(key, unit)
     local slots = NS.botEquipSlots and NS.botEquipSlots[key]
     if not slots then return end

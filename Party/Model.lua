@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotModel.lua  —  DressUpModel creation, right-click
+-- Model.lua  —  DressUpModel creation, right-click
 --                        rotation drag, and favourite-star button.
 -- NS.CB_CreateModel is called once per pool slot from CB_CreateSlot.
 -- All event handlers resolve the bound bot live via `slot`, so the model
@@ -7,10 +7,14 @@
 -- ============================================================
 local NS = CleanBotNS
 
--- Creates and fully wires up a DressUpModel for one slot.
--- Stores slot.updateStar (star refresh) and slot.equipSlots (paperdoll).
--- Rotation drag uses the shared capture frame (NS.CB_BeginCapture).
--- Returns the model frame; the caller positions it.
+--- Creates and fully wires up a DressUpModel for one slot.
+--- Stores slot.updateStar (star refresh) and slot.equipSlots (paperdoll).
+--- Rotation drag uses the shared capture frame (NS.CB_BeginCapture).
+---@param slot   table   The pool slot table (bound bot resolved live via slot.key/unit).
+---@param parent table   Parent frame the model is created inside.
+---@param modelW number  Model width.
+---@param modelH number  Model height.
+---@return table         The created DressUpModel (caller positions it).
 NS.CB_CreateModel = function(slot, parent, modelW, modelH)
     local model = CreateFrame("DressUpModel", "CleanBotModel" .. slot.index, parent)
     model:SetSize(modelW, modelH)
@@ -21,6 +25,7 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
     local modelRotation = 0
     local dragLastX     = 0
 
+    --- OnUpdate handler while dragging: rotates the model by the cursor's X delta.
     local function rotateOnUpdate()
         local x     = select(1, GetCursorPosition())
         local delta = x - dragLastX
@@ -31,6 +36,7 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         end
     end
 
+    --- Ends the rotation drag and restores the cursor.
     local function stopDrag()
         NS.CB_EndCapture()
         SetCursor(nil)
@@ -61,6 +67,9 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
 
     -- Favorites are stored as presets["Favorites"] — an array of display-name strings.
     -- These helpers keep the star button decoupled from the array internals.
+    --- Returns whether the given bot key is in the Favorites preset.
+    ---@param key string  Bot display-name key.
+    ---@return boolean
     local function IsFavorite(key)
         if not key or not CleanBot_SavedVars then return false end
         local favs = CleanBot_SavedVars.presets and CleanBot_SavedVars.presets["Favorites"]
@@ -72,6 +81,8 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         return false
     end
 
+    --- Adds the given bot key to the Favorites preset (no-op if already present).
+    ---@param key string  Bot display-name key.
     local function AddFavorite(key)
         if not CleanBot_SavedVars or not CleanBot_SavedVars.presets then return end
         if not CleanBot_SavedVars.presets["Favorites"] then
@@ -83,6 +94,8 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         favs[#favs + 1] = name
     end
 
+    --- Removes the given bot key from the Favorites preset.
+    ---@param key string  Bot display-name key.
     local function RemoveFavorite(key)
         if not CleanBot_SavedVars or not CleanBot_SavedVars.presets then return end
         local favs = CleanBot_SavedVars.presets["Favorites"]
@@ -96,6 +109,7 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         end
     end
 
+    --- Tints the star gold when the bound bot is a favorite, grey otherwise.
     local function UpdateStar()
         if slot.key and IsFavorite(slot.key) then
             starTex:SetVertexColor(1, 0.82, 0)

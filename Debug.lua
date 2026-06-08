@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotDebug.lua  —  developer diagnostics: the KnownBots
+-- Debug.lua  —  developer diagnostics: the KnownBots
 -- popup window and the /cbdebug chat dump.
 -- Reached via "/cleanbot debug knownbots" and "/cbdebug".
 -- ============================================================
@@ -10,6 +10,9 @@ local NS = CleanBotNS
 -- ============================================================
 local debugKnownBotsFrame = nil
 
+--- Builds the multi-line diagnostic text dump: handshake state, the last raw
+--- STATES payload, and per-bot parsed combat strategy flags.
+---@return string  The formatted report, or a placeholder when no bots are known.
 local function CB_FormatKnownBots()
     local lines = {
         "=== Handshake ===",
@@ -50,7 +53,9 @@ local function CB_FormatKnownBots()
     return table.concat(lines, "\n")
 end
 
-function CleanBot_ShowDebugKnownBots()
+--- Opens (creating once, then reusing) the KnownBots diagnostic popup window
+--- and fills it with the CB_FormatKnownBots report.
+NS.CB_ShowDebugKnownBots = function()
     local screenH = UIParent:GetHeight()
     local winW    = 520
     local winH    = math.floor(screenH / 2)

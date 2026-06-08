@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotTrade.lua  —  Automatic inventory on trade.
+-- Trade.lua  —  Automatic inventory on trade.
 --
 -- When the player initiates a trade with a tracked bot:
 --   • Their inventory frame opens automatically.
@@ -17,8 +17,9 @@ local NS = CleanBotNS
 -- the drag/right-click paths can reference the same bot without re-resolving.
 local activeTradeKey = nil  ---@type string|nil
 
--- Accessor used by CleanBotInventory.lua's drag hit-test to check whether
+-- Accessor used by Inventory.lua's drag hit-test to check whether
 -- a trade with a specific bot is currently active.
+---@return string|nil  The active trade partner's key, or nil when no bot trade is open.
 NS.CB_GetActiveTradeKey = function()
     return activeTradeKey
 end
@@ -45,6 +46,8 @@ local TRADE_SLOTS = {
 -- the correct overlay during a drag without touching native mouse events.
 NS.tradeSlotOverlays = {}
 
+--- Creates the invisible right-click Button overlays over the partner's trade slots.
+--- Called once at PLAYER_LOGIN; overlays start hidden and are shown during bot trades.
 local function CB_CreateTradeSlotOverlays()
     for _, entry in ipairs(TRADE_SLOTS) do
         local slot = _G[entry.frame]
@@ -107,6 +110,7 @@ end
 
 -- Shows or hides all trade slot overlays. Called on TRADE_SHOW (bot trade
 -- confirmed) and TRADE_CLOSED so overlays never intercept outside of a trade.
+---@param visible boolean  true to show overlays, false to hide them.
 local function CB_SetTradeOverlaysVisible(visible)
     for _, overlay in pairs(NS.tradeSlotOverlays) do
         if visible then overlay:Show() else overlay:Hide() end

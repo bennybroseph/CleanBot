@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotPartyData.lua  —  strategy definitions, parsers,
+-- PartyData.lua  —  strategy definitions, parsers,
 --                            bot detection, class icon coords
 -- ============================================================
 local NS = CleanBotNS
@@ -169,6 +169,7 @@ end
 -- ============================================================
 -- Default state constructors
 -- ============================================================
+---@return table  A fresh combat-strategy state table with all flags defaulted.
 NS.CB_DefaultCombat = function()
     local t = {}
     for _, grp in ipairs(NS.STRATEGIES) do
@@ -182,6 +183,7 @@ NS.CB_DefaultCombat = function()
     return t
 end
 
+---@return table  A fresh non-combat-strategy state table with all flags defaulted.
 NS.CB_DefaultNonCombat = function()
     local t = {}
     for _, grp in ipairs(NS.NC_STRATEGIES) do
@@ -193,6 +195,10 @@ end
 -- ============================================================
 -- String helpers
 -- ============================================================
+---@param str string  The string to split.
+---@param sep string  The separator to split on (first occurrence only).
+---@return string      The part before the separator.
+---@return string|nil  The part after the separator, or nil if sep was not found.
 NS.CB_SplitOnce = function(str, sep)
     local i = strfind(str, sep, 1, true)
     if i then return strsub(str, 1, i - 1), strsub(str, i + 1) end
@@ -203,6 +209,8 @@ end
 -- `map` is token(cmd) -> field. Every field present in `map` is seeded
 -- false, then any token found in the message (after an optional "Label: "
 -- prefix) flips its field true.
+---@param msg string  Whisper reply text to scan for strategy tokens.
+---@param map table   Token→field lookup; matched fields are set true/false in the result.
 local function CB_ParseTokens(msg, map)
     local result = {}
     for _, field in pairs(map) do result[field] = false end
@@ -218,23 +226,29 @@ local function CB_ParseTokens(msg, map)
 end
 
 -- Parse a bot whisper response to "co ?".
+---@param msg string  The bot's "co ?" reply text.
+---@return table       Combat-strategy state parsed from the reply.
 NS.CB_ParseCombatStr = function(msg)
     return CB_ParseTokens(msg, NS.STRATEGY_MAP)
 end
 
 -- Parse a bot whisper response to "nc ?".
+---@param msg string  The bot's "nc ?" reply text.
+---@return table       Non-combat-strategy state parsed from the reply.
 NS.CB_ParseNonCombatStr = function(msg)
     return CB_ParseTokens(msg, NS.NC_STRATEGY_MAP)
 end
 
 -- ============================================================
 -- Class-specific data helpers
--- (NS.CLASS_STRATEGIES is defined in CleanBotClassData.lua, which loads after
+-- (NS.CLASS_STRATEGIES is defined in ClassData.lua, which loads after
 --  this file. These helpers are only called at event time, so the forward
 --  reference resolves before first use.)
 -- ============================================================
 
 -- Returns a fresh classData table for a given class.
+---@param class string  Class token (e.g. "WARRIOR").
+---@return table         Default class-strategy state for that class.
 NS.CB_DefaultClassData = function(class)
     local result = { combat = {}, nonCombat = {} }
     local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
@@ -259,6 +273,10 @@ end
 -- Parse a co? or nc? response for class-specific strategy tokens.
 -- section: "combat" or "nonCombat"
 -- Returns { field = bool } for every strategy in that section.
+---@param msg     string  The bot's class-strategy reply text.
+---@param class   string  Class token (e.g. "WARRIOR").
+---@param section string  Which class section the reply belongs to.
+---@return table          Class-strategy state parsed from the reply.
 NS.CB_ParseClassStr = function(msg, class, section)
     local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[class]
     if not cs or not cs[section] then return {} end
@@ -275,6 +293,8 @@ end
 -- ============================================================
 -- Bot detection
 -- ============================================================
+---@param unit string  Unit token to test (e.g. "party1").
+---@return boolean      Whether the unit is a tracked playerbot.
 NS.CleanBot_IsBot = function(unit)
     local name = UnitName(unit)
     if not name then return false end
@@ -288,6 +308,8 @@ end
 -- ============================================================
 
 -- Returns the party unit id ("partyN") whose name matches, or nil.
+---@param name string  Character name to locate in the party/raid.
+---@return string|nil   The matching unit token (e.g. "party2"), or nil if not found.
 NS.CB_FindPartyUnit = function(name)
     for i = 1, GetNumPartyMembers() do
         local unit = "party" .. i
@@ -298,6 +320,9 @@ end
 
 -- Resolves a bot's class token from the live party roster (authoritative),
 -- falling back to the supplied value (or WARRIOR) when the unit isn't found.
+---@param name     string  Character name to resolve the class for.
+---@param fallback string? Class token to return when resolution fails.
+---@return string|nil       The resolved class token, or fallback.
 NS.CB_ResolveClass = function(name, fallback)
     local unit = NS.CB_FindPartyUnit(name)
     if unit then
@@ -308,6 +333,8 @@ NS.CB_ResolveClass = function(name, fallback)
 end
 
 -- Parses a combat strategy string into entry.combat + entry.classData.combat.
+---@param entry     table   The bot roster entry to store parsed flags on.
+---@param combatStr string  The bot's "co ?" reply text.
 NS.CB_StoreCombat = function(entry, combatStr)
     if not entry then return end
     entry.combat = NS.CB_ParseCombatStr(combatStr)
@@ -316,6 +343,8 @@ NS.CB_StoreCombat = function(entry, combatStr)
 end
 
 -- Parses a non-combat strategy string into entry.nonCombat + entry.classData.nonCombat.
+---@param entry table   The bot roster entry to store parsed flags on.
+---@param ncStr string  The bot's "nc ?" reply text.
 NS.CB_StoreNonCombat = function(entry, ncStr)
     if not entry then return end
     entry.nonCombat = NS.CB_ParseNonCombatStr(ncStr)

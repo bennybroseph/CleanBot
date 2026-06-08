@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotEquipData.lua  —  Static equipment slot definitions.
+-- EquipData.lua  —  Static equipment slot definitions.
 -- Each entry: id (inventory slot ID), name, tex (empty-slot
 -- fallback texture), side ("left"|"right"|"bottom"), order
 -- (1-based position within that side, top-to-bottom / left-to-right).
@@ -7,14 +7,17 @@
 local NS = CleanBotNS
 
 -- Proportional paperdoll slot geometry derived from the live model size.
--- Single source of truth shared by the equip-column layout (CleanBotParty's
--- CB_GetGeometry) and the slot-button creation (CleanBotEquip's
+-- Single source of truth shared by the equip-column layout (Party.lua's
+-- CB_GetGeometry) and the slot-button creation (Equip.lua's
 -- CB_CreateEquipSlots) so the two layouts never drift.
 --   step    = modelH / 8    (8 slots distributed down the model height)
 --   slot    = step * 0.88   (12% gap between consecutive slots)
 --   gapX    = modelW * 0.03 (column separation from the model edge)
 --   gapYBot = modelH * 0.02 (weapon-row clearance below the model)
 --   colW    = slot + gapX   (full width of one equip column)
+---@param modelW number  Live model width.
+---@param modelH number  Live model height.
+---@return table         { step, slot, gapX, gapYBot, colW } slot geometry.
 NS.CB_SlotGeometry = function(modelW, modelH)
     local step = math.floor(modelH / 8)
     local slot = math.floor(step * 0.88)

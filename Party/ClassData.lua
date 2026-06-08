@@ -1,5 +1,5 @@
 -- ============================================================
--- CleanBotClassData.lua  —  class display names and class-specific
+-- ClassData.lua  —  class display names and class-specific
 --                            strategy definitions
 --
 -- NS.CLASS_STRATEGIES[CLASS] = {
