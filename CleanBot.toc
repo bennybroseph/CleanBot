@@ -16,6 +16,7 @@ Party\CleanBotInventory.lua
 Party\CleanBotEquip.lua
 Party\CleanBotModel.lua
 Party\CleanBotParty.lua
+CleanBotTrade.lua
 CleanBotManageTab.lua
 CleanBotSettingsTab.lua
 CleanBotDebug.lua
