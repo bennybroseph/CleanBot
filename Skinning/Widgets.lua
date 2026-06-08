@@ -8,6 +8,27 @@
 -- ============================================================
 local NS = CleanBotNS
 
+-- Native Blizzard +/− circle button art, shared by the standalone collapse button
+-- and the Manage-tab section toggle. No FrameXML template exists for these (Blizzard's
+-- own quest/reputation/skill headers set the same textures inline), so both call sites
+-- route through CB_SetCollapseTexture instead of duplicating the paths.
+local COLLAPSE_MINUS_UP = "Interface\\Buttons\\UI-MinusButton-Up"
+local COLLAPSE_MINUS_DN = "Interface\\Buttons\\UI-MinusButton-Down"
+local COLLAPSE_PLUS_UP  = "Interface\\Buttons\\UI-PlusButton-Up"
+local COLLAPSE_PLUS_DN  = "Interface\\Buttons\\UI-PlusButton-Down"
+local COLLAPSE_PLUS_HL  = "Interface\\Buttons\\UI-PlusButton-Hilight"
+
+--- Sets a button's normal/pushed textures to the + (collapsed) or − (expanded) art.
+---@param btn       table    The button to texture.
+---@param collapsed boolean  true → plus (collapsed), false → minus (expanded).
+local function CB_SetCollapseTexture(btn, collapsed)
+    if collapsed then
+        btn:SetNormalTexture(COLLAPSE_PLUS_UP) ; btn:SetPushedTexture(COLLAPSE_PLUS_DN)
+    else
+        btn:SetNormalTexture(COLLAPSE_MINUS_UP) ; btn:SetPushedTexture(COLLAPSE_MINUS_DN)
+    end
+end
+
 -- FontString label. fontObj defaults to "GameFontNormal".
 ---@param parent  table    Parent frame to create the FontString inside.
 ---@param text    string?  Optional initial label text.
@@ -49,21 +70,8 @@ end
 NS.CB_CreateCollapseButton = function(parent, isCollapsed)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(16, 16)
-
-    local MINUS_UP = "Interface\\Buttons\\UI-MinusButton-Up"
-    local MINUS_DN = "Interface\\Buttons\\UI-MinusButton-Down"
-    local PLUS_UP  = "Interface\\Buttons\\UI-PlusButton-Up"
-    local PLUS_DN  = "Interface\\Buttons\\UI-PlusButton-Down"
-    local PLUS_HL  = "Interface\\Buttons\\UI-PlusButton-Hilight"
-
-    if isCollapsed then
-        btn:SetNormalTexture(PLUS_UP)
-        btn:SetPushedTexture(PLUS_DN)
-    else
-        btn:SetNormalTexture(MINUS_UP)
-        btn:SetPushedTexture(MINUS_DN)
-    end
-    btn:SetHighlightTexture(PLUS_HL, "ADD")
+    CB_SetCollapseTexture(btn, isCollapsed)
+    btn:SetHighlightTexture(COLLAPSE_PLUS_HL, "ADD")
 
     if NS.ElvUI_S then
         NS.ElvUI_S:HandleCollapseExpandButton(btn, isCollapsed and "+" or "-")
@@ -105,15 +113,8 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local toggleBtn = CreateFrame("Button", "CleanBotSection_" .. key .. "_Toggle", parent)
     toggleBtn:SetSize(14, 14)
 
-    local MINUS_UP = "Interface\\Buttons\\UI-MinusButton-Up"
-    local MINUS_DN = "Interface\\Buttons\\UI-MinusButton-Down"
-    local PLUS_UP  = "Interface\\Buttons\\UI-PlusButton-Up"
-    local PLUS_DN  = "Interface\\Buttons\\UI-PlusButton-Down"
-    local PLUS_HL  = "Interface\\Buttons\\UI-PlusButton-Hilight"
-
-    toggleBtn:SetNormalTexture(MINUS_UP)
-    toggleBtn:SetPushedTexture(MINUS_DN)
-    toggleBtn:SetHighlightTexture(PLUS_HL, "ADD")
+    CB_SetCollapseTexture(toggleBtn, false)  -- start expanded (−)
+    toggleBtn:SetHighlightTexture(COLLAPSE_PLUS_HL, "ADD")
 
     -- ElvUI hooks SetNormalTexture internally to swap in its own Plus/Minus textures,
     -- so our SetText override (which calls SetNormalTexture) still drives the state.
@@ -121,11 +122,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
 
     -- Swap between + (collapsed) and − (expanded) by swapping normal/pushed textures.
     toggleBtn.SetText = function(self, text)
-        if text == "+" then
-            self:SetNormalTexture(PLUS_UP) ; self:SetPushedTexture(PLUS_DN)
-        else
-            self:SetNormalTexture(MINUS_UP) ; self:SetPushedTexture(MINUS_DN)
-        end
+        CB_SetCollapseTexture(self, text == "+")
     end
 
     -- Title label: FontString on parent, to the right of the toggle button.
@@ -266,7 +263,10 @@ end
 ---@param onSelect fun(value:string)? Called with the row value on click.
 ---@return table             The container frame with SetItems / GetSelected methods.
 NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
-    local ROW_H = 20
+    local ROW_H      = 20
+    -- Number of physical row buttons that fit; scrolling remaps these onto the data
+    -- rather than creating a button per item.
+    local numVisible = math.max(1, math.floor((height - 4) / ROW_H))
 
     -- Outer bordered container. CB_ApplyInnerSkin gives it the panel-inset look
     -- without registering it for theme-refresh (the list colour is fixed art).
@@ -275,18 +275,17 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     container:SetSize(width + 20, height)
     NS.CB_ApplyInnerSkin(container)
 
-    -- ScrollFrame inset 2px from the container walls; 20px right gap keeps the
+    -- Backing data and selection. selectedIndex is an ABSOLUTE index into `items`
+    -- so the highlighted entry survives scrolling and row recycling.
+    local items         = {}
+    local selectedIndex = nil
+
+    -- FauxScrollFrame inset 2px from the container walls; 20px right gap keeps the
     -- scrollbar (18px) plus a 2px mirror of the left inset inside the container border.
-    local sf = CreateFrame("ScrollFrame", name .. "SF", container,
-        "UIPanelScrollFrameTemplate")
+    local sf = CreateFrame("ScrollFrame", name .. "SF", container, "FauxScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     container, "TOPLEFT",      2,  -2)
     sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -20,  2)
-    sf:EnableMouseWheel(true)
-    sf:SetScript("OnMouseWheel", function(self, delta)
-        local cur = self:GetVerticalScroll()
-        local max = self:GetVerticalScrollRange()
-        self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * ROW_H)))
-    end)
+
     -- Re-anchor the scrollbar explicitly so it sits inside the container's right
     -- zone rather than floating to the right of the scroll frame (template default).
     local scrollBar = _G[name .. "SFScrollBar"]
@@ -297,63 +296,85 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
         if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(scrollBar) end
     end
 
-    local content = CreateFrame("Frame", name .. "Content", sf)
-    content:SetHeight(1)
-    sf:SetScrollChild(content)
-    sf:SetScript("OnSizeChanged", function(self, w, _)
-        content:SetWidth(w)
+    local rows = {}
+
+    -- Re-maps the fixed row pool onto items[offset+1 .. offset+numVisible] and
+    -- refreshes the FauxScrollFrame's scrollbar range.
+    local function refresh()
+        local offset = FauxScrollFrame_GetOffset(sf)
+        for i = 1, numVisible do
+            local row     = rows[i]
+            local dataIdx = i + offset
+            local value   = items[dataIdx]
+            if value then
+                row.index = dataIdx
+                row.value = value
+                row.label:SetText(value)
+                row.hl:SetAlpha(dataIdx == selectedIndex and 0.4 or 0)
+                row:Show()
+            else
+                row.index = nil
+                row.value = nil
+                row:Hide()
+            end
+        end
+        FauxScrollFrame_Update(sf, #items, numVisible, ROW_H)
+    end
+
+    -- Fixed pool of row buttons at static offsets over the scroll area. They are
+    -- parented to `container`, NOT to `sf`: FauxScrollFrame_Update calls sf:Hide()
+    -- whenever the items fit without scrolling, which would also hide any rows
+    -- parented to sf. Anchoring to sf (cross-frame) still positions them correctly.
+    for i = 1, numVisible do
+        local row = CreateFrame("Button", nil, container)
+        row:SetHeight(ROW_H)
+        row:SetPoint("TOPLEFT",  sf, "TOPLEFT",  0, -(i - 1) * ROW_H)
+        row:SetPoint("TOPRIGHT", sf, "TOPRIGHT", 0, -(i - 1) * ROW_H)
+
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+        row.label = lbl
+
+        -- Highlight texture shown at reduced alpha when the row is selected.
+        local hl = row:CreateTexture(nil, "BACKGROUND")
+        hl:SetAllPoints()
+        hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        hl:SetBlendMode("ADD")
+        hl:SetAlpha(0)
+        row.hl = hl
+
+        row:SetScript("OnClick", function(self)
+            if not self.index then return end
+            selectedIndex = self.index
+            refresh()
+            if onSelect then onSelect(self.value) end
+        end)
+
+        row:Hide()
+        rows[i] = row
+    end
+
+    -- Scrolling the bar (drag, wheel, or step buttons) re-maps the visible rows.
+    sf:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, ROW_H, refresh)
+    end)
+    -- Wheel handling lives on `container`: the rows (and sf, when it hides itself for
+    -- short lists) may not be under the cursor, but the container always is.
+    container:EnableMouseWheel(true)
+    container:SetScript("OnMouseWheel", function(_, delta)
+        if scrollBar then scrollBar:SetValue(scrollBar:GetValue() - delta * ROW_H) end
     end)
 
-    -- Shared state captured by row closures. Reassigning `rows` inside SetItems
-    -- is safe — all closures share the same upvalue reference, so a new call to
-    -- SetItems immediately makes old OnClick handlers operate on the new table.
-    -- Old rows are hidden anyway and will not receive clicks.
-    local rows          = {}
-    local selectedIndex = nil
-
-    container.SetItems = function(self, items)
-        for _, r in ipairs(rows) do r:Hide() end
-        rows          = {}
+    container.SetItems = function(self, newItems)
+        items         = newItems or {}
         selectedIndex = nil
-
-        for i, text in ipairs(items) do
-            local row = CreateFrame("Button", nil, content)
-            row:SetHeight(ROW_H)
-            row:SetPoint("TOPLEFT",  content, "TOPLEFT",  0, -(i - 1) * ROW_H)
-            row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -(i - 1) * ROW_H)
-
-            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
-            lbl:SetText(text)
-            row.label = lbl
-
-            -- Highlight texture shown at reduced alpha when the row is selected.
-            local hl = row:CreateTexture(nil, "BACKGROUND")
-            hl:SetAllPoints()
-            hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-            hl:SetBlendMode("ADD")
-            hl:SetAlpha(0)
-            row.hl = hl
-
-            row.index = i
-            row.value = text
-
-            row:SetScript("OnClick", function(self)
-                selectedIndex = self.index
-                for _, other in ipairs(rows) do
-                    other.hl:SetAlpha(other.index == selectedIndex and 0.4 or 0)
-                end
-                if onSelect then onSelect(self.value) end
-            end)
-
-            rows[i] = row
-        end
-
-        content:SetHeight(math.max(#items * ROW_H, 1))
+        sf.offset = 0
+        if scrollBar then scrollBar:SetValue(0) end
+        refresh()
     end
 
     container.GetSelected = function(self)
-        return selectedIndex and rows[selectedIndex] and rows[selectedIndex].value
+        return selectedIndex and items[selectedIndex] or nil
     end
 
     container.marginTop    = NS.MARGIN.button.top
@@ -455,12 +476,12 @@ NS.CB_CreateCheckBox = function(parent, name)
     return cb
 end
 
--- Tab button built on UIPanelButtonTemplate.
--- PanelTabButtonTemplate does not exist in WoW 3.3.5a, so we use the standard
--- button template and layer the active/inactive visual state on top.
--- Exposes tab:SetActive(bool) so call sites do not need to manage font objects
--- or button states directly.
--- ElvUI is applied via HandleButton when available.
+-- Tab button built on UIPanelButtonTemplate, with the active/inactive state layered
+-- on top. The native TabButtonTemplate was tried but ElvUI's HandleTab insets its
+-- backdrop 10px per side (tuned for full-size frame tabs), which renders this addon's
+-- compact NS.TAB_WIDTH (88px) tabs far too small — so the button template + HandleButton
+-- gives a correctly-sized, ElvUI-consistent result instead.
+-- Exposes tab:SetActive(bool) so call sites do not need to manage font objects or states.
 ---@param parent  table    Parent frame.
 ---@param name    string?  Optional global frame name.
 ---@param text    string?  Tab label.

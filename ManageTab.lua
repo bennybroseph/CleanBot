@@ -382,18 +382,25 @@ NS.CleanBot_BuildManageTab = function()
         "Remove Preset", 110, 24)
     NS.CB_AnchorBelow(removePresetBtn, renamePresetBtn)
 
-    -- ── Col-2 buttons (independently anchored below presetList2) ──────────────
+    -- ── Col-2 buttons (aligned under presetList2's left edge) ─────────────────
+    -- CB_AnchorBelow pins X to the parent's left wall (single-column flow), so the
+    -- right column can't use it — it is anchored explicitly to presetList2 and then
+    -- chained BOTTOMLEFT→TOPLEFT (X inherited from the button above), using the same
+    -- gap formula (above.marginBottom + widget.marginTop) so spacing matches col-1.
     local addBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetAddBotBtn",
         "Add Bot", 110, 24)
-    NS.CB_AnchorBelow(addBotBtn, presetList2)
+    addBotBtn:SetPoint("TOPLEFT", presetList2, "BOTTOMLEFT",
+        0, -((presetList2.marginBottom or 0) + (addBotBtn.marginTop or 0)))
 
     local renameBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRenameBotBtn",
         "Rename Bot", 110, 24)
-    NS.CB_AnchorBelow(renameBotBtn, addBotBtn)
+    renameBotBtn:SetPoint("TOPLEFT", addBotBtn, "BOTTOMLEFT",
+        0, -((addBotBtn.marginBottom or 0) + (renameBotBtn.marginTop or 0)))
 
     local removeBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetRemoveBotBtn",
         "Remove Bot", 110, 24)
-    NS.CB_AnchorBelow(removeBotBtn, renameBotBtn)
+    removeBotBtn:SetPoint("TOPLEFT", renameBotBtn, "BOTTOMLEFT",
+        0, -((renameBotBtn.marginBottom or 0) + (removeBotBtn.marginTop or 0)))
 
     presetsSection:Finalize(removePresetBtn)  -- col-1 deepest; both cols same row count
 
