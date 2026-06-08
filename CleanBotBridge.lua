@@ -244,7 +244,7 @@ end
 
 NS.CB_RequestInventory = function(key, botName)
     NS.CB_FetchInventory(key, botName)
-    NS.CB_ShowInventory(key, botName)
+    NS.CB_ToggleInventory(key, botName)
 end
 
 -- ============================================================

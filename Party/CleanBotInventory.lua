@@ -169,12 +169,17 @@ end
 -- ── Drag stop (shared by cell OnMouseUp and capture frame OnMouseUp) ─────
 local function CB_StopDrag()
     if not NS.dragging then return end
-    if NS.dragging.hoverBtn     then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
-    if NS.dragging.hoverInvCell then NS.dragging.hoverInvCell:UnlockHighlight() end
+if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
+    if NS.dragging.hoverInvCell   then NS.dragging.hoverInvCell:UnlockHighlight() end
+    if NS.dragging.hoverTradeSlot and NS.tradeSlotOverlays then
+        local ov = NS.tradeSlotOverlays[NS.dragging.hoverTradeSlot]
+        if ov then ov:UnlockHighlight() end
+    end
 
-    local dropBtn    = NS.dragging.dropBtn
-    local invDropCell = NS.dragging.invDropCell
-    local src        = NS.dragging.sourceCell
+    local dropBtn      = NS.dragging.dropBtn
+    local invDropCell  = NS.dragging.invDropCell
+    local dropTradeSlot = NS.dragging.dropTradeSlot
+    local src          = NS.dragging.sourceCell
 
     if dropBtn then
         -- ── Drop onto equip slot → equip item ─────────────────
@@ -230,6 +235,13 @@ local function CB_StopDrag()
         end
 
         src.icon:SetDesaturated(false)
+    elseif dropTradeSlot then
+        -- ── Drop onto trade slot → tell bot to offer the item ─────────────
+        local entry = CleanBot_PartyBots[NS.dragging.key]
+        if entry then
+            NS.CB_SendBotCommand(entry.name, "give " .. NS.CB_CleanItemLink(NS.dragging.link))
+        end
+        if src then src.icon:SetDesaturated(false) end
     else
         -- ── Cancelled ─────────────────────────────────────────
         if src then src.icon:SetDesaturated(false) end
@@ -306,6 +318,39 @@ local function CB_DragOnUpdate()
         NS.dragging.hoverInvCell = foundCell
     end
     NS.dragging.invDropCell = foundCell
+
+    -- ── Trade slot hit-test (bot's side; only when trading this bot) ─────────
+    -- TradeRecipientItem frames are not Buttons so we use a texture highlight
+    -- rather than LockHighlight/UnlockHighlight.
+    local foundTradeSlot = nil
+    if not foundBtn and not foundCell then
+        local activeKey = NS.CB_GetActiveTradeKey and NS.CB_GetActiveTradeKey()
+        if activeKey and activeKey == NS.dragging.key and TradeFrame and TradeFrame:IsShown() then
+            for i = 1, 6 do
+                local slot = _G["TradeRecipientItem" .. i]
+                if slot and slot:IsVisible() then
+                    local l, r, b, t = slot:GetLeft(), slot:GetRight(), slot:GetBottom(), slot:GetTop()
+                    if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
+                        foundTradeSlot = slot; break
+                    end
+                end
+            end
+        end
+    end
+
+    if foundTradeSlot ~= NS.dragging.hoverTradeSlot then
+        local overlays = NS.tradeSlotOverlays
+        if NS.dragging.hoverTradeSlot and overlays then
+            local prev = overlays[NS.dragging.hoverTradeSlot]
+            if prev then prev:UnlockHighlight() end
+        end
+        if foundTradeSlot and overlays then
+            local next = overlays[foundTradeSlot]
+            if next then next:LockHighlight() end
+        end
+        NS.dragging.hoverTradeSlot = foundTradeSlot
+    end
+    NS.dragging.dropTradeSlot = foundTradeSlot
 end
 
 -- Begins an item drag: shows the shared capture frame wired to track the
@@ -705,15 +750,28 @@ NS.CB_RenderInventory = function(key)
     end
 end
 
--- ── Open / toggle the inventory frame ────────────────────────────────────
-NS.CB_ShowInventory = function(key, botName)
+-- ── Open the inventory frame (always shows, never toggles) ───────────────
+-- anchor is an optional frame to position relative to. When provided the
+-- inventory is placed to its right; otherwise it defaults to CleanBotFrame's left.
+NS.CB_ShowInventory = function(key, botName, anchor)
+    local f = NS.CB_GetInventoryFrame(key, botName)
+    f:ClearAllPoints()
+    if anchor then
+        f:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+    else
+        f:SetPoint("TOPRIGHT", CleanBotFrame, "TOPLEFT", -4, 0)
+    end
+    NS.CB_RenderInventory(key)
+    f:Show()
+end
+
+-- ── Toggle the inventory frame open/closed ────────────────────────────────
+-- anchor is forwarded to CB_ShowInventory when opening.
+NS.CB_ToggleInventory = function(key, botName, anchor)
     local f = NS.CB_GetInventoryFrame(key, botName)
     if f:IsShown() then
         f:Hide()
     else
-        f:ClearAllPoints()
-        f:SetPoint("TOPRIGHT", CleanBotFrame, "TOPLEFT", -4, 0)
-        NS.CB_RenderInventory(key)
-        f:Show()
+        NS.CB_ShowInventory(key, botName, anchor)
     end
 end
