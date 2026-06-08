@@ -51,8 +51,8 @@ local QUEST_GAP      = 1    -- vertical gap between rows (px)
 
 -- Per-status display metadata: group label and header text color.
 local QUEST_STATUS_INFO = {
-    I = { label = "Incomplete", r = 1.0,  g = 0.82, b = 0.0 },  -- gold
-    C = { label = "Complete",   r = 0.0,  g = 1.0,  b = 0.0 },  -- green
+    I = { label = "Incomplete", r = 1.0,   g = 1.0,   b = 0.0   },  -- #ffff00
+    C = { label = "Complete",   r = 0.251, g = 0.749, b = 0.251 },  -- #40bf40
     F = { label = "Failed",     r = 1.0,  g = 0.2,  b = 0.2 },  -- red
 }
 -- Render order: most actionable (Incomplete) first.
