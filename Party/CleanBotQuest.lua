@@ -10,10 +10,17 @@ local NS = CleanBotNS
 -- with a 34px visual divider between them.
 local BLIZZ_W      = 682
 local BLIZZ_H      = 447
-local BLIZZ_TOP    = 75   -- parchment top inset (chrome header band)
-local BLIZZ_BOTTOM = 37   -- parchment bottom inset
-local BLIZZ_SIDE   = 19   -- left and right inset
-local BLIZZ_PANE_W = 305  -- width of each content pane
+-- Shared Y insets for both scroll panes.
+local BLIZZ_PANE_TOP    = 74   -- inset from frame top (chrome header band)
+local BLIZZ_PANE_BOTTOM = 37   -- inset from frame bottom
+
+-- Left pane X: offset from frame left / frame right.
+local BLIZZ_LEFT_PANE_L  = 19
+local BLIZZ_LEFT_PANE_R  = 342
+
+-- Right pane X: offset from frame left / frame right.
+local BLIZZ_RIGHT_PANE_L = 358
+local BLIZZ_RIGHT_PANE_R = 12
 
 -- ── Blizz button layout ──────────────────────────────────────────────────
 -- Each bottom button has its own width and X; all share the same Y and height.
@@ -32,6 +39,9 @@ local BLIZZ_CLOSE_BTN_X  = 7    -- inset from frame right edge
 
 local BLIZZ_X_BTN_X = 2         -- X close button offset from TOPRIGHT
 local BLIZZ_X_BTN_Y = -8
+
+local BLIZZ_TITLE_X = 0         -- title label offset from frame TOP (CENTER anchor)
+local BLIZZ_TITLE_Y = -23
 
 -- ── Quest frames pool ────────────────────────────────────────────────────
 NS.botQuestFrames = {}
@@ -132,23 +142,23 @@ NS.CB_GetQuestFrame = function(key, botName)
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetText(botName .. "'s Quest Log")
-        title:SetPoint("CENTER", f, "TOP", 0, -36)
+        title:SetPoint("CENTER", f, "TOP", BLIZZ_TITLE_X, BLIZZ_TITLE_Y)
         title:SetJustifyH("CENTER")
 
         closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", BLIZZ_X_BTN_X, BLIZZ_X_BTN_Y)
 
         -- Two scroll containers manually placed over the left and right parchment panes.
-        -- Left pane: SIDE → SIDE+PANE_W. Right pane: mirrored from the right edge.
-        local rightOffset = BLIZZ_W - BLIZZ_SIDE - BLIZZ_PANE_W
+        -- Tweak BLIZZ_LEFT/RIGHT_PANE_L/R at the top of this file to adjust X.
+        -- Tweak BLIZZ_PANE_TOP/BOTTOM to adjust Y (shared by both panes).
         listScrollParent = CB_MakeScrollContainer(f,
             "CleanBotQuestsLeftPane_" .. key,
-            BLIZZ_SIDE, BLIZZ_TOP,
-            rightOffset, BLIZZ_BOTTOM)
+            BLIZZ_LEFT_PANE_L,  BLIZZ_PANE_TOP,
+            BLIZZ_LEFT_PANE_R,  BLIZZ_PANE_BOTTOM)
 
         detailScrollParent = CB_MakeScrollContainer(f,
             "CleanBotQuestsRightPane_" .. key,
-            rightOffset, BLIZZ_TOP,
-            BLIZZ_SIDE, BLIZZ_BOTTOM)
+            BLIZZ_RIGHT_PANE_L, BLIZZ_PANE_TOP,
+            BLIZZ_RIGHT_PANE_R, BLIZZ_PANE_BOTTOM)
     end
 
     local sf,  sc  = NS.CB_CreateScrollFrame(listScrollParent,   "CleanBotQuestScroll_"       .. key)
