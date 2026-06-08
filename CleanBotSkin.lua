@@ -673,14 +673,21 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         return self.collapsed and self.toggleBtn or (self.lastWidget or self.toggleBtn)
     end
 
+    -- Shared width calculation used by both Apply and the OnSizeChanged hook.
+    local function calcBgWidth()
+        local mar        = NS.MARGIN.section
+        local rightInset = (parent.paddingRight or 0) + mar.right
+        local pw         = parent:GetWidth()
+        return math.max(pw > 0 and (pw - (parent.paddingLeft or 0) - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1)
+    end
+
     section.Apply = function(self)
         -- Content widgets are children of bg and hide/show automatically with it.
         if self.collapsed then
             self.bg:Hide()
         else
-            local mar        = NS.MARGIN.section
-            local topGap     = (toggleBtn.marginBottom or 0) + mar.top
-            local rightInset = (parent.paddingRight or 0) + mar.right
+            local mar    = NS.MARGIN.section
+            local topGap = (toggleBtn.marginBottom or 0) + mar.top
             -- Anchor TOPLEFT to toggleBtn BOTTOMLEFT so bg tracks the toggle when
             -- reflow moves it. toggleBtn is already at panel.left from the panel wall,
             -- so only the section margin delta is needed as an X offset — not leftX
@@ -688,16 +695,21 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
             self.bg:ClearAllPoints()
             self.bg:SetPoint("TOPLEFT", toggleBtn, "BOTTOMLEFT",
                 mar.left - (toggleBtn.marginLeft or 0), -topGap)
-            -- Width spans from toggleBtn's left edge to the panel right inset.
-            -- toggleBtn sits at panel.left already, so subtract only its own left
-            -- margin (0) and the right inset to get the remaining available width.
-            local pw = parent:GetWidth()
-            self.bg:SetWidth(math.max(pw > 0 and (pw - (parent.paddingLeft or 0) - (toggleBtn.marginLeft or 0) - rightInset) or 200, 1))
+            self.bg:SetWidth(calcBgWidth())
             self.bg:SetHeight(2000)  -- corrected by UpdateBackground after first render
             self.bg:Show()
         end
         toggleBtn:SetText(self.collapsed and "+" or "-")
     end
+
+    -- Re-sync bg width whenever the parent (scroll child) changes size — e.g. when
+    -- the frame collapses or expands on tab switch. Only updates width; height is
+    -- managed separately by UpdateBackground to avoid resetting the 2000px placeholder.
+    parent:HookScript("OnSizeChanged", function()
+        if not section.collapsed and section.bg:IsShown() then
+            section.bg:SetWidth(calcBgWidth())
+        end
+    end)
 
     section.Toggle = function(self)
         self.collapsed = not self.collapsed
