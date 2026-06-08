@@ -91,6 +91,7 @@ NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
 NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
+NS.MODEL_GAP         = 25  -- gap between the model panel and the strategy panel in the Party tab
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- Per-frame padding — space between a frame's border and the content inside it (CSS padding).

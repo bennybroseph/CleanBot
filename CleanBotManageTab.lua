@@ -342,7 +342,7 @@ NS.CleanBot_BuildManageTab = function()
     NS.CB_AnchorAhead(inviteBotBtn, invitePresetBtn)
 
     -- ── Row 2: Selectable lists ───────────────────────────
-    local presetList1 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList1", 160, 104,
+    local presetList1 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList1", 155, 104,
         function(name)
             selectedPresetName = name
             local entries = (CleanBot_SavedVars.presets or {})[name] or {}
@@ -350,7 +350,7 @@ NS.CleanBot_BuildManageTab = function()
         end)
     NS.CB_AnchorBelow(presetList1, invitePresetBtn)
 
-    presetList2 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList2", 160, 104)
+    presetList2 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList2", 155, 104)
     presetList2.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(presetList2, presetList1)
 

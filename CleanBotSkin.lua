@@ -789,22 +789,30 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     -- Outer bordered container. CB_ApplyInnerSkin gives it the panel-inset look
     -- without registering it for theme-refresh (the list colour is fixed art).
     local container = CreateFrame("Frame", name, parent)
-    container:SetSize(width, height)
+    -- width is the content area; add 20px (2px left inset + 18px scrollbar) for the container.
+    container:SetSize(width + 20, height)
     CB_ApplyInnerSkin(container)
 
-    -- ScrollFrame inset 2px from the container walls; 18px right gap for the bar.
+    -- ScrollFrame inset 2px from the container walls; 20px right gap keeps the
+    -- scrollbar (18px) plus a 2px mirror of the left inset inside the container border.
     local sf = CreateFrame("ScrollFrame", name .. "SF", container,
         "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     container, "TOPLEFT",      2,  -2)
-    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -18,  2)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -20,  2)
     sf:EnableMouseWheel(true)
     sf:SetScript("OnMouseWheel", function(self, delta)
         local cur = self:GetVerticalScroll()
         local max = self:GetVerticalScrollRange()
         self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * ROW_H)))
     end)
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleScrollBar(_G[name .. "SFScrollBar"])
+    -- Re-anchor the scrollbar explicitly so it sits inside the container's right
+    -- zone rather than floating to the right of the scroll frame (template default).
+    local scrollBar = _G[name .. "SFScrollBar"]
+    if scrollBar then
+        scrollBar:ClearAllPoints()
+        scrollBar:SetPoint("TOPLEFT",    container, "TOPRIGHT",    -20, -20)
+        scrollBar:SetPoint("BOTTOMLEFT", container, "BOTTOMRIGHT", -20,  20)
+        if NS.ElvUI_S then NS.ElvUI_S:HandleScrollBar(scrollBar) end
     end
 
     local content = CreateFrame("Frame", name .. "Content", sf)

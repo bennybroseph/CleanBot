@@ -27,8 +27,15 @@ NS.CleanBot_BuildPartyTab = function()
     NS.partyEmptyLabel:SetText("")
 
     NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
-    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT", 0,  0)
+    -- Inset partyContent by partyPanel's stamped padding so all model/equip/strategy
+    -- content respects the panel border. BOT_BAR_H is added to paddingTop because
+    -- the bot tab bar sits above the content area and is intentionally edge-to-edge.
+    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",
+         NS.partyPanel.paddingLeft,
+       -(NS.BOT_BAR_H + NS.partyPanel.paddingTop))
+    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT",
+        -NS.partyPanel.paddingRight,
+         NS.partyPanel.paddingBottom)
 
     -- ── Two-column panel structure ────────────────────────────────
     -- Compute model panel width from frame height (decoupled from frame width).
@@ -53,11 +60,16 @@ NS.CleanBot_BuildPartyTab = function()
 
     -- Column 2: strategy tabs and controls. Fills the remaining width via BOTTOMRIGHT.
     NS.partyStratPanel = CreateFrame("Frame", "CleanBotPartyStratPanel", NS.partyContent)
-    NS.partyStratPanel:SetPoint("TOPLEFT",     NS.partyModelPanel, "TOPRIGHT",    0, 0)
+    NS.partyStratPanel:SetPoint("TOPLEFT",     NS.partyModelPanel, "TOPRIGHT",    NS.MODEL_GAP, 0)
     NS.partyStratPanel:SetPoint("BOTTOMRIGHT", NS.partyContent,    "BOTTOMRIGHT", 0, 0)
 
-    -- Collapsed width = model panel + frame padding on both sides.
-    NS.COLLAPSED_WIDTH = panelW + NS.PADDING.frame.left + NS.PADDING.frame.right + 25
+    -- Collapsed width = model panel + frame padding + panel padding on both sides.
+    -- MODEL_GAP is included so the collapsed frame visually absorbs the gap between
+    -- the model panel and the strategy panel edge.
+    NS.COLLAPSED_WIDTH = panelW
+        + NS.PADDING.frame.left  + NS.PADDING.frame.right
+        + NS.partyPanel.paddingLeft + NS.partyPanel.paddingRight
+        + NS.MODEL_GAP
 
     -- ── Expand / collapse toggle button ─────────────────────────
     -- Parented to CleanBotFrame and anchored to its RIGHT edge.
@@ -65,10 +77,18 @@ NS.CleanBot_BuildPartyTab = function()
     -- model. This is a fixed UI affordance at the frame edge; do not convert
     -- these offsets to NS.PADDING or margin values.
     NS.partyExpandBtn = NS.CB_CreateButton(CleanBotFrame, "CleanBotPartyExpandBtn",
-        ">", 15, 35, function() NS.CB_TogglePartyExpand() end)
+        ">", 17, 35, function() NS.CB_TogglePartyExpand() end)
     NS.partyExpandBtn:ClearAllPoints()
-    NS.partyExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", -4, 0)
+    NS.partyExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", 0, 0)
     NS.partyExpandBtn:SetFrameLevel(CleanBotFrame:GetFrameLevel() + 20)
+    NS.partyExpandBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText(NS.partyExpanded and "Hide Strategies" or "Show Strategies", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    NS.partyExpandBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
     NS.partyExpandBtn:Hide()  -- shown only when Party tab is active (CleanBot_SelectTopTab)
 end
 
