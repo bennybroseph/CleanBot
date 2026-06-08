@@ -98,7 +98,18 @@ local function CB_CreateTradeSlotOverlays()
                     NS.CB_SendBotCommand(botEntry.name, "give " .. NS.CB_CleanItemLink(link))
                 end
             end)
+
+            -- Hidden by default; shown only while an active bot trade is open.
+            overlay:Hide()
         end
+    end
+end
+
+-- Shows or hides all trade slot overlays. Called on TRADE_SHOW (bot trade
+-- confirmed) and TRADE_CLOSED so overlays never intercept outside of a trade.
+local function CB_SetTradeOverlaysVisible(visible)
+    for _, overlay in pairs(NS.tradeSlotOverlays) do
+        if visible then overlay:Show() else overlay:Hide() end
     end
 end
 
@@ -120,10 +131,12 @@ eventFrame:SetScript("OnEvent", function(self, event)
         if not entry then return end  -- not one of our bots, do nothing
 
         activeTradeKey = key
+        CB_SetTradeOverlaysVisible(true)
         NS.CB_FetchInventory(key, entry.name)
         NS.CB_ShowInventory(key, entry.name, TradeFrame)
 
     elseif event == "TRADE_CLOSED" then
+        CB_SetTradeOverlaysVisible(false)
         if not activeTradeKey then return end
 
         local f = NS.botInventoryFrames and NS.botInventoryFrames[activeTradeKey]
