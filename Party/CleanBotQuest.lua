@@ -142,11 +142,12 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
             nameText:SetTextColor(info.r, info.g, info.b)
             nameText:SetText(displayName)
 
-            -- On hover, ask the WoW client to show the full quest tooltip.
-            -- SetHyperlink pulls from the client's local quest data cache, so
-            -- it works for any quest the player has encountered — which covers
-            -- most quests a bot would be running alongside them.
+            -- Click selects this quest and renders its details in the right pane.
+            -- Hover shows the client's cached quest tooltip.
             local questID = quest.id
+            rowBtn:SetScript("OnClick", function()
+                NS.CB_RenderQuestDetail(key, questID)
+            end)
             rowBtn:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink("quest:" .. (questID or 0) .. ":60")
@@ -160,6 +161,144 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
     end
 
     return yOffset
+end
+
+-- ── Render quest details into the right scroll pane ─────────────────────
+-- Called when the player clicks a quest row in the left pane.
+-- Looks the quest up in the player's own log for description and objective
+-- data. If the quest isn't in the player's log (bot-only quest), renders
+-- the name and a "details unavailable" note instead.
+NS.CB_RenderQuestDetail = function(key, questID)
+    local f = NS.botQuestFrames and NS.botQuestFrames[key]
+    if not f then return end
+    local dsc = f.detailScrollChild
+
+    -- Cancel any pending deferred height pass from a prior selection.
+    dsc:SetScript("OnUpdate", nil)
+
+    -- Hide frames from the previous detail render.
+    if f.detailFrames then
+        for _, fr in ipairs(f.detailFrames) do fr:Hide() end
+    end
+    f.detailFrames    = {}
+    f.selectedQuestID = questID
+
+    local DPAD = 8  -- inner padding from scroll child edges
+
+    -- ── Gather data ────────────────────────────────────────────────────────
+    -- GetQuestLogIndexByID does not exist in 3.3.5a — scan the log manually.
+    -- GetQuestLogTitle returns questID at position 9 (added in WotLK).
+    local logIndex = nil
+    if questID then
+        local n = GetNumQuestLogEntries()
+        for i = 1, n do
+            local _, _, _, _, isHeader, _, _, _, id = GetQuestLogTitle(i)
+            if not isHeader and id == questID then
+                logIndex = i
+                break
+            end
+        end
+    end
+    local hasData = logIndex ~= nil
+
+    local titleText  = ""
+    local desc       = ""
+    local objectives = {}
+
+    if hasData then
+        -- Briefly select the quest so the text / leaderboard APIs return its data.
+        -- Restore the previous selection immediately after to avoid disturbing
+        -- what the player has open in their own quest log UI.
+        local prevSel = GetQuestLogSelection()
+        SelectQuestLogEntry(logIndex)
+        titleText        = GetQuestLogTitle(logIndex) or ""
+        desc             = GetQuestLogQuestText()     or ""
+        local numObj     = GetNumQuestLeaderBoards()
+        for i = 1, numObj do
+            local text, _, finished = GetQuestLogLeaderBoard(i)
+            objectives[#objectives + 1] = { text = text or "", finished = finished }
+        end
+        SelectQuestLogEntry(prevSel or 0)
+    else
+        titleText = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
+    end
+
+    -- ── Title ──────────────────────────────────────────────────────────────
+    -- QuestTitleFont: WoW's built-in golden quest title font.
+    local titleFS = dsc:CreateFontString(nil, "OVERLAY", "QuestTitleFont")
+    titleFS:SetPoint("TOPLEFT", dsc, "TOPLEFT",  DPAD, -DPAD)
+    titleFS:SetPoint("RIGHT",   dsc, "RIGHT",   -DPAD, 0)
+    titleFS:SetJustifyH("LEFT")
+    titleFS:SetFont(titleFS:GetFont(), 22)  -- one step larger than QuestTitleFont default
+    titleFS:SetText(titleText)
+    f.detailFrames[#f.detailFrames + 1] = titleFS
+
+    -- ── No-data fallback ───────────────────────────────────────────────────
+    if not hasData then
+        local noDataFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noDataFS:SetPoint("TOPLEFT", titleFS, "BOTTOMLEFT",  0, -8)
+        noDataFS:SetPoint("RIGHT",   dsc,     "RIGHT",      -DPAD, 0)
+        noDataFS:SetJustifyH("LEFT")
+        noDataFS:SetText("Details unavailable.\nYou do not have this quest.")
+        f.detailFrames[#f.detailFrames + 1] = noDataFS
+
+        dsc:SetHeight(math.max(80, f.detailScrollFrame:GetHeight() or 1))
+        return
+    end
+
+    -- ── Description ────────────────────────────────────────────────────────
+    -- QuestFont: WoW's built-in body text font for quest descriptions.
+    local prevFS = titleFS
+
+    if desc ~= "" then
+        local descFS = dsc:CreateFontString(nil, "OVERLAY", "QuestFont")
+        descFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT",  0, -10)
+        descFS:SetPoint("RIGHT",   dsc,    "RIGHT",      -DPAD, 0)
+        descFS:SetJustifyH("LEFT")
+        descFS:SetTextColor(0.180, 0.122, 0.059)  -- #2e1f0f
+        descFS:SetText(desc)
+        f.detailFrames[#f.detailFrames + 1] = descFS
+        prevFS = descFS
+    end
+
+    -- ── Objectives ─────────────────────────────────────────────────────────
+    if #objectives > 0 then
+        local objLabelFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        objLabelFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT", 0, -10)
+        objLabelFS:SetJustifyH("LEFT")
+        objLabelFS:SetText("Objectives:")
+        f.detailFrames[#f.detailFrames + 1] = objLabelFS
+        prevFS = objLabelFS
+
+        for _, obj in ipairs(objectives) do
+            local objFS = dsc:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            objFS:SetPoint("TOPLEFT", prevFS, "BOTTOMLEFT",  6, -2)
+            objFS:SetPoint("RIGHT",   dsc,    "RIGHT",      -DPAD, 0)
+            objFS:SetJustifyH("LEFT")
+            -- Complete objectives match our status green; incomplete stay white.
+            if obj.finished then
+                objFS:SetTextColor(0.251, 0.749, 0.251)
+            end
+            objFS:SetText(obj.text)
+            f.detailFrames[#f.detailFrames + 1] = objFS
+            prevFS = objFS
+        end
+    end
+
+    -- ── Deferred height: measure after layout resolves ─────────────────────
+    -- GetBottom() on FontStrings needs one rendered frame to return valid values.
+    dsc:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        local dsTop    = dsc:GetTop()
+        local lowestY  = dsTop
+        for _, fr in ipairs(f.detailFrames) do
+            local b = fr:GetBottom()
+            if b and b < lowestY then lowestY = b end
+        end
+        local contentH = (dsTop - lowestY) + DPAD
+        local frameH   = f.detailScrollFrame:GetHeight() or 1
+        dsc:SetHeight(math.max(contentH, frameH))
+    end)
 end
 
 -- ── Render the quest list for a bot (called by CleanBotBridge on QUESTS_END) ─
