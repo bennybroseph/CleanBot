@@ -732,6 +732,72 @@ NS.CB_CreateCollapseButton = function(parent, isCollapsed)
     return btn
 end
 
+--- Creates a quest reward item button backed by LargeItemButtonTemplate (147×41).
+--- The template provides $parentIconTexture (39×39 BACKGROUND), $parentNameFrame
+--- (parchment backing texture), $parentName (GameFontHighlight FontString), and
+--- $parentCount (NumberFontNormal FontString) — all accessed by CB_PopulateRewardSlot
+--- via _G[name.."IconTexture/Name/Count"].
+---
+--- ElvUI: strips the parchment art, applies SetTemplate("Default"), re-layers the
+---   icon to ARTWORK so it renders above the backdrop, re-anchors $parentName.
+--- Default: template art is used as-is; the parchment NameFrame background matches
+---   the Blizzard quest log reward style with no extra skinning needed.
+---
+--- @param parent table   Parent frame.
+--- @param name   string  Globally unique frame name (required by $parent substitution).
+--- @return table         The created Button with margins stamped.
+NS.CB_CreateQuestRewardItem = function(parent, name)
+    local btn = CreateFrame("Button", name, parent, "LargeItemButtonTemplate")
+
+    if NS.ElvUI_S then
+        local bName   = btn:GetName()
+        local iconTex = bName and _G[bName .. "IconTexture"]
+        local nameFS  = bName and _G[bName .. "Name"]
+
+        btn:StripTextures()
+        btn:SetTemplate("Default")
+        btn:SetBackdropBorderColor(1, 1, 1, 1)
+        btn:StyleButton()
+
+        if iconTex then
+            -- Move to ARTWORK so it renders above the BACKGROUND backdrop fill.
+            iconTex:SetDrawLayer("ARTWORK")
+            iconTex:ClearAllPoints()
+            iconTex:SetPoint("TOPLEFT",    btn, "TOPLEFT",    2, -2)
+            iconTex:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 2,  2)
+            iconTex:SetWidth(btn:GetHeight() - 4)
+            NS.CB_ApplyElvCoords(iconTex)
+            iconTex:Show()
+        end
+
+        if nameFS and iconTex then
+            -- Re-anchor away from the (now-hidden) parchment NameFrame texture.
+            nameFS:ClearAllPoints()
+            nameFS:SetPoint("LEFT",   iconTex, "RIGHT",  4,  0)
+            nameFS:SetPoint("RIGHT",  btn,     "RIGHT", -4,  0)
+            nameFS:SetPoint("TOP",    btn,     "TOP",    0, -2)
+            nameFS:SetPoint("BOTTOM", btn,     "BOTTOM", 0,  2)
+        end
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        if self.itemLink then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(self.itemLink)
+            GameTooltip:Show()
+        end
+    end)
+    btn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    btn.marginTop    = 4
+    btn.marginBottom = 4
+    btn.marginLeft   = 0
+    btn.marginRight  = 4
+    return btn
+end
+
 -- Creates a collapsible section for the Manage tab.
 --
 -- The toggle button and title label are children of parent (scroll child, MEDIUM
@@ -1492,6 +1558,13 @@ NS.CB_SkinEquipSlot = function(btn)
     -- btn.bg is created AFTER this function returns (in CB_CreateEquipSlots) so
     -- that it is always the last BACKGROUND texture on the button and renders
     -- above the dark fill that SetTemplate just stamped on.
+end
+
+-- Returns the r, g, b color for a given item quality level (0–6).
+-- Wraps GetItemQualityColor with a white fallback so callers never receive nil.
+NS.CB_GetQualityColor = function(quality)
+    local r, g, b = GetItemQualityColor(quality or 1)
+    return r or 1, g or 1, b or 1
 end
 
 -- Colors the border of an item button to match the item's quality.

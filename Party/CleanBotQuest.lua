@@ -58,6 +58,78 @@ local QUEST_STATUS_INFO = {
 -- Render order: most actionable (Incomplete) first.
 local QUEST_STATUS_ORDER = { "I", "C", "F" }
 
+-- ── Money formatting ────────────────────────────────────────────────────
+-- |T path:h:w|t inline texture codes render coin icons inside FontStrings.
+local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12|t"
+local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:12:12|t"
+local COPPER_ICON = "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12|t"
+
+local function CB_FormatMoney(copper)
+    local g = math.floor(copper / 10000)
+    local s = math.floor((copper % 10000) / 100)
+    local c = copper % 100
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = g .. " " .. GOLD_ICON   end
+    if s > 0 then parts[#parts + 1] = s .. " " .. SILVER_ICON end
+    if c > 0 then parts[#parts + 1] = c .. " " .. COPPER_ICON end
+    if #parts == 0 then return "0 " .. COPPER_ICON end
+    return table.concat(parts, "  ")
+end
+
+-- Populates a pre-created QuestInfoItemTemplate button with item data.
+-- Accesses children by name ($parentIconTexture, $parentName, $parentCount).
+local function CB_PopulateRewardSlot(slot, tex, itemName, count, link, quality)
+    local bName   = slot:GetName()
+    local iconTex = bName and _G[bName .. "IconTexture"]
+    local nameFS  = bName and _G[bName .. "Name"]
+    local countFS = bName and _G[bName .. "Count"]
+    if iconTex then iconTex:SetTexture(tex or "") end
+    if nameFS  then
+        nameFS:SetText(itemName or "")
+        local r, g, b = NS.CB_GetQualityColor(quality)
+        nameFS:SetTextColor(r, g, b)
+    end
+    if countFS then
+        if count and count > 1 then
+            countFS:SetText(tostring(count))
+            countFS:Show()
+        else
+            countFS:SetText("")
+            countFS:Hide()
+        end
+    end
+    slot.itemLink = link  -- used by OnEnter tooltip in CB_CreateQuestRewardItem
+end
+
+-- Lays out items from `items` (array of {tex,name,count,link}) into a 2-column grid.
+-- Each slot is sized to itemSlotW. Rows of 2; odd remainders get a lone slot on the
+-- last row. Returns the updated prevFS (first slot of the last row) and slotIdx.
+local function CB_LayoutRewardGrid(items, count, rewardSlots, slotIdx, itemSlotW, prevFS, detailFrames)
+    local prevSlot = nil
+    for i = 1, count do
+        local item = items[i]
+        if item and slotIdx <= #rewardSlots then
+            local slot = rewardSlots[slotIdx]
+            slotIdx = slotIdx + 1
+            CB_PopulateRewardSlot(slot, item.tex, item.name, item.count, item.link, item.quality)
+            NS.CB_SetQualityBorder(slot, item.quality)
+            slot:SetWidth(itemSlotW)
+            if (i - 1) % 2 == 0 then
+                -- Left column — start of a new row.
+                NS.CB_AnchorBelow(slot, prevFS)
+                prevFS = slot
+            else
+                -- Right column — same row as previous slot.
+                NS.CB_AnchorAhead(slot, prevSlot)
+            end
+            slot:Show()
+            detailFrames[#detailFrames + 1] = slot
+            prevSlot = slot
+        end
+    end
+    return prevFS, slotIdx
+end
+
 -- Collapse state survives re-renders within the same session.
 -- Key format: botKey .. "~" .. statusKey  (e.g. "kira~I")
 local questGroupCollapsed = {}
@@ -245,6 +317,12 @@ NS.CB_RenderQuestDetail = function(key, questID)
     local questDesc   = ""   -- NPC flavor text (1st return of GetQuestLogQuestText)
     local questObj    = ""   -- "Bring X to Y" instructions (2nd return)
     local leaderboard = {}   -- { text, finished } per GetQuestLogLeaderBoard entry
+    local numChoices  = 0    -- pick-one reward items
+    local numRewards  = 0    -- guaranteed reward items
+    local rewardMoney = 0    -- copper
+    local rewardXP    = 0
+    local choiceItems = {}   -- { name, tex, count, quality }
+    local rewardItems = {}   -- { name, tex, count, quality }
 
     if hasData then
         -- Briefly select the quest so the text / leaderboard APIs return its data.
@@ -260,6 +338,22 @@ NS.CB_RenderQuestDetail = function(key, questID)
         for i = 1, numEntries do
             local text, _, finished = GetQuestLogLeaderBoard(i)
             leaderboard[#leaderboard + 1] = { text = text or "", finished = finished }
+        end
+        -- Reward data is gathered inside the same SelectQuestLogEntry block so all
+        -- reward APIs see the correct quest without a second selection call.
+        numChoices  = GetNumQuestLogChoices() or 0
+        numRewards  = GetNumQuestLogRewards() or 0
+        rewardMoney = GetQuestLogRewardMoney() or 0
+        rewardXP    = (GetQuestLogRewardXP and GetQuestLogRewardXP()) or 0
+        for i = 1, numChoices do
+            local rName, tex, count, quality = GetQuestLogChoiceInfo(i)
+            local link = GetQuestLogItemLink and GetQuestLogItemLink("choice", i)
+            choiceItems[i] = { name = rName, tex = tex, count = count, quality = quality, link = link }
+        end
+        for i = 1, numRewards do
+            local rName, tex, count, quality = GetQuestLogRewardInfo(i)
+            local link = GetQuestLogItemLink and GetQuestLogItemLink("reward", i)
+            rewardItems[i] = { name = rName, tex = tex, count = count, quality = quality, link = link }
         end
         SelectQuestLogEntry(prevSel or 0)
     else
@@ -359,9 +453,72 @@ NS.CB_RenderQuestDetail = function(key, questID)
         prevFS = descFS
     end
 
-    -- ── Rewards (TODO) ──────────────────────────────────────────────────────
-    -- Will use: GetNumQuestLogRewards, GetQuestLogRewardInfo, GetQuestLogRewardMoney,
-    --           GetQuestLogRewardXP, GetNumQuestLogChoices, GetQuestLogChoiceInfo
+    -- ── Rewards ─────────────────────────────────────────────────────────────
+    local hasChoices  = numChoices > 0
+    local hasRequired = numRewards > 0
+    local hasMoney    = rewardMoney > 0
+    local hasXP       = rewardXP > 0
+
+    if hasChoices or hasRequired or hasMoney or hasXP then
+        local rewardsHdrFS = NS.CB_CreateQuestHeader(dsc)
+        NS.CB_AnchorBelow(rewardsHdrFS, prevFS)
+        rewardsHdrFS:SetText("Rewards")
+        f.detailFrames[#f.detailFrames + 1] = rewardsHdrFS
+        prevFS = rewardsHdrFS
+
+        local slotIdx    = 1
+        local itemSlotW  = math.floor(contentW / 2)
+
+        -- Choice items
+        if hasChoices then
+            local choiceLblFS = NS.CB_CreateQuestParagraph(dsc)
+            NS.CB_AnchorBelow(choiceLblFS, prevFS)
+            choiceLblFS:SetWidth(contentW)
+            choiceLblFS:SetText("You will be able to choose one of these rewards:")
+            f.detailFrames[#f.detailFrames + 1] = choiceLblFS
+            prevFS = choiceLblFS
+
+            prevFS, slotIdx = CB_LayoutRewardGrid(
+                choiceItems, numChoices, f.rewardSlots, slotIdx,
+                itemSlotW, prevFS, f.detailFrames)
+        end
+
+        -- "You will [also] receive:" label — shown whenever there are items, money, or XP
+        if hasRequired or hasMoney or hasXP then
+            local recvText = hasChoices and "You will also receive:" or "You will receive:"
+            local recvLblFS = NS.CB_CreateQuestParagraph(dsc)
+            NS.CB_AnchorBelow(recvLblFS, prevFS)
+            recvLblFS:SetText(recvText)
+            f.detailFrames[#f.detailFrames + 1] = recvLblFS
+            prevFS = recvLblFS
+
+            -- Money sits on the same line as the label via AnchorAhead.
+            -- prevFS stays on recvLblFS so XP and items anchor below the row correctly.
+            if hasMoney then
+                local moneyFS = NS.CB_CreateQuestParagraph(dsc)
+                NS.CB_AnchorAhead(moneyFS, recvLblFS)
+                moneyFS:SetText(CB_FormatMoney(rewardMoney))
+                f.detailFrames[#f.detailFrames + 1] = moneyFS
+            end
+
+            -- XP line
+            if hasXP then
+                local xpFS = NS.CB_CreateQuestParagraph(dsc)
+                NS.CB_AnchorBelow(xpFS, prevFS)
+                xpFS:SetWidth(contentW)
+                xpFS:SetText("Experience: " .. tostring(rewardXP))
+                f.detailFrames[#f.detailFrames + 1] = xpFS
+                prevFS = xpFS
+            end
+
+            -- Required (non-choice) item grid
+            if hasRequired then
+                prevFS, slotIdx = CB_LayoutRewardGrid(
+                    rewardItems, numRewards, f.rewardSlots, slotIdx,
+                    itemSlotW, prevFS, f.detailFrames)
+            end
+        end
+    end
 
     -- ── Deferred height: measure after layout resolves ─────────────────────
     -- GetBottom() on FontStrings needs one rendered frame to return valid values.
@@ -549,6 +706,18 @@ NS.CB_GetQuestFrame = function(key, botName)
     f.scrollChild       = sc
     f.detailScrollFrame = dsf
     f.detailScrollChild = dsc
+
+    -- Pre-create a fixed pool of QuestInfoItemTemplate reward buttons parented to the
+    -- detail scroll child. 12 covers the maximum possible rewards (6 choice + 6 required).
+    -- CB_RenderQuestDetail populates and shows them as needed; all start hidden.
+    f.rewardSlots = {}
+    for i = 1, 12 do
+        local slotName = "CleanBotRewardSlot_" .. key .. "_" .. i
+        local slot = NS.CB_CreateQuestRewardItem(dsc, slotName)
+        NS.CB_ApplyQualityBackdrop(slot)
+        slot:Hide()
+        f.rewardSlots[i] = slot
+    end
 
     -- ── Action buttons ────────────────────────────────────────────────────
     -- Creation and positioning differ per skin; behaviour is shared after.
