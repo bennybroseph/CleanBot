@@ -418,10 +418,12 @@ NS.CB_CreateDropdown = function(parent, name, width)
     if NS.ElvUI_S then
         NS.ElvUI_S:HandleDropDownBox(dd, width)
 
-        -- Reparent the button and text to dd.backdrop, mirroring ElvUI's own Ace3
-        -- dropdown skin. HandleDropDownBox leaves the button as a child of dd, where
-        -- it is obscured inside a ScrollFrame. Moving it to dd.backdrop (which sits
-        -- at the same frame level as dd) resolves the rendering order issue.
+        -- ElvUI's HandleDropDownBox builds a `.backdrop` child frame and parks it at
+        -- dd's OWN frame level. A same-level child renders above dd's button + text,
+        -- so the arrow and label get obscured when the dropdown is nested in a
+        -- ScrollFrame (the same root cause documented on CB_SkinEditBoxSafe). Rather
+        -- than fight frame levels, reparent the button and text onto dd.backdrop so
+        -- they render above it; this also mirrors ElvUI's own Ace3 dropdown skin.
         local backdrop = dd.backdrop
         if backdrop then
             local btn  = _G[name .. "Button"]
@@ -513,12 +515,18 @@ NS.CB_CreateTab = function(parent, name, text, onClick)
     return tab
 end
 
--- Applies an ElvUI-matching skin to an EditBox using SetBackdrop directly,
--- bypassing HandleEditBox / SetTemplate. HandleEditBox creates iborder/oborder
--- child frames via SetTemplate; inside a ScrollFrame those children land at a
--- frame level that obscures the EditBox's own text layer, making text invisible
--- and blocking cursor interaction. SetBackdrop on the EditBox itself avoids that.
--- Falls back to a no-op when ElvUI is absent (InputBoxTemplate provides its own look).
+-- Applies an ElvUI-matching skin to an EditBox by calling SetBackdrop directly on
+-- the box, deliberately NOT using ElvUI's HandleEditBox.
+--
+-- Why not HandleEditBox: it builds a separate `.backdrop` child frame. A child frame
+-- renders above its parent's text unless its frame level is explicitly lower, and a
+-- fixed level − 1 offset is NOT enough for editboxes nested several frames deep — the
+-- slider value boxes inside the Settings (Theme/Layout) scroll render visually blank
+-- because the backdrop ends up behind the panel. (Verified by testing: HandleEditBox
+-- is fine for shallow editboxes but blanks the nested slider boxes.) SetBackdrop on
+-- the box itself has no child frame, so there is no level-stacking fragility at any
+-- nesting depth.
+-- No-op when ElvUI is absent (InputBoxTemplate provides its own look).
 ---@param box table  The EditBox to skin.
 NS.CB_SkinEditBoxSafe = function(box)
     if not NS.ElvUI_S then return end
