@@ -617,11 +617,61 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
     end
 end
 
+-- ── Loading overlay (B+C) ────────────────────────────────────────────────
+-- A semi-transparent dim + centred text drawn above the grid while an
+-- inventory fetch is in flight (entry.awaitingInventory). Useful on both
+-- paths but especially the whisper path, where replies trickle in over ~3s.
+-- The overlay frame sits above the cells (higher frame level) but leaves mouse
+-- input passing through (EnableMouse false) so the close button still works
+-- and stale-but-correct data stays visible-yet-dimmed underneath.
+---@param f table  An inventory frame from NS.botInventoryFrames.
+---@return table   The frame's loading overlay (created lazily).
+local function CB_EnsureLoadingOverlay(f)
+    if f.loadingOverlay then return f.loadingOverlay end
+    local ov = CreateFrame("Frame", nil, f)
+    ov:SetAllPoints(f)
+    ov:SetFrameLevel(f:GetFrameLevel() + 20)
+    ov:EnableMouse(false)
+    local dim = ov:CreateTexture(nil, "BACKGROUND")
+    dim:SetAllPoints(ov)
+    dim:SetTexture(0, 0, 0, 0.55)
+    local txt = ov:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    txt:SetPoint("CENTER", ov, "CENTER", 0, 0)
+    txt:SetTextColor(1, 0.82, 0)
+    ov.text = txt
+    ov:Hide()
+    f.loadingOverlay = ov
+    return ov
+end
+
+-- Show/hide the loading overlay. Text is "Refreshing..." when the grid already
+-- holds rendered data (a re-fetch over existing items), else "Loading...".
+---@param f  table    An inventory frame from NS.botInventoryFrames.
+---@param on boolean  Whether a fetch is in flight.
+NS.CB_SetInventoryLoading = function(f, on)
+    if not f then return end
+    if on then
+        local ov = CB_EnsureLoadingOverlay(f)
+        ov.text:SetText(f.rendered and "Refreshing..." or "Loading...")
+        ov:Show()
+    elseif f.loadingOverlay then
+        f.loadingOverlay:Hide()
+    end
+end
+
 -- ── Render / re-render the grid from entry.inventory ─────────────────────
 ---@param key string  Bot name-key whose inventory frame should be (re)rendered.
 NS.CB_RenderInventory = function(key)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
+
+    -- Reflect (don't clear) the in-flight flag: the overlay shows while a fetch
+    -- is pending and hides once it lands. This is deliberately not a clear point,
+    -- so CB_ShowInventory rendering stale data mid-fetch keeps the overlay up.
+    -- The flag is cleared at true data-landing points (whisper tick finalize,
+    -- bridge INV_END, money reply).
+    local lf = NS.botInventoryFrames[key]
+    if lf then NS.CB_SetInventoryLoading(lf, entry.awaitingInventory and true or false) end
 
     local forceFullRender = false
     local validation = entry.pendingValidation

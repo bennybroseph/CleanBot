@@ -286,20 +286,29 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             if entry.invTimeout >= 3 then
                 entry.awaitingInventory = false
                 entry.invTimeout        = 0
-                -- Collection complete: atomically swap the freshly-staged items in
-                -- (replacing the preserved stale set) so a refresh updates cleanly.
-                if entry.inventory then
-                    entry.inventory.items = entry.invStaging or {}
-                end
-                entry.invStaging = nil
-                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
-                if f and f:IsShown() then NS.CB_RenderInventory(key) end
 
-                -- Inventory done — now ask for money separately so the reply
-                -- arrives on its own and is not swallowed by awaitingInventory.
-                entry.awaitingMoney  = true
-                entry.moneyTimeout   = 0
-                SendChatMessage("stats", "WHISPER", nil, entry.name)
+                -- Whisper path only (marked by invStaging): atomically swap the
+                -- freshly-staged items in (replacing the preserved stale set) so
+                -- a refresh updates cleanly, then fetch money/bag separately so
+                -- its reply arrives on its own and isn't swallowed here.
+                -- On the bridge path invStaging is nil and INV_END has normally
+                -- already rendered; this branch is just a safety-net flag clear.
+                if entry.invStaging then
+                    if entry.inventory then
+                        entry.inventory.items = entry.invStaging or {}
+                    end
+                    entry.invStaging     = nil
+                    entry.awaitingMoney  = true
+                    entry.moneyTimeout   = 0
+                    SendChatMessage("stats", "WHISPER", nil, entry.name)
+                end
+
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and f:IsShown() then
+                    NS.CB_RenderInventory(key)
+                elseif f and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(f, false)
+                end
             end
         end
 
@@ -323,11 +332,22 @@ NS.CB_FetchInventory = function(key, botName)
     -- frame can display stale-but-correct data instead of going blank.
     entry.inventory = entry.inventory or { items = {} }
 
+    -- In-flight flag drives the loading overlay; set on BOTH paths so the
+    -- indicator is path-agnostic. Cleared in CB_RenderInventory when data lands
+    -- (or by the silence-timeout tick below as a safety net).
+    entry.awaitingInventory = true
+    entry.invTimeout        = 0
+    local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
+    if invF and invF:IsShown() and NS.CB_SetInventoryLoading then
+        NS.CB_SetInventoryLoading(invF, true)
+    end
+
     if CB_EffectiveBridgeState() == "present" then
         SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", CB_GroupChannel())
     else
-        entry.awaitingInventory = true
-        entry.invTimeout        = 0
+        -- invStaging is the whisper-path marker: its presence tells the tick
+        -- below to run the whisper finalize (swap + stats fetch) rather than
+        -- just clearing the flag.
         -- Collect fresh item replies into a staging table rather than appending
         -- to entry.inventory.items directly. The live items are preserved for
         -- the stale-display-during-flight render and only replaced (atomically)
@@ -468,8 +488,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
-        -- Inventory collection (whisper path): grab any item link, ignore everything else
-        if entry and entry.awaitingInventory then
+        -- Inventory collection (whisper path): grab any item link, ignore everything
+        -- else. Gated on invStaging (the whisper-only marker) rather than
+        -- awaitingInventory, so a bridge-path fetch — which also sets
+        -- awaitingInventory but never sends "items" — doesn't swallow unrelated whispers.
+        if entry and entry.invStaging then
             if strfind(msg, "|Hitem:", 1, true) then
                 local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(msg)
                 if item then
@@ -726,9 +749,13 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local rest = strsub(msg, 9)
             local name = NS.CB_SplitOnce(rest, "~")
             local key  = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then entry.awaitingInventory = false end   -- bridge data landed
             local f    = NS.botInventoryFrames and NS.botInventoryFrames[key]
             if f and f:IsShown() then
                 NS.CB_RenderInventory(key)
+            elseif f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, false)
             end
 
         -- ── Quest log packets ────────────────────────────────────────────
