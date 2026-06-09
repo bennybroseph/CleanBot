@@ -2,7 +2,7 @@
 ## Title: CleanBot
 ## Notes: A clean interface to manage Playerbots. No more complex trees of buttons!
 ## Author: BennyBroseph
-## Version: 0.2
+## Version: 0.4
 ## SavedVariables: CleanBot_SavedVars
 
 CleanBot.xml
