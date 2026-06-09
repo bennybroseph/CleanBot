@@ -85,6 +85,45 @@ NS.CB_EndCapture = function()
 end
 
 -- ============================================================
+-- Group iteration (party OR raid)
+-- ============================================================
+-- WoW addresses group members differently depending on group type: "partyN"
+-- (1..GetNumPartyMembers, excludes the player) when in a party, but "raidN"
+-- (1..GetNumRaidMembers, INCLUDES the player) when in a raid — and party APIs
+-- return 0 while in a raid. These helpers paper over that so callers work for
+-- both. Use them instead of hardcoding GetNumPartyMembers / "party"..i.
+
+--- Returns the unit-id prefix and member count for the player's current group.
+--- Raid takes precedence over party; both 0 when solo. In a raid the count
+--- INCLUDES the player, so member iteration must skip the player's own unit.
+---@return string prefix  "raid" or "party".
+---@return number count   Number of group members (raid count includes the player).
+NS.CB_GroupInfo = function()
+    local nRaid = GetNumRaidMembers()
+    if nRaid > 0 then return "raid", nRaid end
+    return "party", GetNumPartyMembers()
+end
+
+--- True when the player is in any group (party or raid).
+---@return boolean
+NS.CB_InGroup = function()
+    return GetNumRaidMembers() > 0 or GetNumPartyMembers() > 0
+end
+
+--- Calls fn(unit, name) for each OTHER group member (the player is skipped).
+--- Works for both party and raid. name may be nil if the unit is not yet known.
+---@param fn fun(unit:string, name:string|nil)
+NS.CB_ForEachGroupMember = function(fn)
+    local prefix, n = NS.CB_GroupInfo()
+    for i = 1, n do
+        local unit = prefix .. i
+        if not UnitIsUnit(unit, "player") then
+            fn(unit, UnitName(unit))
+        end
+    end
+end
+
+-- ============================================================
 -- Config + bot detection cache
 -- ============================================================
 CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
@@ -99,13 +138,19 @@ NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
 NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
-NS.MODEL_GAP         = 25  -- gap between the model panel and the strategy panel in the Party tab
+NS.MODEL_GAP         = 25  -- gap between the model panel and the strategy panel in the Individual tab
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
+-- Individual-tab bot selector: ≤ threshold bots show the tab row; more swap to a
+-- dropdown. MAX_LIVE_SLOTS caps how many bots keep heavy content (3D model + equip
+-- paperdoll) bound at once — an LRU evicts beyond it so large raids never build
+-- dozens of models. Must be ≥ TAB_DROPDOWN_THRESHOLD so tab mode is always fully warm.
+NS.TAB_DROPDOWN_THRESHOLD = 4
+NS.MAX_LIVE_SLOTS         = 6
 -- Per-frame padding — space between a frame's border and the content inside it (CSS padding).
 -- frame:   outermost window (CleanBotFrame)
--- panel:   main panels and column containers (managePanel, partyPanel, ctrl, left/right columns)
--- section: strategy section frames (the bordered checkbox groups in the party tab)
+-- panel:   main panels and column containers (managePanel, individualPanel, ctrl, left/right columns)
+-- section: strategy section frames (the bordered checkbox groups in the Individual tab)
 NS.PADDING_DEFAULTS = {
     frame   = { top = 32, bottom = 16, left = 16, right = 16 },
     panel   = { top = 6,  bottom = 6,  left = 6,  right = 6  },
@@ -164,22 +209,22 @@ NS.EQUIP_WEAPON_PAD  = 60
 -- ============================================================
 NS.topTabBar     = nil
 NS.contentFrame  = nil
-NS.partyPanel        = nil
+NS.individualPanel        = nil
 NS.botTabBar         = nil
-NS.partyContent      = nil
-NS.partyModelPanel   = nil
-NS.partyStratPanel   = nil
-NS.partyExpandBtn    = nil
-NS.partyEmptyLabel   = nil
-NS.partyExpanded     = false
-NS.COLLAPSED_WIDTH   = nil  -- computed in CleanBot_BuildPartyTab after geometry is known
+NS.individualContent      = nil
+NS.individualModelPanel   = nil
+NS.individualStratPanel   = nil
+NS.individualExpandBtn    = nil
+NS.individualEmptyLabel   = nil
+NS.individualExpanded     = false
+NS.COLLAPSED_WIDTH   = nil  -- computed in CleanBot_BuildIndividualTab after geometry is known
 NS.managePanel      = nil
 NS.manageScrollFrame = nil
 NS.manageScrollChild = nil
 NS.settingsPanel = nil
 
 -- ============================================================
--- Top-level tab management  (Manage = 1, Party = 2, Settings = 3)
+-- Top-level tab management  (Manage = 1, Individual = 2, Settings = 3)
 -- ============================================================
 NS.activeTopTabIndex = 0
 NS.topTabs           = {}
@@ -209,13 +254,13 @@ NS.CleanBot_SelectTopTab = function(index)
     end
 
     if NS.managePanel     then if index == 1 then NS.managePanel:Show()     else NS.managePanel:Hide()     end end
-    if NS.partyPanel    then if index == 2 then NS.partyPanel:Show()    else NS.partyPanel:Hide()    end end
+    if NS.individualPanel    then if index == 2 then NS.individualPanel:Show()    else NS.individualPanel:Hide()    end end
     if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
-    if NS.partyExpandBtn then if index == 2 then NS.partyExpandBtn:Show() else NS.partyExpandBtn:Hide() end end
+    if NS.individualExpandBtn then if index == 2 then NS.individualExpandBtn:Show() else NS.individualExpandBtn:Hide() end end
 
-    -- Resize the frame: Party tab restores saved expand state; all other tabs use collapsed width.
+    -- Resize the frame: Individual tab restores saved expand state; all other tabs use collapsed width.
     if NS.COLLAPSED_WIDTH then
-        local targetW = (index == 2) and (NS.partyExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH) or NS.COLLAPSED_WIDTH
+        local targetW = (index == 2) and (NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH) or NS.COLLAPSED_WIDTH
         NS.CB_ResizeFrame(targetW)
     end
 
@@ -234,7 +279,7 @@ end
 
 -- ============================================================
 -- Frame construction (called once at PLAYER_LOGIN)
--- NS.CleanBot_BuildPartyTab / NS.CleanBot_BuildManageTab /
+-- NS.CleanBot_BuildIndividualTab / NS.CleanBot_BuildManageTab /
 -- NS.CleanBot_BuildSettingsTab /
 -- NS.CleanBot_RefreshTabs are all defined in the files that load after this one.
 -- They are only ever called at event time (never at load time), so the forward
@@ -261,7 +306,7 @@ NS.CB_BuildFrames = function()
     NS.topTabBar:SetPoint("TOPRIGHT", CleanBotFrame, "TOPRIGHT", 0, -NS.TITLE_H)
     NS.topTabBar:SetHeight(NS.TOP_BAR_H)
 
-    local tabLabels = { "Manage", "Party", "Settings" }
+    local tabLabels = { "Manage", "Individual", "Settings" }
     local prevTopTab = nil
     for i, label in ipairs(tabLabels) do
         local idx = i
@@ -283,9 +328,9 @@ NS.CB_BuildFrames = function()
     NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -CleanBotFrame.paddingRight,    CleanBotFrame.paddingBottom)
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
-    -- ── Party panel ────────────────────────────────────────────
-    -- Defined in Party/Party.lua (loads after this file).
-    NS.CleanBot_BuildPartyTab()
+    -- ── Individual panel ───────────────────────────────────────
+    -- Defined in Individual/Individual.lua (loads after this file).
+    NS.CleanBot_BuildIndividualTab()
 
     -- ── Manage panel ───────────────────────────────────────────
     -- Defined in ManageTab.lua (loads after this file).
@@ -350,7 +395,17 @@ initFrame:SetScript("OnEvent", function(self, event)
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
             NS.botEmotes = CleanBot_SavedVars.botEmotes
         end
-        NS.partyExpanded = CleanBot_SavedVars.partyExpanded == true
+        NS.individualExpanded = CleanBot_SavedVars.individualExpanded == true
+
+        -- Restore debug overrides (persist across logout so start-to-finish
+        -- flows can be tested). Only the two valid override values are accepted.
+        if CleanBot_SavedVars.debugBridgeOverride == "present"
+        or CleanBot_SavedVars.debugBridgeOverride == "absent" then
+            NS.debugBridgeOverride = CleanBot_SavedVars.debugBridgeOverride
+        end
+        if type(CleanBot_SavedVars.debugSimulate) == "boolean" then
+            NS.debugSimulate = CleanBot_SavedVars.debugSimulate
+        end
 
         -- Restore theme values.
         if type(CleanBot_SavedVars.scale) == "number" then
@@ -395,11 +450,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         NS.CB_BuildFrames()
         -- SelectTopTab(1) inside BuildFrames already sized the frame to COLLAPSED_WIDTH.
         -- Apply saved expand state visibility: hide the strategy panel unless expanded.
-        if NS.partyStratPanel and not NS.partyExpanded then
-            NS.partyStratPanel:Hide()
+        if NS.individualStratPanel and not NS.individualExpanded then
+            NS.individualStratPanel:Hide()
         end
-        if NS.partyExpandBtn then
-            NS.partyExpandBtn:SetText(NS.partyExpanded and "<" or ">")
+        if NS.individualExpandBtn then
+            NS.individualExpandBtn:SetText(NS.individualExpanded and "<" or ">")
         end
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)

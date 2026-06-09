@@ -2,7 +2,7 @@
 ## Title: CleanBot
 ## Notes: A clean interface to manage Playerbots. No more complex trees of buttons!
 ## Author: BennyBroseph
-## Version: 0.2
+## Version: 0.4
 ## SavedVariables: CleanBot_SavedVars
 
 CleanBot.xml
@@ -13,14 +13,14 @@ Skinning\Widgets.lua
 Skinning\QuestWidgets.lua
 Skinning\ItemVisuals.lua
 Bridge.lua
-Party\PartyData.lua
-Party\ClassData.lua
-Party\EquipData.lua
-Party\Inventory.lua
-Party\Quest.lua
-Party\Equip.lua
-Party\Model.lua
-Party\Party.lua
+Individual\PartyData.lua
+Individual\ClassData.lua
+Individual\EquipData.lua
+Individual\Inventory.lua
+Individual\Quest.lua
+Individual\Equip.lua
+Individual\Model.lua
+Individual\Individual.lua
 Trade.lua
 ManageTab.lua
 SettingsTab.lua

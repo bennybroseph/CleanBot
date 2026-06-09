@@ -1,5 +1,5 @@
 -- ============================================================
--- Party.lua  —  party tab panel construction, character
+-- Individual.lua  —  Individual tab panel construction, per-bot
 --                        tab state, tab management, strategy
 --                        section builders, and RefreshTabs.
 -- ============================================================
@@ -8,42 +8,50 @@ local NS = CleanBotNS
 -- ============================================================
 -- Panel construction (called once at PLAYER_LOGIN via NS.CB_BuildFrames)
 -- ============================================================
---- Builds the Party tab: the model/strategy panels and the per-bot slot pool.
-NS.CleanBot_BuildPartyTab = function()
-    NS.partyPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotPartyPanel", 2, "panel")
-    NS.partyPanel:SetAllPoints(NS.contentFrame)
+--- Builds the Individual tab: the model/strategy panels and the per-bot slot pool.
+NS.CleanBot_BuildIndividualTab = function()
+    NS.individualPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotIndividualPanel", 2, "panel")
+    NS.individualPanel:SetAllPoints(NS.contentFrame)
 
-    NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.partyPanel)
-    NS.botTabBar:SetPoint("TOPLEFT",  NS.partyPanel, "TOPLEFT",  0, 0)
-    NS.botTabBar:SetPoint("TOPRIGHT", NS.partyPanel, "TOPRIGHT", 0, 0)
+    NS.botTabBar = CreateFrame("Frame", "CleanBotBotTabBar", NS.individualPanel)
+    NS.botTabBar:SetPoint("TOPLEFT",  NS.individualPanel, "TOPLEFT",  0, 0)
+    NS.botTabBar:SetPoint("TOPRIGHT", NS.individualPanel, "TOPRIGHT", 0, 0)
     NS.botTabBar:SetHeight(NS.BOT_BAR_H)
 
+    -- Bot selector dropdown — shown instead of the tab row when the group has more
+    -- than NS.TAB_DROPDOWN_THRESHOLD bots (RefreshTabs toggles it). Created once,
+    -- hidden by default; populated per refresh in dropdown mode.
+    NS.botDropdown = NS.CB_CreateDropdown(NS.botTabBar, "CleanBotBotDropdown", 180)
+    NS.botDropdown:ClearAllPoints()
+    NS.botDropdown:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left, 0)
+    NS.botDropdown:Hide()
+
     -- The XML-defined CleanBotFrameText is a child of CleanBotFrame and would
-    -- bleed through across tabs. Hide it and use a partyPanel-parented label instead.
+    -- bleed through across tabs. Hide it and use an individualPanel-parented label instead.
     CleanBotFrameText:SetText("")
     CleanBotFrameText:Hide()
 
-    NS.partyEmptyLabel = NS.partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    NS.partyEmptyLabel:SetPoint("TOP", NS.partyPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
-    NS.partyEmptyLabel:SetText("")
+    NS.individualEmptyLabel = NS.individualPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    NS.individualEmptyLabel:SetPoint("TOP", NS.individualPanel, "TOP", 0, -(NS.BOT_BAR_H + 20))
+    NS.individualEmptyLabel:SetText("")
 
-    NS.partyContent = CreateFrame("Frame", "CleanBotPartyContent", NS.partyPanel)
-    -- Inset partyContent by partyPanel's stamped padding so all model/equip/strategy
+    NS.individualContent = CreateFrame("Frame", "CleanBotIndividualContent", NS.individualPanel)
+    -- Inset individualContent by individualPanel's stamped padding so all model/equip/strategy
     -- content respects the panel border. BOT_BAR_H is added to paddingTop because
     -- the bot tab bar sits above the content area and is intentionally edge-to-edge.
-    NS.partyContent:SetPoint("TOPLEFT",     NS.partyPanel, "TOPLEFT",
-         NS.partyPanel.paddingLeft,
-       -(NS.BOT_BAR_H + NS.partyPanel.paddingTop))
-    NS.partyContent:SetPoint("BOTTOMRIGHT", NS.partyPanel, "BOTTOMRIGHT",
-        -NS.partyPanel.paddingRight,
-         NS.partyPanel.paddingBottom)
+    NS.individualContent:SetPoint("TOPLEFT",     NS.individualPanel, "TOPLEFT",
+         NS.individualPanel.paddingLeft,
+       -(NS.BOT_BAR_H + NS.individualPanel.paddingTop))
+    NS.individualContent:SetPoint("BOTTOMRIGHT", NS.individualPanel, "BOTTOMRIGHT",
+        -NS.individualPanel.paddingRight,
+         NS.individualPanel.paddingBottom)
 
     -- ── Two-column panel structure ────────────────────────────────
     -- Compute model panel width from frame height (decoupled from frame width).
     -- This means the model area never changes size when the frame expands/collapses.
     -- modelW factor (0.7) approximates the original contentW/3 at 850px width.
     -- Adjust in-game via this multiplier if the model looks too wide or narrow.
-    local panelH  = NS.partyContent:GetHeight()
+    local panelH  = NS.individualContent:GetHeight()
     if panelH == 0 then
         panelH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H
                  - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom)
@@ -54,22 +62,22 @@ NS.CleanBot_BuildPartyTab = function()
     local panelW  = g.colW + modelW + g.colW
 
     -- Column 1: model + equip slots. Fixed width, never resizes.
-    NS.partyModelPanel = CreateFrame("Frame", "CleanBotPartyModelPanel", NS.partyContent)
-    NS.partyModelPanel:SetPoint("TOPLEFT",    NS.partyContent, "TOPLEFT",    0, 0)
-    NS.partyModelPanel:SetPoint("BOTTOMLEFT", NS.partyContent, "BOTTOMLEFT", 0, 0)
-    NS.partyModelPanel:SetWidth(panelW)
+    NS.individualModelPanel = CreateFrame("Frame", "CleanBotIndividualModelPanel", NS.individualContent)
+    NS.individualModelPanel:SetPoint("TOPLEFT",    NS.individualContent, "TOPLEFT",    0, 0)
+    NS.individualModelPanel:SetPoint("BOTTOMLEFT", NS.individualContent, "BOTTOMLEFT", 0, 0)
+    NS.individualModelPanel:SetWidth(panelW)
 
     -- Column 2: strategy tabs and controls. Fills the remaining width via BOTTOMRIGHT.
-    NS.partyStratPanel = CreateFrame("Frame", "CleanBotPartyStratPanel", NS.partyContent)
-    NS.partyStratPanel:SetPoint("TOPLEFT",     NS.partyModelPanel, "TOPRIGHT",    NS.MODEL_GAP, 0)
-    NS.partyStratPanel:SetPoint("BOTTOMRIGHT", NS.partyContent,    "BOTTOMRIGHT", 0, 0)
+    NS.individualStratPanel = CreateFrame("Frame", "CleanBotIndividualStratPanel", NS.individualContent)
+    NS.individualStratPanel:SetPoint("TOPLEFT",     NS.individualModelPanel, "TOPRIGHT",    NS.MODEL_GAP, 0)
+    NS.individualStratPanel:SetPoint("BOTTOMRIGHT", NS.individualContent,    "BOTTOMRIGHT", 0, 0)
 
     -- Collapsed width = model panel + frame padding + panel padding on both sides.
     -- MODEL_GAP is included so the collapsed frame visually absorbs the gap between
     -- the model panel and the strategy panel edge.
     NS.COLLAPSED_WIDTH = panelW
         + NS.PADDING.frame.left  + NS.PADDING.frame.right
-        + NS.partyPanel.paddingLeft + NS.partyPanel.paddingRight
+        + NS.individualPanel.paddingLeft + NS.individualPanel.paddingRight
         + NS.MODEL_GAP
 
     -- ── Expand / collapse toggle button ─────────────────────────
@@ -77,20 +85,20 @@ NS.CleanBot_BuildPartyTab = function()
     -- IMPORTANT: static pixel offset intentionally bypasses the padding/margin
     -- model. This is a fixed UI affordance at the frame edge; do not convert
     -- these offsets to NS.PADDING or margin values.
-    NS.partyExpandBtn = NS.CB_CreateButton(CleanBotFrame, "CleanBotPartyExpandBtn",
-        ">", 17, 35, function() NS.CB_TogglePartyExpand() end)
-    NS.partyExpandBtn:ClearAllPoints()
-    NS.partyExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", 0, 0)
-    NS.partyExpandBtn:SetFrameLevel(CleanBotFrame:GetFrameLevel() + 20)
-    NS.partyExpandBtn:SetScript("OnEnter", function(self)
+    NS.individualExpandBtn = NS.CB_CreateButton(CleanBotFrame, "CleanBotIndividualExpandBtn",
+        ">", 17, 35, function() NS.CB_ToggleIndividualExpand() end)
+    NS.individualExpandBtn:ClearAllPoints()
+    NS.individualExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", 0, 0)
+    NS.individualExpandBtn:SetFrameLevel(CleanBotFrame:GetFrameLevel() + 20)
+    NS.individualExpandBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText(NS.partyExpanded and "Hide Strategies" or "Show Strategies", 1, 1, 1)
+        GameTooltip:SetText(NS.individualExpanded and "Hide Strategies" or "Show Strategies", 1, 1, 1)
         GameTooltip:Show()
     end)
-    NS.partyExpandBtn:SetScript("OnLeave", function()
+    NS.individualExpandBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-    NS.partyExpandBtn:Hide()  -- shown only when Party tab is active (CleanBot_SelectTopTab)
+    NS.individualExpandBtn:Hide()  -- shown only when Individual tab is active (CleanBot_SelectTopTab)
 end
 
 -- ============================================================
@@ -112,9 +120,13 @@ end
 -- …) plus its container frame and selectInnerTab fn.
 -- ============================================================
 NS.tabPool          = {}   -- all slots ever created, indexed by slot number
-NS.tabList          = {}   -- ordered active slots, in party order
+NS.tabList          = {}   -- currently BOUND slots (heavy content live). In tab mode this
+                           -- mirrors desiredBots; in dropdown mode it's the LRU-bound subset.
+NS.desiredBots      = {}   -- ordered cheap roster {key,name,class,unit} the selector enumerates
+NS.selectorMode     = "tabs" -- "tabs" | "dropdown"; chosen by group size in RefreshTabs
 NS.selectedTabIndex = 0    -- index into tabList of the currently shown tab
-NS.selectedBotKey   = nil  -- key of selected tab; survives RefreshTabs rebuilds
+NS.selectedBotKey   = nil  -- key of selected bot; survives RefreshTabs rebuilds
+NS.lruClock         = 0    -- monotonic counter stamped onto slot.lru for LRU eviction
 NS.lastWavedAt      = nil
 
 -- Per-key registries (keyed by strlower(botName)). On bind these are repointed
@@ -138,8 +150,8 @@ NS.botRegistries = {
 -- ============================================================
 ---@return table  Layout geometry (slot sizes, gaps, column widths) from the live model size.
 local function CB_GetGeometry()
-    local contentW = NS.partyContent and NS.partyContent:GetWidth()  or 0
-    local contentH = NS.partyContent and NS.partyContent:GetHeight() or 0
+    local contentW = NS.individualContent and NS.individualContent:GetWidth()  or 0
+    local contentH = NS.individualContent and NS.individualContent:GetHeight() or 0
     if contentW == 0 then contentW = NS.EXPANDED_WIDTH - NS.PADDING.frame.left - NS.PADDING.frame.right end
     if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom) end
 
@@ -801,6 +813,7 @@ end
 -- Unified tab selection — works for any index in NS.tabList (a slot)
 -- ============================================================
 local CleanBot_SelectTab  -- forward declaration (used inside slot closures)
+local SelectBot           -- forward declaration: key-based selection used by both selectors
 
 -- silent=true suppresses the emote wave for programmatic selections (e.g. RefreshTabs).
 CleanBot_SelectTab = function(index, silent)
@@ -840,7 +853,7 @@ local function CB_CreateSlot(index)
 
     -- ── Tab button ────────────────────────────────────────────
     local tab = NS.CB_CreateTab(NS.botTabBar, "CleanBotCharTab" .. index,
-                                "", function() CleanBot_SelectTab(slot._tabIdx) end)
+                                "", function() SelectBot(slot.key) end)
     tab:SetWidth(NS.TAB_WIDTH)
     local icon = tab:CreateTexture(nil, "OVERLAY")
     icon:SetSize(14, 14)
@@ -851,24 +864,24 @@ local function CB_CreateSlot(index)
     slot.tabIcon = icon
 
     -- ── Model (also builds star + equip slots, all class-agnostic) ──
-    -- Parented to partyModelPanel so the model column is self-contained.
+    -- Parented to individualModelPanel so the model column is self-contained.
     -- Positioned at eqColW from the panel's left edge, leaving room for the
     -- left equip column. Equip buttons extend outside the model frame into
     -- that column area — this is intentional and valid in WoW.
-    local model = NS.CB_CreateModel(slot, NS.partyModelPanel, modelW, modelH)
+    local model = NS.CB_CreateModel(slot, NS.individualModelPanel, modelW, modelH)
     model:ClearAllPoints()
-    model:SetPoint("TOPLEFT", NS.partyModelPanel, "TOPLEFT", eqColW, 0)
+    model:SetPoint("TOPLEFT", NS.individualModelPanel, "TOPLEFT", eqColW, 0)
     model:Hide()
     slot.model = model
 
     -- ── Ctrl container (holds the per-class content frames) ────
     -- CB_CreatePanel stamps paddingLeft/Right/Top/Bottom from the "panel" role,
     -- which downstream code reads to respect insets without raw NS.PADDING lookups.
-    -- Positioned flush against partyStratPanel so the panel's own background and
+    -- Positioned flush against individualStratPanel so the panel's own background and
     -- padding define the content area — no double-inset.
-    local ctrl = NS.CB_CreatePanel(NS.partyStratPanel, "CleanBotCtrl" .. index, 3, "panel")
-    ctrl:SetPoint("TOPLEFT",     NS.partyStratPanel, "TOPLEFT",     0, 0)
-    ctrl:SetPoint("BOTTOMRIGHT", NS.partyStratPanel, "BOTTOMRIGHT", 0, 0)
+    local ctrl = NS.CB_CreatePanel(NS.individualStratPanel, "CleanBotCtrl" .. index, 3, "panel")
+    ctrl:SetPoint("TOPLEFT",     NS.individualStratPanel, "TOPLEFT",     0, 0)
+    ctrl:SetPoint("BOTTOMRIGHT", NS.individualStratPanel, "BOTTOMRIGHT", 0, 0)
     ctrl:Hide()
     slot.ctrl = ctrl
 
@@ -966,135 +979,225 @@ local function CB_BindSlot(slot, info)
 end
 
 -- ============================================================
--- NS.CB_TogglePartyExpand — shows/hides the strategy panel and resizes
--- CleanBotFrame. No slot relayout is needed because each panel (model and
--- strategy) tracks its own anchors independently.
+-- Lazy binding + LRU + key-based selection
+--
+-- The selector (tabs or dropdown) enumerates the cheap NS.desiredBots list, but
+-- heavy slots (model + equip + ctrl) are only bound on demand at selection and
+-- capped at NS.MAX_LIVE_SLOTS via an LRU. This keeps big raids from building a
+-- model per bot and is the shared machinery the future Group tab feeds.
 -- ============================================================
---- Toggles the party strategy panel's expanded/collapsed state and resizes the frame.
-NS.CB_TogglePartyExpand = function()
-    NS.partyExpanded = not NS.partyExpanded
-    if CleanBot_SavedVars then
-        CleanBot_SavedVars.partyExpanded = NS.partyExpanded
+
+-- Returns the desiredBots entry for a key, or nil.
+local function CB_DesiredForKey(key)
+    for _, d in ipairs(NS.desiredBots) do
+        if d.key == key then return d end
+    end
+end
+
+-- Returns the currently-bound (live) slot for a key, or nil.
+local function CB_LiveSlotForKey(key)
+    for _, slot in ipairs(NS.tabList) do
+        if slot.key == key then return slot end
+    end
+end
+
+-- Unbinds least-recently-used bound slots until there is room to bind one more
+-- without exceeding NS.MAX_LIVE_SLOTS. keepKey is never evicted.
+local function CB_EvictForBind(keepKey)
+    while #NS.tabList >= NS.MAX_LIVE_SLOTS do
+        local victim, victimIdx
+        for i, slot in ipairs(NS.tabList) do
+            if slot.key ~= keepKey and (not victim or (slot.lru or 0) < (victim.lru or 0)) then
+                victim, victimIdx = slot, i
+            end
+        end
+        if not victim then break end
+        CB_UnbindSlot(victim)
+        table.remove(NS.tabList, victimIdx)
+    end
+end
+
+-- Key-based selection shared by the tab buttons and the dropdown. Binds the
+-- bot's slot on demand (evicting the LRU slot if at capacity), then shows it.
+-- silent=true suppresses the emote wave (programmatic selections).
+SelectBot = function(key, silent)
+    if not key then return end
+    local slot = CB_LiveSlotForKey(key)
+    if not slot then
+        local d = CB_DesiredForKey(key)
+        if not d then return end
+        CB_EvictForBind(key)
+        slot = CB_AcquireSlot()
+        CB_BindSlot(slot, d)
+        NS.tabList[#NS.tabList + 1] = slot
+        -- Lazy equipment: only inspect bots we actually view.
+        if NS.CB_QueueEquipRefresh and d.unit and UnitExists(d.unit) then
+            NS.CB_QueueEquipRefresh({ { key = d.key, unit = d.unit } })
+        end
     end
 
-    NS.CB_ResizeFrame(NS.partyExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH)
+    NS.lruClock = NS.lruClock + 1
+    slot.lru = NS.lruClock
 
-    if NS.partyExpanded then
-        NS.partyStratPanel:Show()
-        NS.partyExpandBtn:SetText("<")
-        -- Ensure the active slot's ctrl is visible now that the panel is open.
-        local sel = NS.tabList[NS.selectedTabIndex]
-        if sel and sel.ctrl then sel.ctrl:Show() end
-    else
-        NS.partyStratPanel:Hide()
-        NS.partyExpandBtn:SetText(">")
+    local idx
+    for i, s in ipairs(NS.tabList) do if s == slot then idx = i; break end end
+    NS.selectedTabIndex = 0   -- force SelectTab to re-apply (slots may have rebound)
+    CleanBot_SelectTab(idx, silent)
+
+    if NS.selectorMode == "dropdown" and NS.botDropdown then
+        UIDropDownMenu_SetText(NS.botDropdown, slot.name)
     end
 end
 
 -- ============================================================
--- RefreshTabs — assigns desired party bots to pooled slots,
--- binding/rebinding/freeing only what changed.
+-- NS.CB_ToggleIndividualExpand — shows/hides the strategy panel and resizes
+-- CleanBotFrame. No slot relayout is needed because each panel (model and
+-- strategy) tracks its own anchors independently.
 -- ============================================================
---- Rebuilds the visible bot slots from the current roster, binding/unbinding pool slots.
+--- Toggles the Individual strategy panel's expanded/collapsed state and resizes the frame.
+NS.CB_ToggleIndividualExpand = function()
+    NS.individualExpanded = not NS.individualExpanded
+    if CleanBot_SavedVars then
+        CleanBot_SavedVars.individualExpanded = NS.individualExpanded
+    end
+
+    NS.CB_ResizeFrame(NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH)
+
+    if NS.individualExpanded then
+        NS.individualStratPanel:Show()
+        NS.individualExpandBtn:SetText("<")
+        -- Ensure the active slot's ctrl is visible now that the panel is open.
+        local sel = NS.tabList[NS.selectedTabIndex]
+        if sel and sel.ctrl then sel.ctrl:Show() end
+    else
+        NS.individualStratPanel:Hide()
+        NS.individualExpandBtn:SetText(">")
+    end
+end
+
+-- ============================================================
+-- RefreshTabs — recomputes the cheap desired-bot roster, picks the tab vs
+-- dropdown selector by group size, and (lazily, in dropdown mode) binds heavy
+-- slots. Selection is key-based via SelectBot so it survives rebuilds and mode
+-- switches. The future Group tab reuses this by supplying its own desiredBots.
+-- ============================================================
+--- Rebuilds the bot selector + bound slots from the current roster.
 NS.CleanBot_RefreshTabs = function()
-    -- ── 1. Compute desired tab list ────────────────────────────
-    local desired    = {}
-    local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
-    for i = 1, numMembers do
-        local unit = "party" .. i
-        if UnitExists(unit) and NS.CleanBot_IsBot(unit) then
-            local name = UnitName(unit)
+    -- ── 1. Compute the cheap desired-bot roster (party OR raid) ──
+    local desired = {}
+    NS.CB_ForEachGroupMember(function(unit, name)
+        if name and UnitExists(unit) and NS.CleanBot_IsBot(unit) then
             local _, class = UnitClass(unit)
             table.insert(desired, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
         end
-    end
-    -- Prune CleanBot_PartyBots to only current party members
-    local partyKeySet = {}
-    for _, d in ipairs(desired) do partyKeySet[d.key] = true end
-    for key in pairs(CleanBot_PartyBots) do
-        if not partyKeySet[key] then CleanBot_PartyBots[key] = nil end
-    end
+    end)
+    NS.desiredBots = desired
 
-    -- If targeting a current party bot, pre-select their tab
-    if UnitExists("target") and UnitIsPlayer("target") then
-        local targetKey = strlower(UnitName("target") or "")
-        if CleanBot_PartyBots[targetKey] then NS.selectedBotKey = targetKey end
-    end
-
-    if NS.partyEmptyLabel then
-        NS.partyEmptyLabel:SetText(#desired == 0 and "No bots found in party." or "")
-    end
-
-    -- ── 2. Free slots whose bot left the desired list ──────────
     local desiredByKey = {}
     for _, d in ipairs(desired) do desiredByKey[d.key] = true end
-    local slotByKey = {}
-    for _, slot in ipairs(NS.tabList) do
-        if desiredByKey[slot.key] then
-            slotByKey[slot.key] = slot
-        else
+
+    -- Prune CleanBot_PartyBots to only current group members
+    for key in pairs(CleanBot_PartyBots) do
+        if not desiredByKey[key] then CleanBot_PartyBots[key] = nil end
+    end
+
+    -- If targeting a current group bot, pre-select it (drives the selector below).
+    if UnitExists("target") and UnitIsPlayer("target") then
+        local targetKey = strlower(UnitName("target") or "")
+        if desiredByKey[targetKey] then NS.selectedBotKey = targetKey end
+    end
+
+    if NS.individualEmptyLabel then
+        NS.individualEmptyLabel:SetText(#desired == 0 and "No bots found in your party or raid." or "")
+    end
+
+    -- ── 2. Drop any bound slot whose bot is no longer in the group ──
+    for i = #NS.tabList, 1, -1 do
+        local slot = NS.tabList[i]
+        if not desiredByKey[slot.key] then
             CB_UnbindSlot(slot)
+            table.remove(NS.tabList, i)
         end
     end
 
-    -- ── 3. Assign desired bots to slots (reuse, rebind, or acquire) ──
-    local newTabList = {}
-    local newlyBound = {}
-    for i, d in ipairs(desired) do
-        local slot = slotByKey[d.key]
-        if slot then
-            -- Same bot kept its slot; update unit / class if they shifted
-            if slot.unit ~= d.unit then
-                slot.unit = d.unit
-                slot.model:SetUnit(d.unit)
-            end
-            if slot.class ~= d.class then
+    -- ── 3. Choose the selector mode by group size ──────────────
+    local useTabs   = (#desired <= NS.TAB_DROPDOWN_THRESHOLD)
+    NS.selectorMode = useTabs and "tabs" or "dropdown"
+
+    if #desired == 0 then
+        if NS.botDropdown then NS.botDropdown:Hide() end
+        for _, slot in ipairs(NS.tabPool) do slot.tabBtn:Hide() end
+        NS.selectedTabIndex = 0
+        return
+    end
+
+    if useTabs then
+        -- Tab mode: bind a slot for every desired bot (≤ threshold ≤ cap, all warm)
+        -- and lay the tab buttons out left→right in roster order.
+        local existing = {}
+        for _, slot in ipairs(NS.tabList) do existing[slot.key] = slot end
+        local newList    = {}
+        local newlyBound = {}
+        for _, d in ipairs(desired) do
+            local slot = existing[d.key]
+            if slot then
+                if slot.unit ~= d.unit then slot.unit = d.unit; slot.model:SetUnit(d.unit) end
+                if slot.class ~= d.class then CB_BindSlot(slot, d) end
+            else
+                slot = CB_AcquireSlot()
                 CB_BindSlot(slot, d)
-                newlyBound[#newlyBound + 1] = d
+                if d.unit and UnitExists(d.unit) then
+                    newlyBound[#newlyBound + 1] = { key = d.key, unit = d.unit }
+                end
             end
-        else
-            slot = CB_AcquireSlot()
-            CB_BindSlot(slot, d)
-            newlyBound[#newlyBound + 1] = d
+            newList[#newList + 1] = slot
         end
-        newTabList[i] = slot
-    end
-    NS.tabList = newTabList
+        NS.tabList = newList
 
-    -- ── 4. Reposition tab buttons by display order ─────────────
-    local prevTabBtn = nil
-    for i, slot in ipairs(NS.tabList) do
-        slot._tabIdx = i
-        slot.tabBtn:ClearAllPoints()
-        if prevTabBtn then
-            NS.CB_AnchorAhead(slot.tabBtn, prevTabBtn)
-        else
-            slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left + (slot.tabBtn.marginLeft or 0), 0)
+        -- One batched, additive equip-inspect for all freshly-bound bots (the queue
+        -- dedups and never clobbers in-flight inspects).
+        if NS.CB_QueueEquipRefresh and #newlyBound > 0 then
+            NS.CB_QueueEquipRefresh(newlyBound)
         end
-        prevTabBtn = slot.tabBtn
-    end
 
-    -- ── 5. Equip refresh for newly-bound bots only ────────────
-    if NS.CB_QueueEquipRefresh and #newlyBound > 0 then
-        local toInspect = {}
-        for _, d in ipairs(newlyBound) do
-            if d.unit and UnitExists(d.unit) then
-                table.insert(toInspect, { key = d.key, unit = d.unit })
+        local prevTabBtn = nil
+        for _, slot in ipairs(NS.tabList) do
+            slot.tabBtn:ClearAllPoints()
+            if prevTabBtn then
+                NS.CB_AnchorAhead(slot.tabBtn, prevTabBtn)
+            else
+                slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left + (slot.tabBtn.marginLeft or 0), 0)
             end
+            slot.tabBtn:Show()
+            prevTabBtn = slot.tabBtn
         end
-        NS.CB_QueueEquipRefresh(toInspect)
+
+        if NS.botDropdown then NS.botDropdown:Hide() end
+    else
+        -- Dropdown mode: enumerate all desired bots in the dropdown but bind slots
+        -- lazily on selection (LRU-capped). Hide all tab buttons.
+        for _, slot in ipairs(NS.tabPool) do slot.tabBtn:Hide() end
+        if NS.botDropdown then
+            UIDropDownMenu_Initialize(NS.botDropdown, function()
+                for _, d in ipairs(NS.desiredBots) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text         = d.name
+                    info.value        = d.key
+                    info.notCheckable = true
+                    local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.class]
+                    if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+                    info.func = function() SelectBot(d.key) end
+                    UIDropDownMenu_AddButton(info)
+                end
+            end)
+            NS.botDropdown:Show()
+        end
     end
 
-    -- ── 6. Restore or establish selection ─────────────────────
-    if #NS.tabList == 0 then NS.selectedTabIndex = 0; return end
-    local restoreIdx = nil
-    if NS.selectedBotKey then
-        for i, slot in ipairs(NS.tabList) do
-            if slot.key == NS.selectedBotKey then restoreIdx = i; break end
-        end
-    end
-    NS.selectedTabIndex = 0   -- force SelectTab to re-apply (slots may have rebound)
-    CleanBot_SelectTab(restoreIdx or 1, true)
+    -- ── 4. Establish selection (binds on demand in dropdown mode) ──
+    local selKey = NS.selectedBotKey
+    if not selKey or not desiredByKey[selKey] then selKey = desired[1].key end
+    SelectBot(selKey, true)
 end
 
 -- ============================================================

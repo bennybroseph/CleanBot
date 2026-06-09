@@ -343,7 +343,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
     end)
     bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    NS.CB_CreateQuestButton(slot, model, slotSize, gapX)
+    NS.CB_CreateQuestButton(slot, model, slotSize)
 end
 
 -- ── Equipment refresh via InspectUnit chain ───────────────────────────────
@@ -358,12 +358,18 @@ end
 -- INSPECT_WAIT also acts as the cooldown gap between consecutive InspectUnit
 -- calls, so no separate delay logic is needed.
 
-local INSPECT_WAIT   = 0.25   -- seconds to wait after NotifyInspect before reading data
-                              -- must be > throttle window (~1.5s per WoW 3.3.5 docs)
+-- INSPECT_WAIT is both (a) how long to wait after NotifyInspect for the data to
+-- load before reading it, and (b) the minimum gap between consecutive requests
+-- (the ~1.5s inspect throttle). Because INSPECT_READY does not fire on this
+-- server, the timer is the PRIMARY completion path — too short and we read before
+-- the equipment data has arrived (the "equipment not updated" bug). Keep it at the
+-- throttle window.
+local INSPECT_WAIT   = 1.5
 
 local inspectQueue   = {}    -- { key, unit } entries waiting to be inspected
-NS.pendingInspects   = {}    -- { [guid] = { key, unit } } for INSPECT_READY fast-path
+NS.pendingInspects   = {}    -- { [guid] = entry } for the INSPECT_READY fast-path
 local waitFrame      = nil   -- active wait timer
+local current        = nil   -- the in-flight entry { key, unit, guid }, or nil when idle
 
 local processNextInspect     -- forward declaration
 
@@ -374,17 +380,25 @@ local function cancelWait()
     end
 end
 
+-- Clears the in-flight entry and its pendingInspects record.
+local function clearCurrent()
+    if current and current.guid then NS.pendingInspects[current.guid] = nil end
+    current = nil
+end
+
 ---@param key  string  Bot name-key being refreshed.
 ---@param unit string  Unit token to inspect (e.g. "party1").
 local function doRefreshAndNext(key, unit)
     cancelWait()
     NS.CB_RefreshEquipSlots(key, unit)
+    clearCurrent()
     processNextInspect()
 end
 
 ---@param key  string  Bot name-key being refreshed.
 ---@param unit string  Unit token to inspect (e.g. "party1").
 local function startWait(key, unit)
+    cancelWait()
     local elapsed = 0
     waitFrame = CreateFrame("Frame")
     waitFrame:SetScript("OnUpdate", function(self, dt)
@@ -398,43 +412,51 @@ end
 processNextInspect = function()
     cancelWait()
     while #inspectQueue > 0 do
-        local next = table.remove(inspectQueue, 1)
-        if UnitExists(next.unit) then
-            local guid = UnitGUID(next.unit)
-            if guid then NS.pendingInspects[guid] = next end
-            NotifyInspect(next.unit)
-            startWait(next.key, next.unit)
+        local entry = table.remove(inspectQueue, 1)
+        if UnitExists(entry.unit) then
+            entry.guid = UnitGUID(entry.unit)
+            if entry.guid then NS.pendingInspects[entry.guid] = entry end
+            current = entry
+            NotifyInspect(entry.unit)
+            startWait(entry.key, entry.unit)
             return
         end
         -- unit gone — skip to next
     end
-    -- Queue empty — nothing to clean up (NotifyInspect doesn't open a frame)
-    NS.pendingInspects = {}
+    current = nil   -- queue drained; idle
 end
 
--- Called from RefreshTabs after all bot tabs are built.
----@param botList table  Array of { key = string, unit = string } bots to refresh in turn.
+-- Queues bots for an equipment inspect. ADDITIVE: appends entries (deduped by key
+-- against the in-flight and already-queued ones) and only starts processing when
+-- idle. It never resets an in-flight inspect — so selecting/loading another bot
+-- mid-queue no longer drops the bot currently being inspected (the "quits early"
+-- bug). The future Group tab can bulk-enqueue without clobbering, too.
+---@param botList table  Array of { key = string, unit = string } bots to inspect in turn.
 NS.CB_QueueEquipRefresh = function(botList)
-    cancelWait()
-    NS.pendingInspects = {}
-    inspectQueue = {}
     for _, info in ipairs(botList) do
-        table.insert(inspectQueue, { key = info.key, unit = info.unit })
+        local dup = (current ~= nil and current.key == info.key)
+        if not dup then
+            for _, q in ipairs(inspectQueue) do
+                if q.key == info.key then dup = true; break end
+            end
+        end
+        if not dup then
+            inspectQueue[#inspectQueue + 1] = { key = info.key, unit = info.unit }
+        end
     end
-    processNextInspect()
+    if not current then processNextInspect() end
 end
 
--- Called from CleanBot.lua when INSPECT_READY fires.
--- Populates slots early if the server responds before INSPECT_WAIT expires,
--- but does NOT chain to the next NotifyInspect — the waitFrame timer does that,
--- ensuring we always respect the throttle window between requests.
+-- Called from Bridge.lua when INSPECT_READY fires (unreliable on this server, so
+-- a bonus fast-path only). Refreshes early if it arrives, but does NOT chain —
+-- startWait's timer enforces the throttle gap before the next request.
 ---@param guid string  GUID from the INSPECT_READY event for the inspected unit.
 NS.CB_OnInspectReady = function(guid)
     local info = NS.pendingInspects[guid]
     if info then
         NS.pendingInspects[guid] = nil
         NS.CB_RefreshEquipSlots(info.key, info.unit)
-        -- waitFrame is still running and will call processNextInspect when done
+        -- timer still running; doRefreshAndNext will clearCurrent + advance
     end
     -- guid not in our table = player opened inspect themselves; leave it alone
 end

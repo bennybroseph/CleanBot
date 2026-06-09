@@ -307,12 +307,14 @@ end
 -- the no-bridge co?/nc? whisper read paths)
 -- ============================================================
 
--- Returns the party unit id ("partyN") whose name matches, or nil.
+-- Returns the group unit id ("partyN" or "raidN") whose name matches, or nil.
+-- Walks the raid roster when in a raid, the party roster otherwise.
 ---@param name string  Character name to locate in the party/raid.
----@return string|nil   The matching unit token (e.g. "party2"), or nil if not found.
+---@return string|nil   The matching unit token (e.g. "party2" / "raid5"), or nil.
 NS.CB_FindPartyUnit = function(name)
-    for i = 1, GetNumPartyMembers() do
-        local unit = "party" .. i
+    local prefix, n = NS.CB_GroupInfo()
+    for i = 1, n do
+        local unit = prefix .. i
         if UnitName(unit) == name then return unit end
     end
     return nil

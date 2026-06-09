@@ -44,6 +44,12 @@ NS.bridgeState   = "unknown"
 NS.probed        = {}   -- name-key -> true: party member already probed for bot-hood
 NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strategies:" reply
 
+-- Debug overrides — both are nil/false by default and are toggled via /cbdebug.
+-- nil = auto (follow real handshake); "present" or "absent" = forced override.
+NS.debugBridgeOverride = nil   ---@type string|nil
+-- When true, CB_SendBotCommand prints commands to chat instead of sending them.
+NS.debugSimulate       = false ---@type boolean
+
 -- No-bridge login gating: on a fresh login (not a /reload) bots may not be
 -- online yet, so we block CB_ProbePartyForBots until bridge detection
 -- resolves. "Hello!" whispers from bots are buffered here and flushed once
@@ -70,29 +76,25 @@ end
 -- ============================================================
 NS.syncPending = false
 
--- No-bridge discovery: whisper "co ?" to each party member exactly once.
--- Only members that reply with a "Strategies: " line are treated as bots
--- (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so they
--- are probed a single time and then ignored.
+-- No-bridge discovery: whisper "co ?" to each group member (party or raid)
+-- exactly once. Only members that reply with a "Strategies: " line are treated
+-- as bots (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so
+-- they are probed a single time and then ignored.
 -- Skipped during loginPhaseActive — bots may not be online yet on fresh
 -- login; the "Hello!" path gates probing until each bot announces itself.
 local function CB_ProbePartyForBots()
     if NS.loginPhaseActive then return end
-    local n = GetNumPartyMembers()
 
     -- Forget probe records for members who have left, so a rejoin re-probes.
     local present = {}
-    for i = 1, n do
-        local nm = UnitName("party" .. i)
+    NS.CB_ForEachGroupMember(function(unit, nm)
         if nm then present[strlower(nm)] = true end
-    end
+    end)
     for k in pairs(NS.probed) do
         if not present[k] then NS.probed[k] = nil; NS.awaitingProbe[k] = nil end
     end
 
-    for i = 1, n do
-        local unit = "party" .. i
-        local nm   = UnitName(unit)
+    NS.CB_ForEachGroupMember(function(unit, nm)
         if nm and UnitIsPlayer(unit) then
             local key = strlower(nm)
             if not CleanBot_PartyBots[key] and not NS.probed[key] then
@@ -101,7 +103,7 @@ local function CB_ProbePartyForBots()
                 NS.CB_SendBotCommand(nm, "co ?")
             end
         end
-    end
+    end)
 end
 
 -- ============================================================
@@ -191,18 +193,39 @@ local function CB_GetBridgeOpcode(command)
     return nil
 end
 
+-- Returns the effective bridge state, respecting NS.debugBridgeOverride.
+-- Use this instead of reading NS.bridgeState directly inside CB_SendBotCommand
+-- so that /cbdebug bridge on/off can exercise both code paths without a real bridge.
+local function CB_EffectiveBridgeState()
+    return NS.debugBridgeOverride or NS.bridgeState
+end
+
+-- Addon-message distribution channel for the player's current group. Bridge
+-- packets must go to "RAID" when in a raid — "PARTY" does not reach raid members.
+local function CB_GroupChannel()
+    return GetNumRaidMembers() > 0 and "RAID" or "PARTY"
+end
+
 -- Sends a command to a bot. Routes through the bridge (silent, no whisper
 -- spam) when the bridge is present and the command is allowlisted; falls back
 -- to a whisper for everything else or when bridge is absent. Safe to use for
 -- all commands including queries — unlisted commands always whisper, so
 -- replies still arrive normally via CHAT_MSG_WHISPER.
+--
+-- When NS.debugSimulate is true the command is printed to chat instead of
+-- sent, and when NS.debugBridgeOverride is set it overrides the real bridge
+-- state — both are toggled via /cbdebug.
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
 NS.CB_SendBotCommand = function(botName, command)
-    if NS.bridgeState == "present" then
+    if NS.debugSimulate then
+        NS.CB_Print("|cff888888[simulate]|r → " .. botName .. ": " .. command)
+        return
+    end
+    if CB_EffectiveBridgeState() == "present" then
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
-            SendAddonMessage("MBOT", "RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command, "PARTY")
+            SendAddonMessage("MBOT", "RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command, CB_GroupChannel())
             return
         end
     end
@@ -214,11 +237,12 @@ NS.CB_RequestSync = function()
     NS.syncPending = true
     NS.CB_After(0.5, function()
         NS.syncPending = false
-        if NS.bridgeState == "present" then
-            SendAddonMessage("MBOT", "GET~ROSTER",  "PARTY")
-            SendAddonMessage("MBOT", "GET~DETAILS", "PARTY")
-            SendAddonMessage("MBOT", "GET~STATES",  "PARTY")
-        elseif NS.bridgeState == "absent" then
+        if CB_EffectiveBridgeState() == "present" then
+            local ch = CB_GroupChannel()
+            SendAddonMessage("MBOT", "GET~ROSTER",  ch)
+            SendAddonMessage("MBOT", "GET~DETAILS", ch)
+            SendAddonMessage("MBOT", "GET~STATES",  ch)
+        elseif CB_EffectiveBridgeState() == "absent" then
             CB_ProbePartyForBots()
         end
         if CleanBotFrame:IsShown() then
@@ -232,23 +256,59 @@ NS.CB_RequestRosterThenRefresh = function()
     NS.CB_RequestSync()
 end
 
--- Tick inventory and money timeouts for the whisper path (3s silence = done)
+-- Finalizes a whisper-path quest collection: swaps the staged quests into the
+-- live list and re-renders if the bot's quest frame is open. Shared by the
+-- summary-line terminator and the silence-timeout fallback below.
+---@param key   string  Bot name-key.
+---@param entry table   The bot roster entry being finalized.
+local function CB_FinalizeQuestCollection(key, entry)
+    entry.awaitingQuests = false
+    entry.questTimeout   = 0
+    entry.quests         = entry.questStaging or {}
+    entry.questStaging   = nil
+    local f = NS.botQuestFrames and NS.botQuestFrames[key]
+    if f and f:IsShown() and NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
+end
+
+-- Tick inventory, money, and quest timeouts for the whisper path (3s silence = done)
 local invTickFrame = CreateFrame("Frame")
 invTickFrame:SetScript("OnUpdate", function(self, dt)
     for key, entry in pairs(CleanBot_PartyBots) do
+        if entry.awaitingQuests then
+            entry.questTimeout = (entry.questTimeout or 0) + dt
+            if entry.questTimeout >= 3 then
+                CB_FinalizeQuestCollection(key, entry)
+            end
+        end
+
         if entry.awaitingInventory then
             entry.invTimeout = (entry.invTimeout or 0) + dt
             if entry.invTimeout >= 3 then
                 entry.awaitingInventory = false
                 entry.invTimeout        = 0
-                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
-                if f and f:IsShown() then NS.CB_RenderInventory(key) end
 
-                -- Inventory done — now ask for money separately so the reply
-                -- arrives on its own and is not swallowed by awaitingInventory.
-                entry.awaitingMoney  = true
-                entry.moneyTimeout   = 0
-                SendChatMessage("stats", "WHISPER", nil, entry.name)
+                -- Whisper path only (marked by invStaging): atomically swap the
+                -- freshly-staged items in (replacing the preserved stale set) so
+                -- a refresh updates cleanly, then fetch money/bag separately so
+                -- its reply arrives on its own and isn't swallowed here.
+                -- On the bridge path invStaging is nil and INV_END has normally
+                -- already rendered; this branch is just a safety-net flag clear.
+                if entry.invStaging then
+                    if entry.inventory then
+                        entry.inventory.items = entry.invStaging or {}
+                    end
+                    entry.invStaging     = nil
+                    entry.awaitingMoney  = true
+                    entry.moneyTimeout   = 0
+                    SendChatMessage("stats", "WHISPER", nil, entry.name)
+                end
+
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and f:IsShown() then
+                    NS.CB_RenderInventory(key)
+                elseif f and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(f, false)
+                end
             end
         end
 
@@ -272,11 +332,27 @@ NS.CB_FetchInventory = function(key, botName)
     -- frame can display stale-but-correct data instead of going blank.
     entry.inventory = entry.inventory or { items = {} }
 
-    if NS.bridgeState == "present" then
-        SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", "PARTY")
+    -- In-flight flag drives the loading overlay; set on BOTH paths so the
+    -- indicator is path-agnostic. Cleared in CB_RenderInventory when data lands
+    -- (or by the silence-timeout tick below as a safety net).
+    entry.awaitingInventory = true
+    entry.invTimeout        = 0
+    local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
+    if invF and invF:IsShown() and NS.CB_SetInventoryLoading then
+        NS.CB_SetInventoryLoading(invF, true)
+    end
+
+    if CB_EffectiveBridgeState() == "present" then
+        SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", CB_GroupChannel())
     else
-        entry.awaitingInventory = true
-        entry.invTimeout        = 0
+        -- invStaging is the whisper-path marker: its presence tells the tick
+        -- below to run the whisper finalize (swap + stats fetch) rather than
+        -- just clearing the flag.
+        -- Collect fresh item replies into a staging table rather than appending
+        -- to entry.inventory.items directly. The live items are preserved for
+        -- the stale-display-during-flight render and only replaced (atomically)
+        -- once collection completes, so a refresh updates instead of duplicating.
+        entry.invStaging        = {}
         NS.CB_SendBotCommand(botName, "items")
     end
 end
@@ -290,20 +366,32 @@ end
 
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
--- CHAT_MSG_ADDON block. Whisper fallback sends "quests" — structured parsing
--- of the whisper reply is not yet implemented.
+-- CHAT_MSG_ADDON block. Whisper fallback sends "quests" and parses the reply
+-- lines in the CHAT_MSG_WHISPER handler into the same { {id, status} } shape.
+-- The live entry.quests is intentionally NOT cleared here: the bridge path
+-- resets it on QUESTS_BEGIN, and the whisper path swaps fresh data in on
+-- finalize (CB_FinalizeQuestCollection) — so the last render survives on screen
+-- until the new list is ready.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
 NS.CB_FetchQuests = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
-    entry.quests = {}
 
-    if NS.bridgeState == "present" then
-        SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", "PARTY")
+    if CB_EffectiveBridgeState() == "present" then
+        SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", CB_GroupChannel())
     else
-        -- Whisper fallback — reply parsing not yet implemented.
-        NS.CB_SendBotCommand(botName, "quests")
+        -- Whisper path: collect the "quests" reply lines into staging, keyed by
+        -- section header (Incompleted/Completed). Swapped in on the summary line
+        -- or after 3s of silence (invTickFrame).
+        entry.awaitingQuests = true
+        entry.questTimeout   = 0
+        entry.questStatus    = "I"   -- current section; flipped by reply headers
+        entry.questStaging   = {}
+        -- "quests all" (not bare "quests", which only prints the summary) makes the
+        -- bot stream the per-quest lines + section headers we parse — mirrors the
+        -- bridge's GET~QUESTS~ALL mode.
+        NS.CB_SendBotCommand(botName, "quests all")
     end
 end
 
@@ -315,8 +403,8 @@ local function CB_BridgeRequest()
 end
 
 local function CB_SendHello()
-    if GetNumPartyMembers() > 0 then
-        SendAddonMessage("MBOT", "HELLO~1", "PARTY")
+    if NS.CB_InGroup() then
+        SendAddonMessage("MBOT", "HELLO~1", CB_GroupChannel())
     end
 end
 
@@ -326,7 +414,7 @@ end
 local function CB_StartBridgeDetection()
     if NS.bridgeState ~= "unknown" then return end
     if NS.bridgeDetecting then return end           -- a detection timer is already running
-    if GetNumPartyMembers() == 0 then return end    -- nothing to detect against yet
+    if not NS.CB_InGroup() then return end          -- nothing to detect against yet
     NS.bridgeDetecting = true
     CB_SendHello()
 
@@ -360,6 +448,7 @@ bridgeFrame:RegisterEvent("CHAT_MSG_ADDON")
 bridgeFrame:RegisterEvent("CHAT_MSG_WHISPER")
 bridgeFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 bridgeFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+bridgeFrame:RegisterEvent("RAID_ROSTER_UPDATE")
 bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 bridgeFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
 bridgeFrame:RegisterEvent("INSPECT_READY")
@@ -372,36 +461,43 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         local entry = CleanBot_PartyBots[key]
 
         -- "Hello!" detection: a bot has just come online (no-bridge, fresh-login path).
-        -- We verify the sender is actually in our party to avoid acting on a real player.
+        -- We verify the sender is actually in our group to avoid acting on a real player.
         -- "Hello!" is not a Strategies reply, so we return early after handling it.
-        if msg == "Hello!" and NS.bridgeState ~= "present" then
+        if msg == "Hello!" and CB_EffectiveBridgeState() ~= "present" then
             local inParty = false
-            for i = 1, GetNumPartyMembers() do
-                if UnitName("party" .. i) == sender then inParty = true; break end
-            end
+            NS.CB_ForEachGroupMember(function(unit, nm)
+                if nm == sender then inParty = true end
+            end)
             if inParty then
                 if NS.loginPhaseActive then
                     -- Detection still running: buffer for processing when it resolves.
                     NS.pendingHello[key] = sender
-                elseif NS.bridgeState == "absent" then
-                    -- Detection already resolved to absent: probe immediately.
-                    if not CleanBot_PartyBots[key] and not NS.probed[key] then
-                        NS.probed[key]        = true
-                        NS.awaitingProbe[key] = true
-                        NS.CB_SendBotCommand(sender, "co ?")
-                    end
+                elseif not CleanBot_PartyBots[key] then
+                    -- A bot whispers "Hello!" once it has finished loading into the
+                    -- world. Re-probe even if we already probed it: the initial
+                    -- discovery probe is often whispered before the bot has spawned,
+                    -- so it never replies (leaving probed=true, awaiting=true, but no
+                    -- cache entry — exactly what /cbdebug showed). "Hello!" is the
+                    -- bot's readiness signal and only bots send it, so re-probing
+                    -- here never spams real players.
+                    NS.probed[key]        = true
+                    NS.awaitingProbe[key] = true
+                    NS.CB_SendBotCommand(sender, "co ?")
                 end
             end
             return
         end
 
-        -- Inventory collection (whisper path): grab any item link, ignore everything else
-        if entry and entry.awaitingInventory then
+        -- Inventory collection (whisper path): grab any item link, ignore everything
+        -- else. Gated on invStaging (the whisper-only marker) rather than
+        -- awaitingInventory, so a bridge-path fetch — which also sets
+        -- awaitingInventory but never sends "items" — doesn't swallow unrelated whispers.
+        if entry and entry.invStaging then
             if strfind(msg, "|Hitem:", 1, true) then
                 local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(msg)
                 if item then
-                    local items = entry.inventory and entry.inventory.items
-                    if items then items[#items + 1] = item end
+                    local staging = entry.invStaging
+                    if staging then staging[#staging + 1] = item end
                 end
             end
             entry.invTimeout = 0   -- reset timeout on every whisper from this bot
@@ -409,32 +505,64 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Money/stats capture (whisper path): reply from "stats" whisper.
-        -- Format: "Ng Ns Nc, used/total Bag, X% (Y) Dur, cur/max% XP"
+        -- The real reply is laced with WoW colour/hyperlink escape codes, e.g.
+        --   "2g 34s 56c, |h|cff20ff2012/16|h|cffffffff Bag, |cff...87% (5g 24s)|cffffffff Dur, |cff...45/67%|cffffffff XP"
+        -- so we strip the |c / |h / |r escapes first, then parse the cleaned text.
+        -- The bag count is FREE/TOTAL (not used/total); convert to used to match
+        -- the bridge's INV_SUMMARY semantics (which reports used/total).
         -- Each money denomination is optional (e.g. a broke bot omits gold).
         if entry and entry.awaitingMoney then
             entry.moneyTimeout  = 0
             entry.awaitingMoney = false
 
-            local gold   = tonumber(msg:match("(%d+)g")) or 0
-            local silver = tonumber(msg:match("(%d+)s")) or 0
-            local copper = tonumber(msg:match("(%d+)c")) or 0
+            local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
+
+            local gold   = tonumber(clean:match("(%d+)g")) or 0
+            local silver = tonumber(clean:match("(%d+)s")) or 0
+            local copper = tonumber(clean:match("(%d+)c")) or 0
             entry.money  = { gold = gold, silver = silver, copper = copper }
 
             -- Bag totals are not available from the "items" whisper, but stats gives them.
-            local bagUsed, bagTotal = msg:match("(%d+)/(%d+)%s+Bag")
-            if bagUsed and entry.inventory then
-                entry.inventory.bagUsed  = tonumber(bagUsed)
-                entry.inventory.bagTotal = tonumber(bagTotal)
+            local bagFree, bagTotal = clean:match("(%d+)/(%d+)%s*Bag")
+            if bagFree and entry.inventory then
+                bagFree  = tonumber(bagFree)
+                bagTotal = tonumber(bagTotal)
+                entry.inventory.bagTotal = bagTotal
+                entry.inventory.bagUsed  = bagTotal - bagFree
             end
 
             -- Durability and XP are whisper-only — store for future display.
-            local durPct            = tonumber(msg:match("(%d+)%%%s+%(%d+%)%s+Dur"))
-            local xpCur, xpMax     = msg:match("(%d+)/(%d+)%%%s+XP")
-            entry.durability        = durPct
-            entry.xpPercent         = xpCur and (tonumber(xpCur) .. "/" .. tonumber(xpMax)) or nil
+            -- Dur is "N% (repair cost) Dur"; XP is "cur/rest% XP".
+            local durPct        = tonumber(clean:match("(%d+)%%%s*%(.-%)%s*Dur"))
+            local xpCur, xpMax  = clean:match("(%d+)/(%d+)%%%s*XP")
+            entry.durability    = durPct
+            entry.xpPercent     = xpCur and (tonumber(xpCur) .. "/" .. tonumber(xpMax)) or nil
 
             local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
             if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
+            return
+        end
+
+        -- Quest list collection (whisper path): reply to the "quests" command.
+        -- The bot streams section headers (Incompleted/Completed) then one quest
+        -- hyperlink per line, ending with a "--- Summary --- / Total:" line.
+        -- Status comes from the active section; the quest ID from the |Hquest:ID:
+        -- link. Collected into questStaging, swapped into entry.quests on finalize.
+        if entry and entry.awaitingQuests then
+            entry.questTimeout = 0
+            -- Quest lines carry a |Hquest:ID: link — match that FIRST so a quest
+            -- whose title contains "Complete"/"Incomplete" isn't mistaken for a
+            -- section header. Headers (no link) only set the current status.
+            local id = tonumber(msg:match("|Hquest:(%d+):"))
+            if id then
+                entry.questStaging[#entry.questStaging + 1] = { id = id, status = entry.questStatus }
+            elseif msg:find("Summary", 1, true) or msg:match("^%s*Total:") then
+                CB_FinalizeQuestCollection(key, entry)
+            elseif msg:find("Incomplet", 1, true) then
+                entry.questStatus = "I"
+            elseif msg:find("Complet", 1, true) then
+                entry.questStatus = "C"
+            end
             return
         end
 
@@ -479,6 +607,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         if prefix ~= "MBOT" then return end
 
         if msg and strsub(msg, 1, 10) == "HELLO_ACK~" then
+            -- HELLO_ACK drives the *real* state machine and is processed even when
+            -- the override forces "absent", so /cbdebug bridge reset can restore the
+            -- true state. CB_BridgeRequest below re-syncs via the effective path.
             NS.lastHelloAck = msg
             if not NS.bridgeReady then
                 NS.bridgeReady      = true
@@ -489,6 +620,14 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 CB_BridgeRequest()
                 NS.CleanBot_FetchLinkedAccounts()
             end
+
+        elseif CB_EffectiveBridgeState() ~= "present" then
+            -- Override forces the no-bridge path: ignore all inbound bridge data
+            -- packets (ROSTER~/DETAIL~/STATE~/INV_*/QUESTS_*) so the cache is only
+            -- ever populated via the whisper discovery path. Without this guard a
+            -- real bridge would keep pushing strategy/inventory data and the
+            -- "absent" simulation would be incomplete.
+            return
 
         elseif msg and strsub(msg, 1, 7) == "ROSTER~" then
             local name = strmatch(msg, "^ROSTER~([^,]+),")
@@ -610,9 +749,13 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local rest = strsub(msg, 9)
             local name = NS.CB_SplitOnce(rest, "~")
             local key  = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then entry.awaitingInventory = false end   -- bridge data landed
             local f    = NS.botInventoryFrames and NS.botInventoryFrames[key]
             if f and f:IsShown() then
                 NS.CB_RenderInventory(key)
+            elseif f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, false)
             end
 
         -- ── Quest log packets ────────────────────────────────────────────
@@ -673,7 +816,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
-    elseif event == "PARTY_MEMBERS_CHANGED" then
+    elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
+        -- Either group-roster event drives detection/sync: party APIs read 0 while
+        -- in a raid, so RAID_ROSTER_UPDATE is required to detect bots in a raid.
         if NS.bridgeState == "unknown" then
             CB_StartBridgeDetection()
         else
@@ -681,7 +826,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PLAYER_TARGET_CHANGED" then
-        if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_RefreshTabs then
+        if NS.individualPanel and NS.individualPanel:IsShown() and NS.CleanBot_RefreshTabs then
             NS.CleanBot_RefreshTabs()
         end
 
@@ -723,6 +868,15 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.awaitingProbe    = {}
         CleanBot_PartyBots  = {}
         CB_StartBridgeDetection()
+        -- The party/raid roster may not be query-able yet at login, so the call
+        -- above can no-op (GetNum*Members == 0) and the roster event may have
+        -- already fired during the loading screen. Retry a few times so being
+        -- already in a group — especially a raid — is reliably detected.
+        -- CB_StartBridgeDetection is idempotent (guards on state / in-progress /
+        -- in-group), so extra calls are harmless once detection has begun.
+        NS.CB_After(1, CB_StartBridgeDetection)
+        NS.CB_After(3, CB_StartBridgeDetection)
+        NS.CB_After(6, CB_StartBridgeDetection)
 
     elseif event == "PLAYER_LOGOUT" then
         -- Clear the flag so the next session is treated as a fresh login.
