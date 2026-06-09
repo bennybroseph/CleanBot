@@ -21,6 +21,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 # Individual Tab
 - Manage Individual Bots Within Your Party or Raid
 - Set Combat, Non-Combat, and Class Specific Strategies
+- Target Party/Raid Members to Swap to Them
 - Manage gear through drag and drop or context menus
     - View Gold and Items in an intuitive and familiar interface
 
