@@ -235,17 +235,15 @@ NS.CleanBot_BuildManageTab = function()
 
     local uninviteAllBtn = NS.CB_CreateButton(targetSection.bg, "CleanBotManageUninviteAllBtn",
         "Uninvite All", 120, 24, function()
-            local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
             local removed = 0
-            for i = 1, numMembers do
-                local unit = "party" .. i
-                if UnitExists(unit) and NS.CleanBot_IsBot(unit) then
-                    UninviteUnit(UnitName(unit))
+            NS.CB_ForEachGroupMember(function(unit, name)
+                if name and UnitExists(unit) and NS.CleanBot_IsBot(unit) then
+                    UninviteUnit(name)
                     removed = removed + 1
                 end
-            end
+            end)
             if removed == 0 then
-                NS.CB_Print("No bots found in party to remove.")
+                NS.CB_Print("No bots found in party or raid to remove.")
             end
         end)
     NS.CB_AnchorBelow(uninviteAllBtn, uninviteTargetBtn)

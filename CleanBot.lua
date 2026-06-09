@@ -85,6 +85,45 @@ NS.CB_EndCapture = function()
 end
 
 -- ============================================================
+-- Group iteration (party OR raid)
+-- ============================================================
+-- WoW addresses group members differently depending on group type: "partyN"
+-- (1..GetNumPartyMembers, excludes the player) when in a party, but "raidN"
+-- (1..GetNumRaidMembers, INCLUDES the player) when in a raid — and party APIs
+-- return 0 while in a raid. These helpers paper over that so callers work for
+-- both. Use them instead of hardcoding GetNumPartyMembers / "party"..i.
+
+--- Returns the unit-id prefix and member count for the player's current group.
+--- Raid takes precedence over party; both 0 when solo. In a raid the count
+--- INCLUDES the player, so member iteration must skip the player's own unit.
+---@return string prefix  "raid" or "party".
+---@return number count   Number of group members (raid count includes the player).
+NS.CB_GroupInfo = function()
+    local nRaid = GetNumRaidMembers()
+    if nRaid > 0 then return "raid", nRaid end
+    return "party", GetNumPartyMembers()
+end
+
+--- True when the player is in any group (party or raid).
+---@return boolean
+NS.CB_InGroup = function()
+    return GetNumRaidMembers() > 0 or GetNumPartyMembers() > 0
+end
+
+--- Calls fn(unit, name) for each OTHER group member (the player is skipped).
+--- Works for both party and raid. name may be nil if the unit is not yet known.
+---@param fn fun(unit:string, name:string|nil)
+NS.CB_ForEachGroupMember = function(fn)
+    local prefix, n = NS.CB_GroupInfo()
+    for i = 1, n do
+        local unit = prefix .. i
+        if not UnitIsUnit(unit, "player") then
+            fn(unit, UnitName(unit))
+        end
+    end
+end
+
+-- ============================================================
 -- Config + bot detection cache
 -- ============================================================
 CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
@@ -351,6 +390,16 @@ initFrame:SetScript("OnEvent", function(self, event)
             NS.botEmotes = CleanBot_SavedVars.botEmotes
         end
         NS.partyExpanded = CleanBot_SavedVars.partyExpanded == true
+
+        -- Restore debug overrides (persist across logout so start-to-finish
+        -- flows can be tested). Only the two valid override values are accepted.
+        if CleanBot_SavedVars.debugBridgeOverride == "present"
+        or CleanBot_SavedVars.debugBridgeOverride == "absent" then
+            NS.debugBridgeOverride = CleanBot_SavedVars.debugBridgeOverride
+        end
+        if type(CleanBot_SavedVars.debugSimulate) == "boolean" then
+            NS.debugSimulate = CleanBot_SavedVars.debugSimulate
+        end
 
         -- Restore theme values.
         if type(CleanBot_SavedVars.scale) == "number" then

@@ -173,42 +173,56 @@ SlashCmdList["CBDEBUG"] = function(msg)
     -- instead of waiting for the next window open.
     if msg == "bridge off" then
         NS.debugBridgeOverride = "absent"
+        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = "absent" end
         NS.CB_Print("Bridge override set to |cffff4444absent|r (whisper fallback).")
         NS.CB_RequestSync()
         return
     elseif msg == "bridge on" then
         NS.debugBridgeOverride = "present"
+        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = "present" end
         NS.CB_Print("Bridge override set to |cff00ff00present|r (bridge path).")
         NS.CB_RequestSync()
         return
     elseif msg == "bridge reset" then
         NS.debugBridgeOverride = nil
+        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = nil end
         NS.CB_Print("Bridge override cleared — following real handshake (" .. NS.bridgeState .. ").")
         NS.CB_RequestSync()
         return
     -- Simulate mode toggle.
     elseif msg == "simulate" then
         NS.debugSimulate = not NS.debugSimulate
+        if CleanBot_SavedVars then CleanBot_SavedVars.debugSimulate = NS.debugSimulate end
         NS.CB_Print("Simulate mode: " .. (NS.debugSimulate and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
         return
     end
 
-    -- Default: quick party/cache dump.
-    local numMembers = GetNumPartyMembers()
-    print("Party members:", numMembers)
-    for i = 1, numMembers do
-        local unit = "party" .. i
-        local name = UnitName(unit)
+    -- Default: quick group/cache/state dump.
+    print(string.format("Bridge: real=%s override=%s simulate=%s loginPhase=%s",
+        tostring(NS.bridgeState),
+        tostring(NS.debugBridgeOverride or "none"),
+        tostring(NS.debugSimulate),
+        tostring(NS.loginPhaseActive)))
+
+    local prefix, n = NS.CB_GroupInfo()
+    print(string.format("Group: type=%s count=%d  (party=%d raid=%d)",
+        prefix, n, GetNumPartyMembers(), GetNumRaidMembers()))
+
+    -- Walk the resolved group (skips the player), reporting per-member state.
+    NS.CB_ForEachGroupMember(function(unit, name)
         local _, class = UnitClass(unit)
-        local inCache = name and CleanBot_PartyBots[strlower(name)] ~= nil
-        print(string.format("  [%d] name=%s exists=%s isPlayer=%s class=%s inCache=%s",
-            i,
+        local key      = name and strlower(name)
+        print(string.format("  %s name=%s exists=%s isPlayer=%s class=%s inCache=%s probed=%s awaiting=%s",
+            unit,
             tostring(name),
             tostring(UnitExists(unit)),
             tostring(UnitIsPlayer(unit)),
             tostring(class),
-            tostring(inCache)))
-    end
+            tostring(key and CleanBot_PartyBots[key] ~= nil),
+            tostring(key and NS.probed[key] == true),
+            tostring(key and NS.awaitingProbe[key] == true)))
+    end)
+
     print("KnownBots cache:")
     local count = 0
     for k, v in pairs(CleanBot_PartyBots) do

@@ -998,17 +998,15 @@ end
 --- Rebuilds the visible bot slots from the current roster, binding/unbinding pool slots.
 NS.CleanBot_RefreshTabs = function()
     -- ── 1. Compute desired tab list ────────────────────────────
-    local desired    = {}
-    local numMembers = GetNumPartyMembers and GetNumPartyMembers() or 0
-    for i = 1, numMembers do
-        local unit = "party" .. i
-        if UnitExists(unit) and NS.CleanBot_IsBot(unit) then
-            local name = UnitName(unit)
+    -- Iterates the player's group (party OR raid) so raid bots show up too.
+    local desired = {}
+    NS.CB_ForEachGroupMember(function(unit, name)
+        if name and UnitExists(unit) and NS.CleanBot_IsBot(unit) then
             local _, class = UnitClass(unit)
             table.insert(desired, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
         end
-    end
-    -- Prune CleanBot_PartyBots to only current party members
+    end)
+    -- Prune CleanBot_PartyBots to only current group members
     local partyKeySet = {}
     for _, d in ipairs(desired) do partyKeySet[d.key] = true end
     for key in pairs(CleanBot_PartyBots) do
