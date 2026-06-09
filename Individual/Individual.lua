@@ -1030,10 +1030,16 @@ SelectBot = function(key, silent)
         slot = CB_AcquireSlot()
         CB_BindSlot(slot, d)
         NS.tabList[#NS.tabList + 1] = slot
-        -- Lazy equipment: only inspect bots we actually view.
-        if NS.CB_QueueEquipRefresh and d.unit and UnitExists(d.unit) then
-            NS.CB_QueueEquipRefresh({ { key = d.key, unit = d.unit } })
-        end
+    end
+
+    -- Re-inspect on every selection (not just on fresh bind). The client caches
+    -- inspect data for only the last-inspected unit, so viewing another bot evicts
+    -- this one's data — re-warming on each select keeps SetInventoryItem tooltips
+    -- (gems/enchants/set bonuses) rich instead of falling back to generic links.
+    -- CB_QueueEquipRefresh dedups against in-flight/queued entries, so rapid
+    -- re-selects don't pile up.
+    if NS.CB_QueueEquipRefresh and slot.unit and UnitExists(slot.unit) then
+        NS.CB_QueueEquipRefresh({ { key = slot.key, unit = slot.unit } })
     end
 
     NS.lruClock = NS.lruClock + 1
@@ -1136,8 +1142,7 @@ NS.CleanBot_RefreshTabs = function()
         -- and lay the tab buttons out left→right in roster order.
         local existing = {}
         for _, slot in ipairs(NS.tabList) do existing[slot.key] = slot end
-        local newList    = {}
-        local newlyBound = {}
+        local newList = {}
         for _, d in ipairs(desired) do
             local slot = existing[d.key]
             if slot then
@@ -1146,19 +1151,18 @@ NS.CleanBot_RefreshTabs = function()
             else
                 slot = CB_AcquireSlot()
                 CB_BindSlot(slot, d)
-                if d.unit and UnitExists(d.unit) then
-                    newlyBound[#newlyBound + 1] = { key = d.key, unit = d.unit }
-                end
             end
             newList[#newList + 1] = slot
         end
         NS.tabList = newList
 
-        -- One batched, additive equip-inspect for all freshly-bound bots (the queue
-        -- dedups and never clobbers in-flight inspects).
-        if NS.CB_QueueEquipRefresh and #newlyBound > 0 then
-            NS.CB_QueueEquipRefresh(newlyBound)
-        end
+        -- Equipment inspect is deliberately NOT batched across all bound bots. The
+        -- client caches inspect data for only one unit at a time, so inspecting every
+        -- bot would leave the cache on whichever finished LAST — not the viewed bot —
+        -- making its rich SetInventoryItem tooltips (gems/enchants/set bonuses) revert
+        -- to generic once the background queue drains. Instead, SelectBot inspects the
+        -- viewed bot on every selection, keeping the cache warm for exactly the bot on
+        -- screen (matches the lazy "only inspect bots we view" intent).
 
         local prevTabBtn = nil
         for _, slot in ipairs(NS.tabList) do

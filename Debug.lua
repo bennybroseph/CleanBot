@@ -231,3 +231,51 @@ SlashCmdList["CBDEBUG"] = function(msg)
     end
     if count == 0 then print("  (empty)") end
 end
+
+-- ============================================================
+-- /cbinspect  — TEMP DIAGNOSTIC. Traces every NotifyInspect call (from ANY
+-- addon) to find whether something other than CleanBot is inspecting in the
+-- background and evicting our single-unit equipment-inspect cache.
+--
+-- Toggle with /cbinspect, repro the tooltip-revert, then read the log:
+--   source=CleanBot   → our own inspect (Equip.lua / SelectBot / UNIT_INVENTORY_CHANGED)
+--   source=EXTERNAL   → another addon is inspecting — that's the evictor.
+-- The printed stack line identifies the caller's file. Remove this block once
+-- the source is confirmed.
+-- ============================================================
+local cbInspectTraceOn = false
+local cbInspectHooked  = false
+
+SLASH_CBINSPECT1 = "/cbinspect"
+SlashCmdList["CBINSPECT"] = function()
+    cbInspectTraceOn = not cbInspectTraceOn
+
+    if cbInspectTraceOn and not cbInspectHooked then
+        cbInspectHooked = true
+        hooksecurefunc("NotifyInspect", function(unit)
+            if not cbInspectTraceOn then return end
+            local stack = debugstack(2, 8, 0) or ""
+            -- CleanBot's files all live under the ...\CleanBot\ folder, so a stack
+            -- containing "CleanBot" is our own call; anything else is external.
+            local mine = stack:find("CleanBot", 1, true) ~= nil
+            local name = (unit and UnitName(unit)) or "?"
+            print(string.format("|cff%s[CBInspect]|r NotifyInspect(%s = %s)  source=%s",
+                mine and "00ff00" or "ff4444",
+                tostring(unit), tostring(name),
+                mine and "CleanBot" or "EXTERNAL"))
+            -- Print the first caller frame (skip the hook frame itself in Debug.lua)
+            -- so an external addon's file/line is visible.
+            for line in stack:gmatch("[^\r\n]+") do
+                if not line:find("Debug.lua", 1, true) then
+                    print("    " .. line)
+                    break
+                end
+            end
+        end)
+        NS.CB_Print("NotifyInspect trace |cff00ff00ON|r — open the Individual tab, switch bots, and wait for the revert. Watch for |cffff4444source=EXTERNAL|r lines. /cbinspect again to stop.")
+    elseif cbInspectTraceOn then
+        NS.CB_Print("NotifyInspect trace |cff00ff00ON|r.")
+    else
+        NS.CB_Print("NotifyInspect trace |cffff4444OFF|r.")
+    end
+end

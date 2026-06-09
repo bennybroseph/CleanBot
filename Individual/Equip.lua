@@ -269,11 +269,41 @@ NS.CB_CreateEquipSlots = function(slot, model)
 
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local unit = self.slot and self.slot.unit
+
+            -- Unit-aware tooltip (gems / enchants / set-bonus highlighting). On a HIT
+            -- the bot is still the current inspect target — done.
+            if unit and UnitExists(unit) and self.slotId
+               and GameTooltip:SetInventoryItem(unit, self.slotId) then
+                return
+            end
+
+            -- MISS: the global single-unit inspect slot was likely stolen by another
+            -- addon inspecting party members in the background. Show the generic link
+            -- now (no worse than before), reclaim the bot via NotifyInspect, then
+            -- upgrade the tooltip in place once the data lands — if still hovering this
+            -- same slot. Empty slots just show the slot-name label.
             if self.itemLink then
                 GameTooltip:SetHyperlink(self.itemLink)
             else
                 GameTooltip:AddLine(self.slotName, 1, 1, 1)
                 GameTooltip:Show()
+            end
+
+            if unit and UnitExists(unit) and self.slotId and self.itemLink then
+                NotifyInspect(unit)   -- reclaim: make this bot the current inspect target
+                local btn = self
+                NS.CB_After(0.35, function()
+                    -- Only upgrade if the mouse is still over this exact slot/bot.
+                    if GameTooltip:IsShown() and GameTooltip:GetOwner() == btn
+                       and btn.slot and btn.slot.unit == unit and btn.itemLink then
+                        -- Re-fill; if data still hasn't arrived (throttled), restore the
+                        -- generic link so the tooltip never goes blank.
+                        if not GameTooltip:SetInventoryItem(unit, btn.slotId) then
+                            GameTooltip:SetHyperlink(btn.itemLink)
+                        end
+                    end
+                end)
             end
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
