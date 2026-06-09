@@ -26,6 +26,21 @@ NS.CLASS_DISPLAY = {
     DEATHKNIGHT = "Death Knight",
 }
 
+-- Class icon texture coordinates {left, right, top, bottom} into the standard
+-- class-icon atlas. Used to set per-class tab/button icons.
+NS.CLASS_ICON_COORDS = {
+    WARRIOR     = {0,    0.25,  0,    0.25},
+    MAGE        = {0.25, 0.5,   0,    0.25},
+    ROGUE       = {0.5,  0.75,  0,    0.25},
+    DRUID       = {0.75, 1.0,   0,    0.25},
+    HUNTER      = {0,    0.25,  0.25, 0.5},
+    SHAMAN      = {0.25, 0.5,   0.25, 0.5},
+    PRIEST      = {0.5,  0.75,  0.25, 0.5},
+    WARLOCK     = {0.75, 1.0,   0.25, 0.5},
+    PALADIN     = {0,    0.25,  0.5,  0.75},
+    DEATHKNIGHT = {0.25, 0.5,   0.5,  0.75},
+}
+
 NS.CLASS_STRATEGIES = {
 
     -- ──────────────────────────────────────────────────────────

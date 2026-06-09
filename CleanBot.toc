@@ -13,7 +13,7 @@ Skinning\Widgets.lua
 Skinning\QuestWidgets.lua
 Skinning\ItemVisuals.lua
 Bridge.lua
-Individual\PartyData.lua
+Individual\Strategies.lua
 Individual\ClassData.lua
 Individual\EquipData.lua
 Individual\Inventory.lua

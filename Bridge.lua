@@ -31,6 +31,51 @@ NS.CB_CleanItemLink = function(rawLink)
 end
 
 -- ============================================================
+-- Bot discovery / roster helpers
+-- These support bot identification and class resolution during the
+-- handshake and STATE~ packet handling below, so they live alongside the
+-- discovery state and probing logic. Called at event time, so they may
+-- reference helpers defined in earlier-loading files (CB_GroupInfo).
+-- ============================================================
+
+-- Tests whether a unit token belongs to a tracked playerbot.
+---@param unit string  Unit token to test (e.g. "party1").
+---@return boolean      Whether the unit is a tracked playerbot.
+NS.CleanBot_IsBot = function(unit)
+    local name = UnitName(unit)
+    if not name then return false end
+    if CleanBot_PartyBots[strlower(name)] then return true end
+    return false
+end
+
+-- Returns the group unit id ("partyN" or "raidN") whose name matches, or nil.
+-- Walks the raid roster when in a raid, the party roster otherwise.
+---@param name string  Character name to locate in the party/raid.
+---@return string|nil   The matching unit token (e.g. "party2" / "raid5"), or nil.
+NS.CB_FindPartyUnit = function(name)
+    local prefix, n = NS.CB_GroupInfo()
+    for i = 1, n do
+        local unit = prefix .. i
+        if UnitName(unit) == name then return unit end
+    end
+    return nil
+end
+
+-- Resolves a bot's class token from the live party roster (authoritative),
+-- falling back to the supplied value (or WARRIOR) when the unit isn't found.
+---@param name     string  Character name to resolve the class for.
+---@param fallback string? Class token to return when resolution fails.
+---@return string|nil       The resolved class token, or fallback.
+NS.CB_ResolveClass = function(name, fallback)
+    local unit = NS.CB_FindPartyUnit(name)
+    if unit then
+        local _, class = UnitClass(unit)
+        if class then return class end
+    end
+    return fallback or "WARRIOR"
+end
+
+-- ============================================================
 -- Bridge / handshake state
 -- ============================================================
 NS.lastRawStates = nil

@@ -1,6 +1,7 @@
 -- ============================================================
--- PartyData.lua  —  strategy definitions, parsers,
---                            bot detection, class icon coords
+-- Strategies.lua  —  the combat / non-combat strategy model:
+--   definitions, derived lookup tables, default-state builders,
+--   whisper-reply parsers, and per-bot storage helpers.
 -- ============================================================
 local NS = CleanBotNS
 
@@ -192,19 +193,6 @@ NS.CB_DefaultNonCombat = function()
     return t
 end
 
--- ============================================================
--- String helpers
--- ============================================================
----@param str string  The string to split.
----@param sep string  The separator to split on (first occurrence only).
----@return string      The part before the separator.
----@return string|nil  The part after the separator, or nil if sep was not found.
-NS.CB_SplitOnce = function(str, sep)
-    local i = strfind(str, sep, 1, true)
-    if i then return strsub(str, 1, i - 1), strsub(str, i + 1) end
-    return str, ""
-end
-
 -- Parse a comma-separated strategy reply into a { field = bool } table.
 -- `map` is token(cmd) -> field. Every field present in `map` is seeded
 -- false, then any token found in the message (after an optional "Label: "
@@ -291,48 +279,9 @@ NS.CB_ParseClassStr = function(msg, class, section)
 end
 
 -- ============================================================
--- Bot detection
--- ============================================================
----@param unit string  Unit token to test (e.g. "party1").
----@return boolean      Whether the unit is a tracked playerbot.
-NS.CleanBot_IsBot = function(unit)
-    local name = UnitName(unit)
-    if not name then return false end
-    if CleanBot_PartyBots[strlower(name)] then return true end
-    return false
-end
-
--- ============================================================
 -- Strategy storage helpers (shared by bridge GET~STATES and
 -- the no-bridge co?/nc? whisper read paths)
 -- ============================================================
-
--- Returns the group unit id ("partyN" or "raidN") whose name matches, or nil.
--- Walks the raid roster when in a raid, the party roster otherwise.
----@param name string  Character name to locate in the party/raid.
----@return string|nil   The matching unit token (e.g. "party2" / "raid5"), or nil.
-NS.CB_FindPartyUnit = function(name)
-    local prefix, n = NS.CB_GroupInfo()
-    for i = 1, n do
-        local unit = prefix .. i
-        if UnitName(unit) == name then return unit end
-    end
-    return nil
-end
-
--- Resolves a bot's class token from the live party roster (authoritative),
--- falling back to the supplied value (or WARRIOR) when the unit isn't found.
----@param name     string  Character name to resolve the class for.
----@param fallback string? Class token to return when resolution fails.
----@return string|nil       The resolved class token, or fallback.
-NS.CB_ResolveClass = function(name, fallback)
-    local unit = NS.CB_FindPartyUnit(name)
-    if unit then
-        local _, class = UnitClass(unit)
-        if class then return class end
-    end
-    return fallback or "WARRIOR"
-end
 
 -- Parses a combat strategy string into entry.combat + entry.classData.combat.
 ---@param entry     table   The bot roster entry to store parsed flags on.
@@ -353,19 +302,3 @@ NS.CB_StoreNonCombat = function(entry, ncStr)
     if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
     entry.classData.nonCombat = NS.CB_ParseClassStr(ncStr, entry.class, "nonCombat")
 end
-
--- ============================================================
--- Class icon texture coordinates
--- ============================================================
-NS.CLASS_ICON_COORDS = {
-    WARRIOR     = {0,    0.25,  0,    0.25},
-    MAGE        = {0.25, 0.5,   0,    0.25},
-    ROGUE       = {0.5,  0.75,  0,    0.25},
-    DRUID       = {0.75, 1.0,   0,    0.25},
-    HUNTER      = {0,    0.25,  0.25, 0.5},
-    SHAMAN      = {0.25, 0.5,   0.25, 0.5},
-    PRIEST      = {0.5,  0.75,  0.25, 0.5},
-    WARLOCK     = {0.75, 1.0,   0.25, 0.5},
-    PALADIN     = {0,    0.25,  0.5,  0.75},
-    DEATHKNIGHT = {0.25, 0.5,   0.5,  0.75},
-}

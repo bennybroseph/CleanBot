@@ -123,6 +123,18 @@ NS.CB_ForEachGroupMember = function(fn)
     end
 end
 
+-- Splits a string on the first occurrence of a (plain, non-pattern) separator.
+-- Used heavily by Bridge.lua to parse "~"-delimited MBOT packets.
+---@param str string  The string to split.
+---@param sep string  The separator to split on (matched literally, not as a pattern).
+---@return string      The part before the separator.
+---@return string|nil  The part after the separator, or "" if sep was not found.
+NS.CB_SplitOnce = function(str, sep)
+    local i = strfind(str, sep, 1, true)
+    if i then return strsub(str, 1, i - 1), strsub(str, i + 1) end
+    return str, ""
+end
+
 -- ============================================================
 -- Config + bot detection cache
 -- ============================================================
