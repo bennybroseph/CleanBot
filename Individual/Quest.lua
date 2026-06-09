@@ -889,15 +889,19 @@ NS.CB_ToggleQuests = function(key, botName)
 end
 
 -- ── Quest button for the model viewer ───────────────────────────────────
+-- Mirrors the inventory (bag) button on the opposite side: same slot size, same
+-- weapon-row band, but anchored to the bottom of the RIGHT equip column (slot 14)
+-- instead of the left column. Bag uses LEFT(slot 9)/TOP(slot 16); this uses
+-- RIGHT(slot 14)/TOP(slot 16).
 ---@param slot     table   The pool slot the button belongs to (resolves the live bot).
 ---@param model    table   The model frame the button anchors against.
----@param slotSize number  Equip-slot size used for relative positioning.
----@param gapX     number  Horizontal gap from the adjacent equip slot.
-NS.CB_CreateQuestButton = function(slot, model, slotSize, gapX)
+---@param slotSize number  Equip-slot size (matches the bag button's size).
+NS.CB_CreateQuestButton = function(slot, model, slotSize)
     local btnName = "CleanBotQuestBtn_" .. slot.index
     local btn = CreateFrame("Button", btnName, model)
     btn:SetSize(slotSize, slotSize)
-    btn:SetPoint("RIGHT", slot.equipSlots[10], "LEFT", -gapX, 0)
+    btn:SetPoint("RIGHT", slot.equipSlots[14], "RIGHT", 0, 0)
+    btn:SetPoint("TOP",   slot.equipSlots[16], "TOP",   0, 0)
     btn:RegisterForClicks("LeftButtonUp")
 
     if NS.ElvUI_S then
@@ -906,6 +910,14 @@ NS.CB_CreateQuestButton = function(slot, model, slotSize, gapX)
     else
         btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+        -- Blizzard-style slot border. The book icon has no border baked in (unlike
+        -- the bag's backpack art), so add the standard UI-Quickslot2 border on top,
+        -- sized like ItemButtonTemplate's normal texture (64px art over a 37px button,
+        -- centred with a -1 y offset) so it overhangs the icon as a beveled frame.
+        local border = btn:CreateTexture(nil, "OVERLAY")
+        border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+        border:SetPoint("CENTER", btn, "CENTER", 0, -1)
+        border:SetSize(slotSize * (64 / 37), slotSize * (64 / 37))
     end
 
     local icon = btn:CreateTexture(nil, "ARTWORK")
