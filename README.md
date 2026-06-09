@@ -17,7 +17,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 <img width="500" alt="601104749-0326d03b-314a-4490-9de5-dd5364fe9244" src="https://github.com/user-attachments/assets/d3b3fdd6-628d-40ef-9a11-212f51c87188" />
 
 
-# Party Tab
+# Individual Tab
 - Set Combat, Non-Combat, and Class Specific Strategies
 - Manage gear through drag and drop or context menus
 - View Gold and Items in an intuitive and familiar interface

@@ -315,7 +315,7 @@ NS.CleanBot_BuildManageTab = function()
     --       ["Favorites"] = { "BotName1", ... },   ← protected; seeded on init
     --       ["PresetName"] = { "BotName1", ... },
     --   }
-    -- "Favorites" is the protected preset populated by the Party tab star buttons.
+    -- "Favorites" is the protected preset populated by the Individual tab star buttons.
     -- It cannot be renamed or removed. Left list: preset names. Right list: bots in
     -- the selected preset. Col-2 buttons anchor independently below presetList2 so
     -- both columns stay vertically aligned regardless of button label width differences.
@@ -513,7 +513,7 @@ NS.CleanBot_BuildManageTab = function()
                 end
             end
             preset[#preset + 1] = botName
-            -- If adding to Favorites, refresh the star on any matching party slot.
+            -- If adding to Favorites, refresh the star on any matching Individual tab slot.
             if selectedPresetName == FAVORITES_KEY then
                 local key = strlower(botName)
                 if NS.botStarUpdaters and NS.botStarUpdaters[key] then
@@ -574,7 +574,7 @@ NS.CleanBot_BuildManageTab = function()
                     break
                 end
             end
-            -- If removing from Favorites, update the star on any matching party slot.
+            -- If removing from Favorites, update the star on any matching Individual tab slot.
             if selectedPresetName == FAVORITES_KEY then
                 local key = strlower(data)
                 if NS.botStarUpdaters and NS.botStarUpdaters[key] then

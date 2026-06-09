@@ -743,7 +743,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PLAYER_TARGET_CHANGED" then
-        if NS.partyPanel and NS.partyPanel:IsShown() and NS.CleanBot_RefreshTabs then
+        if NS.individualPanel and NS.individualPanel:IsShown() and NS.CleanBot_RefreshTabs then
             NS.CleanBot_RefreshTabs()
         end
 

@@ -254,7 +254,7 @@ local function showSampleLayout()
         closeBtn:SetScript("OnClick", function() f:Hide() end)
         if NS.ElvUI_S then NS.ElvUI_S:HandleCloseButton(closeBtn) end
 
-        -- Panel — level 2, mirrors managePanel/partyPanel inside CleanBotFrame.
+        -- Panel — level 2, mirrors managePanel/individualPanel inside CleanBotFrame.
         local panel = NS.CB_CreatePanel(f, "CleanBotSamplePanel", 2, "panel")
         panel:SetPoint("TOPLEFT",     f, "TOPLEFT",      f.paddingLeft,   -NS.TITLE_H)
         panel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -f.paddingRight,   f.paddingBottom)
@@ -735,7 +735,7 @@ NS.CleanBot_BuildSettingsTab = function()
     botEmotesCBLblHit:EnableMouse(true)
 
     -- Tooltip on hover over the checkbox or its label.
-    local EMOTE_TOOLTIP = "When enabled, switching to a bot's party tab sends an \"emote wave\" command, making them wave at you."
+    local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
     local function showEmoteTooltip(anchor)
         GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
         GameTooltip:SetText(EMOTE_TOOLTIP, nil, nil, nil, nil, true)

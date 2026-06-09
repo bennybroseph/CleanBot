@@ -7,7 +7,7 @@
 local NS = CleanBotNS
 
 -- Proportional paperdoll slot geometry derived from the live model size.
--- Single source of truth shared by the equip-column layout (Party.lua's
+-- Single source of truth shared by the equip-column layout (Individual.lua's
 -- CB_GetGeometry) and the slot-button creation (Equip.lua's
 -- CB_CreateEquipSlots) so the two layouts never drift.
 --   step    = modelH / 8    (8 slots distributed down the model height)
