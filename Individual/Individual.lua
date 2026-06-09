@@ -1136,7 +1136,8 @@ NS.CleanBot_RefreshTabs = function()
         -- and lay the tab buttons out left→right in roster order.
         local existing = {}
         for _, slot in ipairs(NS.tabList) do existing[slot.key] = slot end
-        local newList = {}
+        local newList    = {}
+        local newlyBound = {}
         for _, d in ipairs(desired) do
             local slot = existing[d.key]
             if slot then
@@ -1145,13 +1146,19 @@ NS.CleanBot_RefreshTabs = function()
             else
                 slot = CB_AcquireSlot()
                 CB_BindSlot(slot, d)
-                if NS.CB_QueueEquipRefresh and d.unit and UnitExists(d.unit) then
-                    NS.CB_QueueEquipRefresh({ { key = d.key, unit = d.unit } })
+                if d.unit and UnitExists(d.unit) then
+                    newlyBound[#newlyBound + 1] = { key = d.key, unit = d.unit }
                 end
             end
             newList[#newList + 1] = slot
         end
         NS.tabList = newList
+
+        -- One batched, additive equip-inspect for all freshly-bound bots (the queue
+        -- dedups and never clobbers in-flight inspects).
+        if NS.CB_QueueEquipRefresh and #newlyBound > 0 then
+            NS.CB_QueueEquipRefresh(newlyBound)
+        end
 
         local prevTabBtn = nil
         for _, slot in ipairs(NS.tabList) do
