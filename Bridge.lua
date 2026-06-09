@@ -496,7 +496,7 @@ bridgeFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
 bridgeFrame:RegisterEvent("RAID_ROSTER_UPDATE")
 bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 bridgeFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-bridgeFrame:RegisterEvent("INSPECT_READY")
+bridgeFrame:RegisterEvent("INSPECT_TALENT_READY")
 bridgeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 bridgeFrame:RegisterEvent("PLAYER_LOGOUT")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
@@ -886,11 +886,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
-    elseif event == "INSPECT_READY" then
-        -- Fired when NotifyInspect data arrives; GUID identifies which unit.
-        local guid = ...
+    elseif event == "INSPECT_TALENT_READY" then
+        -- 3.3.5a's inspect-data-ready event (there is no "INSPECT_READY"). Carries
+        -- only `success`, not a unit id — Equip.lua maps it to the serialised
+        -- in-flight inspect. Equipment is readable immediately once this fires.
         if NS.CB_OnInspectReady then
-            NS.CB_OnInspectReady(guid)
+            NS.CB_OnInspectReady()
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
