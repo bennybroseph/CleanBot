@@ -19,6 +19,10 @@ local function CB_FormatKnownBots()
         "bridgeReady: " .. tostring(NS.bridgeReady),
         "Last HELLO_ACK: " .. (NS.lastHelloAck or "(none received yet)"),
         "",
+        "=== Debug Overrides ===",
+        "Bridge override : " .. (NS.debugBridgeOverride or "none (auto)"),
+        "Simulate mode   : " .. (NS.debugSimulate and "ON" or "OFF"),
+        "",
         "=== Last raw STATES payload ===",
         NS.lastRawStates or "(none received yet)",
         "",
@@ -153,10 +157,43 @@ SlashCmdList["CBFRAMES"] = function()
 end
 
 -- ============================================================
--- /cbdebug  — quick party/cache dump to chat
+-- /cbdebug  — quick party/cache dump + debug overrides
+--
+--   /cbdebug bridge off    — force bridge absent (uses whisper fallback)
+--   /cbdebug bridge on     — force bridge present (uses bridge path)
+--   /cbdebug bridge reset  — clear override; follow real handshake result
+--   /cbdebug simulate      — toggle simulate mode (print commands instead of sending)
 -- ============================================================
 SLASH_CBDEBUG1 = "/cbdebug"
-SlashCmdList["CBDEBUG"] = function()
+SlashCmdList["CBDEBUG"] = function(msg)
+    msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+
+    -- Bridge override sub-commands. Each re-syncs so the new effective state
+    -- applies immediately (roster/inventory/quests re-fetch via the right path)
+    -- instead of waiting for the next window open.
+    if msg == "bridge off" then
+        NS.debugBridgeOverride = "absent"
+        NS.CB_Print("Bridge override set to |cffff4444absent|r (whisper fallback).")
+        NS.CB_RequestSync()
+        return
+    elseif msg == "bridge on" then
+        NS.debugBridgeOverride = "present"
+        NS.CB_Print("Bridge override set to |cff00ff00present|r (bridge path).")
+        NS.CB_RequestSync()
+        return
+    elseif msg == "bridge reset" then
+        NS.debugBridgeOverride = nil
+        NS.CB_Print("Bridge override cleared — following real handshake (" .. NS.bridgeState .. ").")
+        NS.CB_RequestSync()
+        return
+    -- Simulate mode toggle.
+    elseif msg == "simulate" then
+        NS.debugSimulate = not NS.debugSimulate
+        NS.CB_Print("Simulate mode: " .. (NS.debugSimulate and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
+        return
+    end
+
+    -- Default: quick party/cache dump.
     local numMembers = GetNumPartyMembers()
     print("Party members:", numMembers)
     for i = 1, numMembers do

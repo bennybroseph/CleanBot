@@ -44,6 +44,12 @@ NS.bridgeState   = "unknown"
 NS.probed        = {}   -- name-key -> true: party member already probed for bot-hood
 NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strategies:" reply
 
+-- Debug overrides — both are nil/false by default and are toggled via /cbdebug.
+-- nil = auto (follow real handshake); "present" or "absent" = forced override.
+NS.debugBridgeOverride = nil   ---@type string|nil
+-- When true, CB_SendBotCommand prints commands to chat instead of sending them.
+NS.debugSimulate       = false ---@type boolean
+
 -- No-bridge login gating: on a fresh login (not a /reload) bots may not be
 -- online yet, so we block CB_ProbePartyForBots until bridge detection
 -- resolves. "Hello!" whispers from bots are buffered here and flushed once
@@ -191,15 +197,30 @@ local function CB_GetBridgeOpcode(command)
     return nil
 end
 
+-- Returns the effective bridge state, respecting NS.debugBridgeOverride.
+-- Use this instead of reading NS.bridgeState directly inside CB_SendBotCommand
+-- so that /cbdebug bridge on/off can exercise both code paths without a real bridge.
+local function CB_EffectiveBridgeState()
+    return NS.debugBridgeOverride or NS.bridgeState
+end
+
 -- Sends a command to a bot. Routes through the bridge (silent, no whisper
 -- spam) when the bridge is present and the command is allowlisted; falls back
 -- to a whisper for everything else or when bridge is absent. Safe to use for
 -- all commands including queries — unlisted commands always whisper, so
 -- replies still arrive normally via CHAT_MSG_WHISPER.
+--
+-- When NS.debugSimulate is true the command is printed to chat instead of
+-- sent, and when NS.debugBridgeOverride is set it overrides the real bridge
+-- state — both are toggled via /cbdebug.
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
 NS.CB_SendBotCommand = function(botName, command)
-    if NS.bridgeState == "present" then
+    if NS.debugSimulate then
+        NS.CB_Print("|cff888888[simulate]|r → " .. botName .. ": " .. command)
+        return
+    end
+    if CB_EffectiveBridgeState() == "present" then
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
             SendAddonMessage("MBOT", "RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command, "PARTY")
@@ -214,11 +235,11 @@ NS.CB_RequestSync = function()
     NS.syncPending = true
     NS.CB_After(0.5, function()
         NS.syncPending = false
-        if NS.bridgeState == "present" then
+        if CB_EffectiveBridgeState() == "present" then
             SendAddonMessage("MBOT", "GET~ROSTER",  "PARTY")
             SendAddonMessage("MBOT", "GET~DETAILS", "PARTY")
             SendAddonMessage("MBOT", "GET~STATES",  "PARTY")
-        elseif NS.bridgeState == "absent" then
+        elseif CB_EffectiveBridgeState() == "absent" then
             CB_ProbePartyForBots()
         end
         if CleanBotFrame:IsShown() then
@@ -272,7 +293,7 @@ NS.CB_FetchInventory = function(key, botName)
     -- frame can display stale-but-correct data instead of going blank.
     entry.inventory = entry.inventory or { items = {} }
 
-    if NS.bridgeState == "present" then
+    if CB_EffectiveBridgeState() == "present" then
         SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", "PARTY")
     else
         entry.awaitingInventory = true
@@ -299,7 +320,7 @@ NS.CB_FetchQuests = function(key, botName)
     if not entry then return end
     entry.quests = {}
 
-    if NS.bridgeState == "present" then
+    if CB_EffectiveBridgeState() == "present" then
         SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", "PARTY")
     else
         -- Whisper fallback — reply parsing not yet implemented.
@@ -374,7 +395,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- "Hello!" detection: a bot has just come online (no-bridge, fresh-login path).
         -- We verify the sender is actually in our party to avoid acting on a real player.
         -- "Hello!" is not a Strategies reply, so we return early after handling it.
-        if msg == "Hello!" and NS.bridgeState ~= "present" then
+        if msg == "Hello!" and CB_EffectiveBridgeState() ~= "present" then
             local inParty = false
             for i = 1, GetNumPartyMembers() do
                 if UnitName("party" .. i) == sender then inParty = true; break end
@@ -383,7 +404,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 if NS.loginPhaseActive then
                     -- Detection still running: buffer for processing when it resolves.
                     NS.pendingHello[key] = sender
-                elseif NS.bridgeState == "absent" then
+                elseif CB_EffectiveBridgeState() == "absent" then
                     -- Detection already resolved to absent: probe immediately.
                     if not CleanBot_PartyBots[key] and not NS.probed[key] then
                         NS.probed[key]        = true
