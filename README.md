@@ -10,23 +10,37 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 
 # Manage Tab
 - Invite/Uninvite, Login/Logout bots
-- Favorite Bots, Invite all Favorites
-- Link an Account for Altbot usage
-    - Invite linked account, Unlink account
+- Group Revive, Release, Eat/Drink, Maintenence, Summon
+- Create Custom Presets, Invite All From Preset
+- Link an Account for Altbot Usage
+    - Invite Linked Account, Unlink Account
+- Fully Collapsable Sections
 
-<img width="500" alt="601104749-0326d03b-314a-4490-9de5-dd5364fe9244" src="https://github.com/user-attachments/assets/d3b3fdd6-628d-40ef-9a11-212f51c87188" />
-
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/147bb107-6b97-46b8-9d1c-80d9f928672b" />
 
 # Individual Tab
+- Manage Individual Bots Within Your Party or Raid
 - Set Combat, Non-Combat, and Class Specific Strategies
 - Manage gear through drag and drop or context menus
-- View Gold and Items in an intuitive and familiar interface
+    - View Gold and Items in an intuitive and familiar interface
 
-<img width="500" alt="603431382-1617df25-428c-4871-bc15-b958bae3105b" src="https://github.com/user-attachments/assets/4b8ed085-d72d-4390-8a7f-8bf7d8abd2de" />
+<img width="500" alt="image" src="https://github.com/user-attachments/assets/8472ff0d-6a2a-4628-b9f2-2a4e7c55a159" />
 <img width="300" alt="603430857-b9f2179f-db59-44a8-880e-b999b6505b41" src="https://github.com/user-attachments/assets/e747a2d9-e461-402c-97ad-d386d6e49ec6" />
 
+## Quest Log
+- Check Failed, Incomplete, and Completed Quests
+    - Read quest text and requirements directly for any quest you both share
+- Abandon Bot Quests
+
+<img width="700" alt="image" src="https://github.com/user-attachments/assets/083d79cc-d36a-443e-bc55-7d21d037e57f" />
+
 # Settings Tab
-- Change Transparency, Scale, Accent Color, and Layout values
+- Change Transparency, Scale, Accent Color, and Layout Values
 - Enable or Disable a /wave from the bot when selecting them in the UI
 
-<img width="500" alt="image" src="https://github.com/user-attachments/assets/b43a069e-0122-4867-bb6c-e1614d594106" />
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/8036f2c4-d192-45d8-828b-e56a3f771a8c" />
+
+# Automatic Actions
+- Open Bot Inventory on Trade
+    - Drag and Drop Items to Trade
+    - Right Click Items to Remove
