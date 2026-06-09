@@ -256,10 +256,31 @@ NS.CB_RequestRosterThenRefresh = function()
     NS.CB_RequestSync()
 end
 
--- Tick inventory and money timeouts for the whisper path (3s silence = done)
+-- Finalizes a whisper-path quest collection: swaps the staged quests into the
+-- live list and re-renders if the bot's quest frame is open. Shared by the
+-- summary-line terminator and the silence-timeout fallback below.
+---@param key   string  Bot name-key.
+---@param entry table   The bot roster entry being finalized.
+local function CB_FinalizeQuestCollection(key, entry)
+    entry.awaitingQuests = false
+    entry.questTimeout   = 0
+    entry.quests         = entry.questStaging or {}
+    entry.questStaging   = nil
+    local f = NS.botQuestFrames and NS.botQuestFrames[key]
+    if f and f:IsShown() and NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
+end
+
+-- Tick inventory, money, and quest timeouts for the whisper path (3s silence = done)
 local invTickFrame = CreateFrame("Frame")
 invTickFrame:SetScript("OnUpdate", function(self, dt)
     for key, entry in pairs(CleanBot_PartyBots) do
+        if entry.awaitingQuests then
+            entry.questTimeout = (entry.questTimeout or 0) + dt
+            if entry.questTimeout >= 3 then
+                CB_FinalizeQuestCollection(key, entry)
+            end
+        end
+
         if entry.awaitingInventory then
             entry.invTimeout = (entry.invTimeout or 0) + dt
             if entry.invTimeout >= 3 then
@@ -325,20 +346,32 @@ end
 
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
--- CHAT_MSG_ADDON block. Whisper fallback sends "quests" — structured parsing
--- of the whisper reply is not yet implemented.
+-- CHAT_MSG_ADDON block. Whisper fallback sends "quests" and parses the reply
+-- lines in the CHAT_MSG_WHISPER handler into the same { {id, status} } shape.
+-- The live entry.quests is intentionally NOT cleared here: the bridge path
+-- resets it on QUESTS_BEGIN, and the whisper path swaps fresh data in on
+-- finalize (CB_FinalizeQuestCollection) — so the last render survives on screen
+-- until the new list is ready.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
 NS.CB_FetchQuests = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
-    entry.quests = {}
 
     if CB_EffectiveBridgeState() == "present" then
         SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", CB_GroupChannel())
     else
-        -- Whisper fallback — reply parsing not yet implemented.
-        NS.CB_SendBotCommand(botName, "quests")
+        -- Whisper path: collect the "quests" reply lines into staging, keyed by
+        -- section header (Incompleted/Completed). Swapped in on the summary line
+        -- or after 3s of silence (invTickFrame).
+        entry.awaitingQuests = true
+        entry.questTimeout   = 0
+        entry.questStatus    = "I"   -- current section; flipped by reply headers
+        entry.questStaging   = {}
+        -- "quests all" (not bare "quests", which only prints the summary) makes the
+        -- bot stream the per-quest lines + section headers we parse — mirrors the
+        -- bridge's GET~QUESTS~ALL mode.
+        NS.CB_SendBotCommand(botName, "quests all")
     end
 end
 
@@ -484,6 +517,29 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
             local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
             if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
+            return
+        end
+
+        -- Quest list collection (whisper path): reply to the "quests" command.
+        -- The bot streams section headers (Incompleted/Completed) then one quest
+        -- hyperlink per line, ending with a "--- Summary --- / Total:" line.
+        -- Status comes from the active section; the quest ID from the |Hquest:ID:
+        -- link. Collected into questStaging, swapped into entry.quests on finalize.
+        if entry and entry.awaitingQuests then
+            entry.questTimeout = 0
+            -- Quest lines carry a |Hquest:ID: link — match that FIRST so a quest
+            -- whose title contains "Complete"/"Incomplete" isn't mistaken for a
+            -- section header. Headers (no link) only set the current status.
+            local id = tonumber(msg:match("|Hquest:(%d+):"))
+            if id then
+                entry.questStaging[#entry.questStaging + 1] = { id = id, status = entry.questStatus }
+            elseif msg:find("Summary", 1, true) or msg:match("^%s*Total:") then
+                CB_FinalizeQuestCollection(key, entry)
+            elseif msg:find("Incomplet", 1, true) then
+                entry.questStatus = "I"
+            elseif msg:find("Complet", 1, true) then
+                entry.questStatus = "C"
+            end
             return
         end
 

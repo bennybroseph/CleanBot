@@ -43,6 +43,14 @@ local BLIZZ_X_BTN_Y = -8
 local BLIZZ_TITLE_X = 0         -- title label offset from frame TOP (CENTER anchor)
 local BLIZZ_TITLE_Y = -23
 
+-- Quest objectives are rendered generically and bot-accurately by default (the
+-- requirement count is quest-static; completion follows the BOT's quest status —
+-- see CB_FormatGenericObjective). This flag switches the detail pane back to the
+-- raw player leaderboard progress ("cur/req" from GetQuestLogLeaderBoard):
+--   false = generic, bot-accurate view (default)
+--   true  = raw player progress (kept for if a real per-bot progress source appears)
+local SHOW_OBJECTIVE_PROGRESS = false
+
 -- ── Quest list rendering constants ──────────────────────────────────────
 local QUEST_HEADER_H = 20   -- collapsible group header height (px)
 local QUEST_ROW_H    = 16   -- quest entry row height (px)
@@ -76,6 +84,26 @@ local function CB_FormatMoney(copper)
     if c > 0 then parts[#parts + 1] = c .. " " .. COPPER_ICON end
     if #parts == 0 then return "0 " .. COPPER_ICON end
     return table.concat(parts, "  ")
+end
+
+-- Rewrites a player-log objective string into a generic, bot-accurate form.
+-- The leaderboard text ("Name: cur/req") reports the PLAYER's current count, so we
+-- rebuild it from the quest-static requirement (req) and the BOT's quest completion:
+--   incomplete → "Name x req"  (counted)  /  "Name"            (boolean)
+--   complete   → "Name: req/req (Complete)" / "Name (Complete)"
+---@param text     string   Raw GetQuestLogLeaderBoard text.
+---@param complete boolean  Whether the BOT's quest is complete.
+---@return string           The generic objective label.
+local function CB_FormatGenericObjective(text, complete)
+    -- Counted objective "Name: cur/req" → rebuild from the static requirement.
+    local name, _, req = text:match("^(.-):%s*(%d+)%s*/%s*(%d+)%s*$")
+    if name then
+        if complete then return string.format("%s: %s/%s (Complete)", name, req, req) end
+        return string.format("%s x %s", name, req)
+    end
+    -- Boolean / location objective (no counts).
+    if complete then return text .. " (Complete)" end
+    return text
 end
 
 -- Populates a pre-created LargeItemButtonTemplate reward button with item data.
@@ -450,15 +478,34 @@ NS.CB_RenderQuestDetail = function(key, questID)
         prevFS = objTextFS
     end
 
-    -- ── Leaderboard progress items ──────────────────────────────────────────
-    -- Each entry shows current count toward one objective, e.g. "Wolves slain: 3/10".
-    -- Finished entries are coloured green; in-progress entries stay white.
+    -- ── Objective requirements ──────────────────────────────────────────────
+    -- GetQuestLogLeaderBoard reports the PLAYER's progress ("Wolves slain: 3/10"),
+    -- which is misleading for a bot. By default we render generically and drive
+    -- completion off the BOT's quest status (botComplete): incomplete shows just the
+    -- requirement ("Name x N"), complete shows "Name: N/N (Complete)". The existing
+    -- gold/gray colours are unchanged — botComplete just selects between them.
+    -- SHOW_OBJECTIVE_PROGRESS restores the raw player progress for the future case
+    -- where a real per-bot objective-progress source exists.
+    local botComplete = false
+    if entry and entry.quests then
+        for _, q in ipairs(entry.quests) do
+            if q.id == questID then botComplete = (q.status == "C"); break end
+        end
+    end
+
     for _, lbEntry in ipairs(leaderboard) do
-        local entryFS = NS.CB_CreateObjectiveText(dsc, lbEntry.finished)
+        local label, finishedColor
+        if SHOW_OBJECTIVE_PROGRESS then
+            finishedColor = lbEntry.finished
+            label = lbEntry.finished and (lbEntry.text .. " (Complete)") or lbEntry.text
+        else
+            finishedColor = botComplete
+            label = CB_FormatGenericObjective(lbEntry.text, botComplete)
+        end
+        local entryFS = NS.CB_CreateObjectiveText(dsc, finishedColor)
         NS.CB_AnchorBelow(entryFS, prevFS)
         entryFS:SetWidth(contentW)
-        local entryLabel = lbEntry.finished and (lbEntry.text .. " (Complete)") or lbEntry.text
-        entryFS:SetText(entryLabel)
+        entryFS:SetText(label)
         f.detailFrames[#f.detailFrames + 1] = entryFS
         prevFS = entryFS
     end
