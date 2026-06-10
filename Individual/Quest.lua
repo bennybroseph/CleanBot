@@ -699,8 +699,7 @@ end
 ---@param top    number  Top inset from the parent.
 ---@param right  number  Right inset from the parent.
 ---@param bottom number  Bottom inset from the parent.
----@return table          scrollFrame  The created ScrollFrame.
----@return table          scrollChild  The scroll child Frame.
+---@return table  The created container Frame.
 local function CB_MakeScrollContainer(parent, name, left, top, right, bottom)
     local c = CreateFrame("Frame", name, parent)
     c:SetPoint("TOPLEFT",     parent, "TOPLEFT",      left,  -top)

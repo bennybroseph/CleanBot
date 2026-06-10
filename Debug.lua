@@ -303,15 +303,22 @@ end
 -- line, so total reply length is irrelevant. Reports per-run and aggregate
 -- stats plus a suggested timeout (2x the worst observation, for headroom).
 -- ============================================================
-local timing = nil   -- active session, or nil
+---@class CB_TimingSession
+---@field key      string
+---@field name     string
+---@field runsLeft number
+---@field results  table
+---@field run      table?  Per-query stats for the in-flight 'items' request.
+local timing = nil   ---@type CB_TimingSession?  -- active session, or nil
 
 local timingEvents = CreateFrame("Frame")
 timingEvents:RegisterEvent("CHAT_MSG_WHISPER")
 timingEvents:SetScript("OnEvent", function(_, _, msg, sender)
-    if not timing or not timing.run then return end
+    if not timing then return end
+    local run = timing.run
+    if not run then return end
     if strlower(sender or "") ~= timing.key then return end
     local now = GetTime()
-    local run = timing.run
     if not run.firstAt then
         run.firstAt = now
         run.first   = now - run.sendTime
@@ -329,6 +336,7 @@ local timingTicker = CreateFrame("Frame")
 timingTicker:Hide()
 
 local function timingStartRun()
+    if not timing then return end
     timing.run = {
         sendTime = GetTime(),
         lines    = 0,
@@ -341,6 +349,7 @@ end
 
 local function timingReport()
     timingTicker:Hide()
+    if not timing then return end
     local rs = timing.results
     timing = nil
     if #rs == 0 then
@@ -368,9 +377,10 @@ local function timingReport()
 end
 
 timingTicker:SetScript("OnUpdate", function()
-    if not timing or not timing.run then timingTicker:Hide(); return end
-    local now = GetTime()
+    if not timing then timingTicker:Hide(); return end
     local run = timing.run
+    if not run then timingTicker:Hide(); return end
+    local now = GetTime()
     if run.firstAt then
         -- Run is complete after a generous fixed measurement window of silence
         -- (independent of NS.WHISPER_SILENCE, so the tool stays valid while tuning).

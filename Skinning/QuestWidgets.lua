@@ -52,7 +52,8 @@ NS.CB_CreateQuestParagraph = function(parent)
         fs:SetTextColor(1, 1, 1)              -- white
     else
         local ref        = _G["QuestFont"]
-        local path, size = ref and ref:GetFont()
+        local path, size
+        if ref then path, size = ref:GetFont() end
         fs:SetFont(path or "Fonts\\FRIZQT__.TTF", size or 12)
         fs:SetTextColor(0.180, 0.122, 0.059)  -- #2e1f0f
     end
@@ -82,7 +83,8 @@ NS.CB_CreateObjectiveText = function(parent, finished)
         end
     else
         local ref        = _G["GameFontHighlight"]
-        local path, size = ref and ref:GetFont()
+        local path, size
+        if ref then path, size = ref:GetFont() end
         fs:SetFont(path or "Fonts\\FRIZQT__.TTF", size or 12)
         if finished then
             fs:SetTextColor(0.2, 0.2, 0.2)        -- #333333 greyed out

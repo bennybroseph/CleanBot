@@ -697,9 +697,12 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     -- to match its neighboring checkbox labels).
     local thumbTex                    = s:GetThumbTexture()
     local thumbR, thumbG, thumbB      = thumbTex:GetVertexColor()
-    local labelR, labelG, labelB      = label and label:GetTextColor()
-    local lowR,   lowG,   lowB        = lowLabel  and lowLabel:GetTextColor()
-    local highR,  highG,  highB       = highLabel and highLabel:GetTextColor()
+    local labelR, labelG, labelB
+    if label then labelR, labelG, labelB = label:GetTextColor() end
+    local lowR, lowG, lowB
+    if lowLabel then lowR, lowG, lowB = lowLabel:GetTextColor() end
+    local highR, highG, highB
+    if highLabel then highR, highG, highB = highLabel:GetTextColor() end
     local boxR,   boxG,   boxB        = box:GetTextColor()
     local GREY                        = 0.5
 
