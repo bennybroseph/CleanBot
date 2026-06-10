@@ -551,11 +551,17 @@ NS.CLASS_STRATEGIES = {
                 type     = "dropdown",
                 readonly = true,
                 strategies = {
-                    { cmd = "melee",  field = "isMelee",    name = "Melee",
-                      desc = "Active strategy set by the bot's talents — Feral melee" },
-                    { cmd = "caster", field = "isCaster",   name = "Caster",
+                    -- These are the bot's actual reported combat-strategy tokens
+                    -- (BearDruidStrategy:getName() == "bear", etc.), not the generic
+                    -- melee/caster/heal roles — druid never registers those, so the
+                    -- read-only display could never match the co? reply.
+                    { cmd = "bear",    field = "bear",    name = "Guardian (Bear)",
+                      desc = "Active strategy set by the bot's talents — Feral tank in Bear Form" },
+                    { cmd = "cat",     field = "cat",     name = "Feral (Cat)",
+                      desc = "Active strategy set by the bot's talents — Feral DPS in Cat Form" },
+                    { cmd = "balance", field = "balance", name = "Balance (Moonkin)",
                       desc = "Active strategy set by the bot's talents — Balance caster" },
-                    { cmd = "heal",   field = "isHealer", name = "Healer",
+                    { cmd = "resto",   field = "resto",   name = "Restoration",
                       desc = "Active strategy set by the bot's talents — Restoration healer" },
                 },
             },

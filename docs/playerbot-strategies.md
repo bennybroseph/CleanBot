@@ -251,10 +251,12 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   - Paladin blessings corrected to `bmight`/`bwisdom`/`bkings`/`bsanc` (`ClassData.lua`).
     (`bthreat` exists and is still unexposed.)
   - Hunter "Aspect of the Viper" removed — Hunter registers no token for it.
-- **Still open:** Druid/Shaman's read-only class "Strategy" dropdown matches on
-  `melee`/`caster`/`heal`; a druid's active strategies report as
-  `cat`/`bear`/`balance`/`resto`, so that *display-only* dropdown can still mismatch
-  (the functional Role dropdown above is now correct). Left as-is for now.
+- **Read-only "Strategy" display (fixed for Druid).** This dropdown reflects the bot's
+  *active* combat strategy, matched against the `co ?` reply. Shaman was always correct
+  (its entries `ele`/`enh`/`resto` are exactly what `ElementalShamanStrategy:getName()`
+  etc. report). Druid used the fictional `melee`/`caster`/`heal` tokens it never
+  registers, so it never matched — now corrected to the real reported tokens
+  `bear`/`cat`/`balance`/`resto` (`ClassData.lua`).
 - **`aoe` vs `dps aoe`:** CleanBot's "AoE — target many mobs" sends the class `aoe`
   token, which is the AoE *rotation*; the AoE *target picker* is the generic
   `dps aoe`, unused. Enabling both is the coherent combo.
