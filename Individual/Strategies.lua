@@ -271,8 +271,14 @@ NS.CB_ParseClassStr = function(msg, class, section)
 
     local map = {}
     for _, group in ipairs(cs[section]) do
-        for _, s in ipairs(group.strategies) do
-            map[s.cmd] = s.field
+        -- Skip whisper groups (talent-spec premades): their cmds are "talents spec"
+        -- names that never appear in co?/nc? replies, so including them here would
+        -- seed their fields false on every reconcile — stomping the talent dropdown.
+        -- Those fields are owned by CB_SyncTalentSpec (inspect-derived) and user clicks.
+        if not group.whisper then
+            for _, s in ipairs(group.strategies) do
+                map[s.cmd] = s.field
+            end
         end
     end
     return CB_ParseTokens(msg, map)
@@ -283,6 +289,32 @@ end
 -- the no-bridge co?/nc? whisper read paths)
 -- ============================================================
 
+-- Dev mismatch check: after an authoritative re-read reconciles the bot's real
+-- state, compare the expectations recorded by CB_SendStrategyToggle (the optimistic
+-- UI guess) against what actually parsed, and print any divergence. Only runs when
+-- /cbdebug verify is on; pops entry.stratExpect[section] either way so it doesn't
+-- carry over. Each field may live in the general (entry[section]) or class-specific
+-- (entry.classData[section]) table, so check both.
+---@param entry   table   The reconciled bot roster entry.
+---@param section string  "combat" or "nonCombat".
+local function CB_VerifyStrategyExpect(entry, section)
+    local expect = entry.stratExpect and entry.stratExpect[section]
+    if not expect then return end
+    entry.stratExpect[section] = nil
+    if not NS.debugVerify then return end
+
+    local general  = entry[section]
+    local classSec = entry.classData and entry.classData[section]
+    for field, want in pairs(expect) do
+        local got = general and general[field]
+        if got == nil and classSec then got = classSec[field] end
+        if got ~= want then
+            NS.CB_Print(string.format("|cffff4444[verify]|r %s  %s.%s: expected %s, got %s",
+                entry.name or "?", section, field, tostring(want), tostring(got)))
+        end
+    end
+end
+
 -- Parses a combat strategy string into entry.combat + entry.classData.combat.
 ---@param entry     table   The bot roster entry to store parsed flags on.
 ---@param combatStr string  The bot's "co ?" reply text.
@@ -291,6 +323,7 @@ NS.CB_StoreCombat = function(entry, combatStr)
     entry.combat = NS.CB_ParseCombatStr(combatStr)
     if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
     entry.classData.combat = NS.CB_ParseClassStr(combatStr, entry.class, "combat")
+    CB_VerifyStrategyExpect(entry, "combat")
 end
 
 -- Parses a non-combat strategy string into entry.nonCombat + entry.classData.nonCombat.
@@ -301,4 +334,5 @@ NS.CB_StoreNonCombat = function(entry, ncStr)
     entry.nonCombat = NS.CB_ParseNonCombatStr(ncStr)
     if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
     entry.classData.nonCombat = NS.CB_ParseClassStr(ncStr, entry.class, "nonCombat")
+    CB_VerifyStrategyExpect(entry, "nonCombat")
 end

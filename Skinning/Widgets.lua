@@ -691,7 +691,10 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper.GetValue = function(self) return s:GetValue() end
 
     -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame
-    -- so ElvUI's thumb replacement is already in place.
+    -- so ElvUI's thumb replacement is already in place. The stored values are the
+    -- "enabled" colors; wrapper.SetTextColor overrides them for call sites that
+    -- need a specific text color (e.g. the Combat tab's timer slider uses white
+    -- to match its neighboring checkbox labels).
     local thumbTex                    = s:GetThumbTexture()
     local thumbR, thumbG, thumbB      = thumbTex:GetVertexColor()
     local labelR, labelG, labelB      = label and label:GetTextColor()
@@ -699,6 +702,23 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     local highR,  highG,  highB       = highLabel and highLabel:GetTextColor()
     local boxR,   boxG,   boxB        = box:GetTextColor()
     local GREY                        = 0.5
+
+    -- Sets the slider's text color (title, endpoints, value box) and makes it
+    -- the color Enable() restores — so a Disable/Enable cycle can't resurrect
+    -- the skin's original (possibly off-theme) color.
+    ---@param r number  Red 0-1.
+    ---@param g number  Green 0-1.
+    ---@param b number  Blue 0-1.
+    wrapper.SetTextColor = function(self, r, g, b)
+        labelR, labelG, labelB = r, g, b
+        lowR,   lowG,   lowB   = r, g, b
+        highR,  highG,  highB  = r, g, b
+        boxR,   boxG,   boxB   = r, g, b
+        if label     then label:SetTextColor(r, g, b) end
+        if lowLabel  then lowLabel:SetTextColor(r, g, b) end
+        if highLabel then highLabel:SetTextColor(r, g, b) end
+        box:SetTextColor(r, g, b)
+    end
 
     wrapper.Disable = function(self)
         if label    then label:SetTextColor(GREY, GREY, GREY) end

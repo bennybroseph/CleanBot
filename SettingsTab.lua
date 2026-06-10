@@ -471,6 +471,11 @@ NS.CleanBot_BuildSettingsTab = function()
     otherPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
     otherPanel:Hide()
 
+    local debugPanel = NS.CB_CreatePanel(panel, "CleanBotDebugPanel", 3, "panel")
+    debugPanel:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0, -SUB_TAB_H)
+    debugPanel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0,  BTN_ROW_H)
+    debugPanel:Hide()
+
     -- ── Sub-tab switching ──────────────────────────────────────
     local subTabs      = {}
     local activeSubTab = 0
@@ -484,12 +489,15 @@ NS.CleanBot_BuildSettingsTab = function()
         themePanel:Hide()
         layoutPanel:Hide()
         otherPanel:Hide()
+        debugPanel:Hide()
         if index == 1 then
             themePanel:Show()
         elseif index == 2 then
             layoutPanel:Show()
-        else
+        elseif index == 3 then
             otherPanel:Show()
+        else
+            debugPanel:Show()
         end
     end
 
@@ -510,6 +518,27 @@ NS.CleanBot_BuildSettingsTab = function()
     otherTab:SetWidth(NS.TAB_WIDTH)
     NS.CB_AnchorAhead(otherTab, layoutTab)
     subTabs[3] = otherTab
+
+    -- Debug sub-tab: hidden unless enabled via /cbdebug enable (persisted).
+    -- Last in the anchor chain, so hiding it leaves no gap in the tab bar.
+    local debugTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsDebugTab", "Debug",
+        function() selectSubTab(4) end)
+    debugTab:SetWidth(NS.TAB_WIDTH)
+    NS.CB_AnchorAhead(debugTab, otherTab)
+    subTabs[4] = debugTab
+    if not NS.debugTabEnabled then debugTab:Hide() end
+
+    -- Called by NS.CB_SetDebugTabEnabled (Debug.lua) when /cbdebug enable/disable
+    -- runs. Hiding while the Debug sub-tab is active falls back to Theme.
+    ---@param on boolean  Whether the Debug sub-tab button should be visible.
+    NS.CB_SetDebugTabVisible = function(on)
+        if on then
+            debugTab:Show()
+        else
+            debugTab:Hide()
+            if activeSubTab == 4 then selectSubTab(1) end
+        end
+    end
 
     -- ── Theme tab: ScrollFrame ─────────────────────────────────
     local themeSF, themeChild = NS.CB_CreateScrollFrame(themePanel, "CleanBotThemeScroll")
@@ -752,6 +781,96 @@ NS.CleanBot_BuildSettingsTab = function()
         NS.botEmotes = checked
         CleanBot_SavedVars.botEmotes = checked
     end)
+
+    -- ── Debug tab ──────────────────────────────────────────────
+    -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:
+    -- every control routes through the shared setters in Debug.lua, which
+    -- persist + re-sync and call NS.CB_RefreshDebugTab, so the slash commands
+    -- and this UI always agree. Setter references are late-bound closures
+    -- because Debug.lua loads after this file.
+
+    -- Checkbox + label + tooltip helper (debug panel only).
+    local function CB_MakeDebugCheck(name, labelText, tooltip, anchor, onClick)
+        local cb = NS.CB_CreateCheckBox(debugPanel, name)
+        cb:SetSize(20, 20)
+        NS.CB_AnchorBelow(cb, anchor)
+        local lbl = NS.CB_CreateLabel(debugPanel, labelText)
+        lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+        cb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(tooltip, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        cb:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
+        return cb
+    end
+
+    local bridgeHeader = NS.CB_CreateHeader(debugPanel, "Bridge Override")
+    bridgeHeader:SetPoint("TOPLEFT", debugPanel, "TOPLEFT",
+        (debugPanel.paddingLeft or 0) + (bridgeHeader.marginLeft or 0),
+        -((debugPanel.paddingTop or 0) + (bridgeHeader.marginTop  or 0)))
+
+    -- Wide enough for the longest collapsed label, "Auto (unknown)".
+    local bridgeDD = NS.CB_CreateDropdown(debugPanel, "CleanBotDebugBridgeDD", 170)
+    NS.CB_AnchorBelow(bridgeDD, bridgeHeader)
+    UIDropDownMenu_Initialize(bridgeDD, function()
+        local opts = {
+            { text = "On (force present)", value = "present" },
+            { text = "Off (force absent)", value = "absent"  },
+        }
+        for _, o in ipairs(opts) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text    = o.text
+            info.value   = o.value
+            info.checked = (NS.debugBridgeOverride == o.value)
+            info.func    = function() NS.CB_SetBridgeOverride(o.value) end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    local bridgeResetBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugBridgeReset", "Reset", 70, 22,
+        function() NS.CB_SetBridgeOverride(nil) end)
+    NS.CB_AnchorAhead(bridgeResetBtn, bridgeDD)
+
+    local simulateCB = CB_MakeDebugCheck("CleanBotDebugSimulateCB", "Simulate Commands",
+        "Print bot commands to chat instead of sending them.",
+        bridgeDD, function(v) NS.CB_SetDebugSimulate(v) end)
+
+    local verifyCB = CB_MakeDebugCheck("CleanBotDebugVerifyCB", "Verify Strategy Toggles",
+        "After each strategy toggle, log any mismatch between the optimistic UI state and the bot's actual state.",
+        simulateCB, function(v) NS.CB_SetDebugVerify(v) end)
+
+    local diagHeader = NS.CB_CreateHeader(debugPanel, "Diagnostics")
+    NS.CB_AnchorBelow(diagHeader, verifyCB)
+
+    local traceCB = CB_MakeDebugCheck("CleanBotDebugTraceCB", "Trace NotifyInspect",
+        "Print every NotifyInspect call from any addon, tagged CleanBot or EXTERNAL (session only; not saved).",
+        diagHeader, function(v) NS.CB_SetInspectTrace(v) end)
+
+    local knownBotsBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugKnownBotsBtn", "Known Bots", 110, 22,
+        function() NS.CB_ShowDebugKnownBots() end)
+    NS.CB_AnchorBelow(knownBotsBtn, traceCB)
+
+    local timingBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugTimingBtn", "Measure Reply Timing", 150, 22,
+        function() NS.CB_RunTimingMeasure(3) end)
+    NS.CB_AnchorAhead(timingBtn, knownBotsBtn)
+
+    -- Syncs all Debug-tab controls from NS state. Called at build and by every
+    -- setter in Debug.lua (so slash-command changes update an open panel).
+    NS.CB_RefreshDebugTab = function()
+        if NS.debugBridgeOverride == "present" then
+            UIDropDownMenu_SetText(bridgeDD, "On (forced)")
+        elseif NS.debugBridgeOverride == "absent" then
+            UIDropDownMenu_SetText(bridgeDD, "Off (forced)")
+        else
+            UIDropDownMenu_SetText(bridgeDD, "Auto (" .. tostring(NS.bridgeState) .. ")")
+        end
+        simulateCB:SetChecked(NS.debugSimulate and true or false)
+        verifyCB:SetChecked(NS.debugVerify and true or false)
+        traceCB:SetChecked(NS.debugInspectTrace and true or false)
+    end
+    NS.CB_RefreshDebugTab()
 
     -- ── Sync helper ────────────────────────────────────────────
     syncPendingToUI = function()

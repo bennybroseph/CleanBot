@@ -210,6 +210,10 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                 end)
             ready = true
             sl:SetWidth(140)
+            -- White text to match the checkbox labels around it in the strategy
+            -- sections; also becomes the color Enable() restores after a
+            -- dependsOn Disable/Enable cycle (other sliders keep skin defaults).
+            sl:SetTextColor(1, 1, 1)
             sl:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left + NS.MARGIN.slider.left, -yOffset)
 
             sl.slider:SetScript("OnMouseDown", function() dragging = true end)
@@ -251,12 +255,11 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                 local cbCmd   = s.cmd
                 local cbField = s.field
                 cb:SetScript("OnClick", function(self)
-                    local toggle = (self:GetChecked() and "+" or "-") .. cbCmd
-                    NS.CB_SendBotCommand(slot.name, "co " .. toggle)
+                    local checked = self:GetChecked() and true or false
+                    local toggle  = (checked and "+" or "-") .. cbCmd
                     local e = CleanBot_PartyBots[slot.key]
-                    if e and e.combat then
-                        e.combat[cbField] = self:GetChecked() and true or false
-                    end
+                    if e and e.combat then e.combat[cbField] = checked end
+                    NS.CB_SendStrategyToggle(slot, "co", toggle, { [cbField] = checked })
                 end)
             end
 
@@ -298,16 +301,20 @@ end
 ---@param slot          table   The bound slot (resolves the live bot).
 ---@param dataTable     table   State table updated to reflect the selection.
 local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, dataTable)
-    local parts = {}
+    local parts  = {}
+    local expect = {}
     for _, rs in ipairs(strategies) do
-        parts[#parts + 1] = (rs.field == selectedField and "+" or "-") .. rs.cmd
+        local on = (rs.field == selectedField)
+        parts[#parts + 1] = (on and "+" or "-") .. rs.cmd
+        expect[rs.field] = on
     end
-    NS.CB_SendBotCommand(slot.name, cmd .. " " .. table.concat(parts, ","))
     if dataTable then
         for _, rs in ipairs(strategies) do
             dataTable[rs.field] = (rs.field == selectedField)
         end
     end
+    -- Optimistic write above; toggle + authoritative reconcile (self-healing).
+    NS.CB_SendStrategyToggle(slot, cmd, table.concat(parts, ","), expect)
 end
 
 -- ============================================================
@@ -422,7 +429,9 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     end)
 
     if registry then
-        registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource }
+        -- whisper = true marks this as the talent-spec dropdown so
+        -- CB_SyncTalentSpec can find its dd for the tree-name fallback label.
+        registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource, whisper = true }
     end
     return setBtn
 end
@@ -485,9 +494,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 local sec, cbs = CB_BuildStrategySection(col, ddAnchor, sg.strategies, slot, tag,
                     function(s, checked)
                         local toggle = (checked and "+" or "-") .. s.cmd
-                        NS.CB_SendBotCommand(slot.name, cmd .. " " .. toggle)
                         local ds = getSource(CleanBot_PartyBots[slot.key])
                         if ds then ds[s.field] = checked end
+                        NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
                     end,
                     initSrc)
                 sec:Hide()
@@ -603,9 +612,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
                 function(s, checked)
                     local toggle = (checked and "+" or "-") .. s.cmd
-                    NS.CB_SendBotCommand(slot.name, cmd .. " " .. toggle)
                     local ds = getSource(CleanBot_PartyBots[slot.key])
                     if ds then ds[s.field] = checked end
+                    NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
                 end,
                 getSource(entry))
             section:Show()
@@ -1274,6 +1283,108 @@ NS.CB_UpdateTabData = function(key)
                     sub.section:Hide()
                 end
                 syncControls(sub.checkboxes, sub.strategies, cd)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- NS.CB_SyncTalentSpec — sets the talent-spec dropdown from the bot's REAL
+-- talents. Called from CB_OnInspectReady (Equip.lua) right after
+-- INSPECT_TALENT_READY fires for the viewed bot, while its talent data is
+-- readable via the inspect Talent APIs.
+--
+-- Identification: the bot's per-tree point totals are matched against the
+-- per-class premade spreads cached from "talents spec list" (NS.premadeSpecs,
+-- Bridge.lua) — the premade name there is the exact dropdown cmd. A unique
+-- spread match selects that premade; zero/multiple matches fall back to
+-- showing the dominant tree's name as the collapsed label only (no list entry
+-- is checked — totals are the finest signal the server exposes).
+-- ============================================================
+---@param key string  Bot name-key of the bot whose inspect data just loaded.
+NS.CB_SyncTalentSpec = function(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry or not entry.class then return end
+
+    -- The class's talent-spec group (whisper = "talents spec"); bail if none.
+    local cs = NS.CLASS_STRATEGIES and NS.CLASS_STRATEGIES[entry.class]
+    if not cs or not cs.combat then return end
+    local talentGroup = nil
+    for _, group in ipairs(cs.combat) do
+        if group.whisper then talentGroup = group; break end
+    end
+    if not talentGroup then return end
+
+    -- Per-tree totals from the inspected unit's talent data. Summing
+    -- GetTalentInfo ranks (same pattern as the Talented integration above)
+    -- avoids GetTalentTabInfo return-order ambiguity for the points value.
+    local totals    = {}
+    local bestTab   = 1
+    local allZero   = true
+    local numTabs   = GetNumTalentTabs(true)
+    if not numTabs or numTabs == 0 then return end
+    for tab = 1, numTabs do
+        local sum = 0
+        for index = 1, GetNumTalents(tab, true) do
+            sum = sum + (select(5, GetTalentInfo(tab, index, true)) or 0)
+        end
+        totals[tab] = sum
+        if sum > 0 then allZero = false end
+        if sum > (totals[bestTab] or 0) then bestTab = tab end
+    end
+    if allZero then return end   -- inspect data not actually readable (or untalented)
+
+    -- Need the premade spread list for this class; fetch (once) and retry on finalize.
+    local specs = NS.premadeSpecs and NS.premadeSpecs[entry.class]
+    if not specs then
+        if NS.CB_FetchSpecList then NS.CB_FetchSpecList(key, entry) end
+        return
+    end
+
+    -- Match the bot's spread against the premades.
+    local matched = nil
+    local matchCount = 0
+    for _, spec in ipairs(specs) do
+        if spec.t[1] == (totals[1] or 0)
+        and spec.t[2] == (totals[2] or 0)
+        and spec.t[3] == (totals[3] or 0) then
+            matchCount = matchCount + 1
+            matched    = spec
+        end
+    end
+
+    if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
+    local src = entry.classData.combat
+    if not src then return end
+
+    local matchedStrat = nil
+    if matchCount == 1 and matched then
+        for _, s in ipairs(talentGroup.strategies) do
+            if s.cmd == matched.name then matchedStrat = s; break end
+        end
+    end
+
+    -- Write the resolved selection (or clear on ambiguity) and let the existing
+    -- registry sync set the dropdown text + checked state.
+    for _, s in ipairs(talentGroup.strategies) do
+        src[s.field] = (s == matchedStrat) or false
+    end
+    if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
+
+    -- Ambiguous / unmatched: label the collapsed button with the dominant tree's
+    -- name (display only — the list itself still shows the real premade entries).
+    if not matchedStrat then
+        local a, b = GetTalentTabInfo(bestTab, true)
+        local treeName = (type(a) == "string" and a) or (type(b) == "string" and b) or nil
+        if treeName then
+            local frames = NS.botFrames and NS.botFrames[key]
+            if frames then
+                for _, cf in ipairs(frames) do
+                    if cf.whisper and cf.dd then
+                        UIDropDownMenu_SetText(cf.dd, treeName)
+                        break
+                    end
+                end
             end
         end
     end

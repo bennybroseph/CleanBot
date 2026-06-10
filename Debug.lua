@@ -1,7 +1,8 @@
 -- ============================================================
--- Debug.lua  —  developer diagnostics: the KnownBots
--- popup window and the /cbdebug chat dump.
--- Reached via "/cleanbot debug knownbots" and "/cbdebug".
+-- Debug.lua  —  developer diagnostics: the debug-state setters (shared by
+-- the /cbdebug subcommands and the Settings → Debug tab), the KnownBots
+-- popup window, the /cbdebug chat dump, the /cbtiming whisper-latency
+-- measurer, and the /cbinspect NotifyInspect trace.
 -- ============================================================
 local NS = CleanBotNS
 
@@ -157,51 +158,108 @@ SlashCmdList["CBFRAMES"] = function()
 end
 
 -- ============================================================
--- /cbdebug  — quick party/cache dump + debug overrides
+-- Debug state setters — the single source of truth for changing debug
+-- options. Both the /cbdebug subcommands and the Settings → Debug tab route
+-- through these, so chat and UI always agree. Each setter persists to
+-- SavedVars, prints the change, and refreshes the Debug tab if it's built
+-- (NS.CB_RefreshDebugTab is defined by SettingsTab.lua at build time).
+-- ============================================================
+
+local function CB_RefreshDebugTabIfBuilt()
+    if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
+end
+
+-- Sets/clears the bridge override and re-syncs so the new effective state
+-- applies immediately (roster/inventory/quests re-fetch via the right path)
+-- instead of waiting for the next window open.
+---@param value string|nil  "present" | "absent" | nil (= auto, follow handshake).
+NS.CB_SetBridgeOverride = function(value)
+    NS.debugBridgeOverride = value
+    if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = value end
+    if value == "absent" then
+        NS.CB_Print("Bridge override set to |cffff4444absent|r (whisper fallback).")
+    elseif value == "present" then
+        NS.CB_Print("Bridge override set to |cff00ff00present|r (bridge path).")
+    else
+        NS.CB_Print("Bridge override cleared — following real handshake (" .. NS.bridgeState .. ").")
+    end
+    NS.CB_RequestSync()
+    CB_RefreshDebugTabIfBuilt()
+end
+
+---@param on boolean  Whether CB_SendBotCommand prints instead of sending.
+NS.CB_SetDebugSimulate = function(on)
+    NS.debugSimulate = on and true or false
+    if CleanBot_SavedVars then CleanBot_SavedVars.debugSimulate = NS.debugSimulate end
+    NS.CB_Print("Simulate mode: " .. (NS.debugSimulate and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
+    CB_RefreshDebugTabIfBuilt()
+end
+
+---@param on boolean  Whether strategy toggles log optimistic-vs-actual mismatches.
+NS.CB_SetDebugVerify = function(on)
+    NS.debugVerify = on and true or false
+    if CleanBot_SavedVars then CleanBot_SavedVars.debugVerify = NS.debugVerify end
+    NS.CB_Print("Strategy verify logging: " .. (NS.debugVerify and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
+    CB_RefreshDebugTabIfBuilt()
+end
+
+-- Shows/hides the Settings → Debug sub-tab (persisted). The tab widget itself
+-- is managed by SettingsTab.lua via NS.CB_SetDebugTabVisible.
+---@param on boolean  Whether the Debug sub-tab is available in Settings.
+NS.CB_SetDebugTabEnabled = function(on)
+    NS.debugTabEnabled = on and true or false
+    if CleanBot_SavedVars then CleanBot_SavedVars.debugTabEnabled = NS.debugTabEnabled end
+    if NS.CB_SetDebugTabVisible then NS.CB_SetDebugTabVisible(NS.debugTabEnabled) end
+    NS.CB_Print("Debug tab " .. (NS.debugTabEnabled
+        and "|cff00ff00enabled|r — see Settings."
+        or  "|cffff4444disabled|r."))
+end
+
+-- ============================================================
+-- /cbdebug  — quick party/cache dump + debug option subcommands
 --
+--   /cbdebug enable        — show the Debug sub-tab in Settings (persisted)
+--   /cbdebug disable       — hide the Debug sub-tab
 --   /cbdebug bridge off    — force bridge absent (uses whisper fallback)
 --   /cbdebug bridge on     — force bridge present (uses bridge path)
 --   /cbdebug bridge reset  — clear override; follow real handshake result
 --   /cbdebug simulate      — toggle simulate mode (print commands instead of sending)
+--   /cbdebug verify        — toggle strategy-toggle mismatch logging
 -- ============================================================
 SLASH_CBDEBUG1 = "/cbdebug"
 SlashCmdList["CBDEBUG"] = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
 
-    -- Bridge override sub-commands. Each re-syncs so the new effective state
-    -- applies immediately (roster/inventory/quests re-fetch via the right path)
-    -- instead of waiting for the next window open.
-    if msg == "bridge off" then
-        NS.debugBridgeOverride = "absent"
-        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = "absent" end
-        NS.CB_Print("Bridge override set to |cffff4444absent|r (whisper fallback).")
-        NS.CB_RequestSync()
+    if msg == "enable" then
+        NS.CB_SetDebugTabEnabled(true)
+        return
+    elseif msg == "disable" then
+        NS.CB_SetDebugTabEnabled(false)
+        return
+    elseif msg == "bridge off" then
+        NS.CB_SetBridgeOverride("absent")
         return
     elseif msg == "bridge on" then
-        NS.debugBridgeOverride = "present"
-        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = "present" end
-        NS.CB_Print("Bridge override set to |cff00ff00present|r (bridge path).")
-        NS.CB_RequestSync()
+        NS.CB_SetBridgeOverride("present")
         return
     elseif msg == "bridge reset" then
-        NS.debugBridgeOverride = nil
-        if CleanBot_SavedVars then CleanBot_SavedVars.debugBridgeOverride = nil end
-        NS.CB_Print("Bridge override cleared — following real handshake (" .. NS.bridgeState .. ").")
-        NS.CB_RequestSync()
+        NS.CB_SetBridgeOverride(nil)
         return
-    -- Simulate mode toggle.
     elseif msg == "simulate" then
-        NS.debugSimulate = not NS.debugSimulate
-        if CleanBot_SavedVars then CleanBot_SavedVars.debugSimulate = NS.debugSimulate end
-        NS.CB_Print("Simulate mode: " .. (NS.debugSimulate and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
+        NS.CB_SetDebugSimulate(not NS.debugSimulate)
+        return
+    elseif msg == "verify" then
+        NS.CB_SetDebugVerify(not NS.debugVerify)
         return
     end
 
     -- Default: quick group/cache/state dump.
-    print(string.format("Bridge: real=%s override=%s simulate=%s loginPhase=%s",
+    print(string.format("Bridge: real=%s override=%s simulate=%s verify=%s tabEnabled=%s loginPhase=%s",
         tostring(NS.bridgeState),
         tostring(NS.debugBridgeOverride or "none"),
         tostring(NS.debugSimulate),
+        tostring(NS.debugVerify),
+        tostring(NS.debugTabEnabled),
         tostring(NS.loginPhaseActive)))
 
     local prefix, n = NS.CB_GroupInfo()
@@ -233,27 +291,168 @@ SlashCmdList["CBDEBUG"] = function(msg)
 end
 
 -- ============================================================
--- /cbinspect  — TEMP DIAGNOSTIC. Traces every NotifyInspect call (from ANY
--- addon) to find whether something other than CleanBot is inspecting in the
--- background and evicting our single-unit equipment-inspect cache.
+-- /cbtiming  — measures how fast bots whisper replies, to tune
+-- NS.WHISPER_SILENCE (the collection silence timeout in Bridge.lua).
 --
--- Toggle with /cbinspect, repro the tooltip-revert, then read the log:
---   source=CleanBot   → our own inspect (Equip.lua / SelectBot / UNIT_INVENTORY_CHANGED)
---   source=EXTERNAL   → another addon is inspecting — that's the evictor.
--- The printed stack line identifies the caller's file. Remove this block once
--- the source is confirmed.
+--   /cbtiming [runs] [botName]   — default 3 runs against the selected bot
+--
+-- Each run whispers "items" and records:
+--   first  = time from send to the FIRST reply line
+--   gaps   = time between consecutive reply lines within the burst
+-- The silence timeout must cover max(first, maxGap) — it resets on every
+-- line, so total reply length is irrelevant. Reports per-run and aggregate
+-- stats plus a suggested timeout (2x the worst observation, for headroom).
 -- ============================================================
-local cbInspectTraceOn = false
-local cbInspectHooked  = false
+local timing = nil   -- active session, or nil
 
-SLASH_CBINSPECT1 = "/cbinspect"
-SlashCmdList["CBINSPECT"] = function()
-    cbInspectTraceOn = not cbInspectTraceOn
+local timingEvents = CreateFrame("Frame")
+timingEvents:RegisterEvent("CHAT_MSG_WHISPER")
+timingEvents:SetScript("OnEvent", function(_, _, msg, sender)
+    if not timing or not timing.run then return end
+    if strlower(sender or "") ~= timing.key then return end
+    local now = GetTime()
+    local run = timing.run
+    if not run.firstAt then
+        run.firstAt = now
+        run.first   = now - run.sendTime
+    else
+        local gap = now - run.lastAt
+        run.gapSum = run.gapSum + gap
+        run.gapN   = run.gapN + 1
+        if gap > run.maxGap then run.maxGap = gap end
+    end
+    run.lastAt = now
+    run.lines  = run.lines + 1
+end)
 
-    if cbInspectTraceOn and not cbInspectHooked then
+local timingTicker = CreateFrame("Frame")
+timingTicker:Hide()
+
+local function timingStartRun()
+    timing.run = {
+        sendTime = GetTime(),
+        lines    = 0,
+        gapSum   = 0,
+        gapN     = 0,
+        maxGap   = 0,
+    }
+    NS.CB_SendBotCommand(timing.name, "items")
+end
+
+local function timingReport()
+    timingTicker:Hide()
+    local rs = timing.results
+    timing = nil
+    if #rs == 0 then
+        NS.CB_Print("[timing] No replies received — is the bot online and whispering?")
+        return
+    end
+    local firstSum, firstMax, gapSum, gapN, gapMax = 0, 0, 0, 0, 0
+    for i, r in ipairs(rs) do
+        local avgGap = r.gapN > 0 and (r.gapSum / r.gapN) or 0
+        print(string.format("  run %d: first %.0f ms, %d lines, avg gap %.0f ms, max gap %.0f ms",
+            i, r.first * 1000, r.lines, avgGap * 1000, r.maxGap * 1000))
+        firstSum = firstSum + r.first
+        if r.first > firstMax then firstMax = r.first end
+        gapSum = gapSum + r.gapSum
+        gapN   = gapN + r.gapN
+        if r.maxGap > gapMax then gapMax = r.maxGap end
+    end
+    local avgFirst = firstSum / #rs
+    local avgGap   = gapN > 0 and (gapSum / gapN) or 0
+    local worst    = math.max(firstMax, gapMax)
+    NS.CB_Print(string.format(
+        "[timing] avg first reply %.0f ms (max %.0f) | avg line gap %.0f ms (max %.0f) | suggested NS.WHISPER_SILENCE >= %.2f s (2x worst; currently %.2f s)",
+        avgFirst * 1000, firstMax * 1000, avgGap * 1000, gapMax * 1000,
+        worst * 2, NS.WHISPER_SILENCE or 0))
+end
+
+timingTicker:SetScript("OnUpdate", function()
+    if not timing or not timing.run then timingTicker:Hide(); return end
+    local now = GetTime()
+    local run = timing.run
+    if run.firstAt then
+        -- Run is complete after a generous fixed measurement window of silence
+        -- (independent of NS.WHISPER_SILENCE, so the tool stays valid while tuning).
+        if now - run.lastAt > 1.5 then
+            timing.results[#timing.results + 1] = run
+            timing.run = nil
+            timing.runsLeft = timing.runsLeft - 1
+            if timing.runsLeft > 0 then timingStartRun() else timingReport() end
+        end
+    elseif now - run.sendTime > 5 then
+        -- No reply at all: count the run as failed and move on.
+        NS.CB_Print("[timing] run got no reply within 5 s — skipping.")
+        timing.run = nil
+        timing.runsLeft = timing.runsLeft - 1
+        if timing.runsLeft > 0 then timingStartRun() else timingReport() end
+    end
+end)
+
+-- Starts a timing measurement session. Shared by /cbtiming and the Settings →
+-- Debug tab's "Measure Reply Timing" button.
+---@param runs    number?  How many "items" queries to run (default 3).
+---@param botName string?  Target bot name; defaults to the selected bot, then any known bot.
+NS.CB_RunTimingMeasure = function(runs, botName)
+    if timing then NS.CB_Print("[timing] already measuring — wait for the report.") return end
+    if NS.debugSimulate then
+        NS.CB_Print("[timing] simulate mode is ON — commands aren't actually sent. Turn simulate off first.")
+        return
+    end
+    local key, entry
+    if botName and botName ~= "" then
+        key   = strlower(botName)
+        entry = CleanBot_PartyBots[key]
+    else
+        key   = NS.selectedBotKey
+        entry = key and CleanBot_PartyBots[key]
+        if not entry then
+            for k, e in pairs(CleanBot_PartyBots) do key = k; entry = e; break end
+        end
+    end
+    if not entry then
+        NS.CB_Print("[timing] no known bot to measure (open the Individual tab or pass a name).")
+        return
+    end
+    timing = {
+        key      = key,
+        name     = entry.name,
+        runsLeft = runs or 3,
+        results  = {},
+    }
+    NS.CB_Print(string.format("[timing] measuring %s with %d 'items' queries...", entry.name, timing.runsLeft))
+    timingStartRun()
+    timingTicker:Show()
+end
+
+SLASH_CBTIMING1 = "/cbtiming"
+SlashCmdList["CBTIMING"] = function(msg)
+    local runsArg, nameArg = msg:match("^%s*(%d*)%s*(%S*)")
+    NS.CB_RunTimingMeasure(tonumber(runsArg), nameArg ~= "" and nameArg or nil)
+end
+
+-- ============================================================
+-- /cbinspect — traces every NotifyInspect call (from ANY addon), to diagnose
+-- something other than CleanBot inspecting in the background and evicting the
+-- single-unit equipment-inspect cache (rich tooltips reverting to generic).
+--   source=CleanBot   → our own inspect (Equip.lua / SelectBot / OnEnter reclaim)
+--   source=EXTERNAL   → another addon is inspecting.
+-- The printed stack line identifies the caller's file.
+-- ============================================================
+NS.debugInspectTrace = false   -- session-only; deliberately NOT persisted
+local cbInspectHooked = false
+
+-- Enables/disables the NotifyInspect trace. Shared by /cbinspect and the
+-- Settings → Debug tab checkbox. The hooksecurefunc is installed once on
+-- first enable (hooks can't be removed; the flag gates the output).
+---@param on boolean  Whether to print every NotifyInspect call.
+NS.CB_SetInspectTrace = function(on)
+    NS.debugInspectTrace = on and true or false
+
+    if NS.debugInspectTrace and not cbInspectHooked then
         cbInspectHooked = true
         hooksecurefunc("NotifyInspect", function(unit)
-            if not cbInspectTraceOn then return end
+            if not NS.debugInspectTrace then return end
             local stack = debugstack(2, 8, 0) or ""
             -- CleanBot's files all live under the ...\CleanBot\ folder, so a stack
             -- containing "CleanBot" is our own call; anything else is external.
@@ -272,10 +471,17 @@ SlashCmdList["CBINSPECT"] = function()
                 end
             end
         end)
-        NS.CB_Print("NotifyInspect trace |cff00ff00ON|r — open the Individual tab, switch bots, and wait for the revert. Watch for |cffff4444source=EXTERNAL|r lines. /cbinspect again to stop.")
-    elseif cbInspectTraceOn then
-        NS.CB_Print("NotifyInspect trace |cff00ff00ON|r.")
+    end
+
+    if NS.debugInspectTrace then
+        NS.CB_Print("NotifyInspect trace |cff00ff00ON|r — watch for |cffff4444source=EXTERNAL|r lines.")
     else
         NS.CB_Print("NotifyInspect trace |cffff4444OFF|r.")
     end
+    if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
+end
+
+SLASH_CBINSPECT1 = "/cbinspect"
+SlashCmdList["CBINSPECT"] = function()
+    NS.CB_SetInspectTrace(not NS.debugInspectTrace)
 end

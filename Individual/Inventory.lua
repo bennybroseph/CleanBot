@@ -72,7 +72,22 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 ---@param link    string  Item link to equip.
 local function CB_EquipItem(key, botName, link)
     NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
-    NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
+    NS.CB_After(1.5, function()
+        NS.CB_FetchInventory(key, botName)
+        -- Delayed equip-slot re-inspect: the immediate UNIT_INVENTORY_CHANGED read
+        -- has a stale item link (texture fresh, link lagging), so the staleness
+        -- guard in CB_RefreshEquipSlots skips it. By now the link has caught up, so
+        -- this fresh read lands the correct icon + border — and covers the
+        -- context-menu Equip path, which has no optimistic paint to hold in the gap.
+        if NS.CB_QueueEquipRefresh then
+            for _, slot in ipairs(NS.tabList or {}) do
+                if slot.key == key and slot.unit and UnitExists(slot.unit) then
+                    NS.CB_QueueEquipRefresh({{ key = key, unit = slot.unit }})
+                    break
+                end
+            end
+        end
+    end)
 end
 
 -- ── Inventory cell right-click context menu ──────────────────────────────
@@ -217,6 +232,17 @@ if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_Re
             if src.countText then src.countText:Hide() end
             NS.CB_ClearQualityBorder(src)
         end
+        -- Optimistic slot update (mirrors the unequip drag's inventory-cell
+        -- update): show the dragged item's icon + rarity border immediately;
+        -- the inspect-driven refresh confirms/corrects once the server applies.
+        local link   = NS.dragging.link
+        local itemId = strmatch(link, "item:(%d+)")
+        dropBtn.icon:SetTexture(GetItemIcon(tonumber(itemId) or 0))
+        dropBtn.icon:Show()
+        if dropBtn.bg then dropBtn.bg:Hide() end
+        dropBtn.itemLink = link
+        local q = select(3, GetItemInfo(link))
+        if q then NS.CB_SetQualityBorder(dropBtn, q) else NS.CB_ClearQualityBorder(dropBtn) end
     elseif invDropCell and src then
         -- ── Drop onto inventory cell → visual swap ─────────────
         local tmpTex   = src.icon:GetTexture()
@@ -669,9 +695,13 @@ NS.CB_RenderInventory = function(key)
     -- is pending and hides once it lands. This is deliberately not a clear point,
     -- so CB_ShowInventory rendering stale data mid-fetch keeps the overlay up.
     -- The flag is cleared at true data-landing points (whisper tick finalize,
-    -- bridge INV_END, money reply).
+    -- bridge INV_END, money reply). entry.invOverlay (set by CB_FetchInventory)
+    -- suppresses the overlay for bridge-path refreshes of already-rendered grids.
     local lf = NS.botInventoryFrames[key]
-    if lf then NS.CB_SetInventoryLoading(lf, entry.awaitingInventory and true or false) end
+    if lf then
+        NS.CB_SetInventoryLoading(lf,
+            (entry.awaitingInventory and entry.invOverlay) and true or false)
+    end
 
     local forceFullRender = false
     local validation = entry.pendingValidation

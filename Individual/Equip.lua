@@ -388,8 +388,11 @@ end
 -- with no fixed delay. (Bridge.lua routes the event here via CB_OnInspectReady.)
 --
 -- INSPECT_TIMEOUT is only a safety net: if the event never fires (e.g. the client
--- throttle of ~6 NotifyInspect/10s silently drops the request), we refresh from
--- whatever is cached and advance the queue so it can't stall.
+-- throttle of ~6 NotifyInspect/10s silently drops the request), we advance the
+-- queue so it can't stall. The timeout path deliberately does NOT refresh: no
+-- event means no inspect packet, so the cache cannot hold anything newer than
+-- the opportunistic read already painted — re-reading it would only stomp
+-- optimistic equip/unequip visuals with stale data.
 local INSPECT_TIMEOUT = 1.0
 
 local inspectQueue   = {}    -- { key, unit } entries waiting to be inspected
@@ -410,16 +413,18 @@ local function clearCurrent()
     current = nil
 end
 
--- Refreshes the in-flight bot, clears it, and advances to the next queued inspect.
--- Shared by the INSPECT_TALENT_READY path and the fallback timer.
-local function finishCurrent()
+-- Clears the in-flight entry and advances to the next queued inspect, refreshing
+-- the bot's slots first only when fresh data actually arrived (the event path).
+---@param refresh boolean  Whether to repaint slots before advancing.
+local function finishCurrent(refresh)
     cancelWait()
-    if current then NS.CB_RefreshEquipSlots(current.key, current.unit) end
+    if refresh and current then NS.CB_RefreshEquipSlots(current.key, current.unit) end
     clearCurrent()
     processNextInspect()
 end
 
--- Fallback-only timer: advance if INSPECT_TALENT_READY never arrives for this unit.
+-- Fallback-only timer: advance (without repainting — see INSPECT_TIMEOUT note)
+-- if INSPECT_TALENT_READY never arrives for this unit.
 local function startWait()
     cancelWait()
     local elapsed = 0
@@ -427,7 +432,7 @@ local function startWait()
     waitFrame:SetScript("OnUpdate", function(self, dt)
         elapsed = elapsed + dt
         if elapsed >= INSPECT_TIMEOUT then
-            finishCurrent()
+            finishCurrent(false)
         end
     end)
 end
@@ -477,7 +482,14 @@ end
 -- refers to the in-flight `current`. Refreshes it and advances. When `current` is
 -- nil the event is the player's own inspect (Blizzard UI) — ignore it.
 NS.CB_OnInspectReady = function()
-    if current then finishCurrent() end
+    if current then
+        -- Talent data is readable right now (that's what this event means) —
+        -- sync the talent-spec dropdown before finishCurrent clears `current`.
+        -- Deliberately not done on the fallback-timer path: without the event,
+        -- talent data likely never arrived; the next successful inspect catches it.
+        if NS.CB_SyncTalentSpec then NS.CB_SyncTalentSpec(current.key) end
+        finishCurrent(true)
+    end
 end
 
 -- Refreshes slot icons and the DressUpModel for one bot from live inventory data.
@@ -490,12 +502,36 @@ NS.CB_RefreshEquipSlots = function(key, unit)
         local itemTex  = GetInventoryItemTexture(unit, slotId)
         local itemLink = GetInventoryItemLink(unit, slotId)
         if itemTex then
-            btn.icon:SetTexture(itemTex)
-            btn.icon:Show()
-            if btn.bg then btn.bg:Hide() end
-            btn.itemLink = itemLink
-            local _, _, quality = GetItemInfo(itemLink)
-            if quality then NS.CB_SetQualityBorder(btn, quality) end
+            -- Staleness guard: right after an equip the inspect data's TEXTURE
+            -- updates immediately but the LINK lags a few seconds, so a link-derived
+            -- border (GetItemInfo) would be the OLD item's rarity (right icon, wrong
+            -- border). Apply icon+link+border only when the link is consistent with
+            -- the fresh texture (same icon path); otherwise skip this slot, leaving
+            -- the current display (the correct optimistic paint, or the prior item)
+            -- until a later refresh reads a caught-up link. GetItemIcon resolves even
+            -- for uncached items, so the comparison is reliable.
+            local linkFresh = itemLink and (GetItemIcon(itemLink) == itemTex)
+            if linkFresh then
+                btn.icon:SetTexture(itemTex)
+                btn.icon:Show()
+                if btn.bg then btn.bg:Hide() end
+                btn.itemLink = itemLink
+                -- Clear on unknown quality rather than skipping, so a GetItemInfo
+                -- cache miss can't leave the previous item's border colour behind.
+                local quality = select(3, GetItemInfo(itemLink))
+                if quality then
+                    NS.CB_SetQualityBorder(btn, quality)
+                else
+                    NS.CB_ClearQualityBorder(btn)
+                end
+            elseif not itemLink then
+                -- Texture present but no link at all (link not yet populated): show
+                -- the fresh icon now; the border lands on the next consistent read.
+                btn.icon:SetTexture(itemTex)
+                btn.icon:Show()
+                if btn.bg then btn.bg:Hide() end
+            end
+            -- else: link lags the texture — leave the slot untouched (no stale border).
         else
             btn.icon:Hide()
             if btn.bg then btn.bg:Show() end

@@ -418,6 +418,12 @@ initFrame:SetScript("OnEvent", function(self, event)
         if type(CleanBot_SavedVars.debugSimulate) == "boolean" then
             NS.debugSimulate = CleanBot_SavedVars.debugSimulate
         end
+        if type(CleanBot_SavedVars.debugVerify) == "boolean" then
+            NS.debugVerify = CleanBot_SavedVars.debugVerify
+        end
+        if type(CleanBot_SavedVars.debugTabEnabled) == "boolean" then
+            NS.debugTabEnabled = CleanBot_SavedVars.debugTabEnabled
+        end
 
         -- Restore theme values.
         if type(CleanBot_SavedVars.scale) == "number" then

@@ -94,6 +94,9 @@ NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strateg
 NS.debugBridgeOverride = nil   ---@type string|nil
 -- When true, CB_SendBotCommand prints commands to chat instead of sending them.
 NS.debugSimulate       = false ---@type boolean
+-- When true, strategy toggles log any optimistic-vs-actual mismatch after the
+-- authoritative state comes back (see CB_SendStrategyToggle / CB_VerifyStrategyExpect).
+NS.debugVerify         = false ---@type boolean
 
 -- No-bridge login gating: on a fresh login (not a /reload) bots may not be
 -- online yet, so we block CB_ProbePartyForBots until bridge detection
@@ -301,6 +304,64 @@ NS.CB_RequestRosterThenRefresh = function()
     NS.CB_RequestSync()
 end
 
+-- Lightweight, debounced strategy-state re-sync (bridge path). Unlike
+-- CB_RequestSync it sends ONLY GET~STATES — no ROSTER/DETAILS and no RefreshTabs —
+-- so it reconciles strategy flags (via the STATE~ handler → CB_StoreCombat/
+-- CB_StoreNonCombat → CB_UpdateTabData) without tab/inspect churn. Used to verify a
+-- strategy toggle silently after sending it over the bridge.
+NS.statesPending = false
+NS.CB_RequestStates = function()
+    if NS.statesPending then return end
+    NS.statesPending = true
+    NS.CB_After(0.4, function()
+        NS.statesPending = false
+        if CB_EffectiveBridgeState() == "present" then
+            SendAddonMessage("MBOT", "GET~STATES", CB_GroupChannel())
+        end
+    end)
+end
+
+-- Sends a combat/non-combat strategy toggle, then arranges an authoritative
+-- re-read so the optimistic UI converges to the bot's real state (self-healing).
+-- Path-aware to avoid reintroducing bridge whisper spam:
+--   bridge present → send the toggle as usual (allowlisted singles stay silent),
+--                    then a silent debounced GET~STATES (CB_RequestStates).
+--   no bridge      → send the atomic combined form "<prefix> <toggle>,?" so the
+--                    bot's "Strategies:" reply (still via CHAT_MSG_WHISPER) reflects
+--                    the post-set state; arm awaitingCo/awaitingNc to consume it.
+-- expectMap = { [field] = bool } of the toggled strategies; recorded for the
+-- /cbdebug verify mismatch check (only when NS.debugVerify is on).
+---@param slot      table   The bound slot (resolves the live bot via slot.key/.name).
+---@param prefix    string  "co" or "nc".
+---@param toggleStr string  Toggle body, e.g. "+focus", "-aoe", "+arms,-fury,-prot".
+---@param expectMap table?  field→expected-bool map for the debug mismatch check.
+NS.CB_SendStrategyToggle = function(slot, prefix, toggleStr, expectMap)
+    local entry = CleanBot_PartyBots[slot.key]
+
+    if entry and NS.debugVerify and expectMap then
+        local section = (prefix == "co") and "combat" or "nonCombat"
+        entry.stratExpect = entry.stratExpect or {}
+        local acc = entry.stratExpect[section] or {}
+        for f, v in pairs(expectMap) do acc[f] = v end   -- merge so rapid toggles all check
+        entry.stratExpect[section] = acc
+    end
+
+    if CB_EffectiveBridgeState() == "present" then
+        NS.CB_SendBotCommand(slot.name, prefix .. " " .. toggleStr)
+        NS.CB_RequestStates()
+    else
+        NS.CB_SendBotCommand(slot.name, prefix .. " " .. toggleStr .. ",?")
+        if entry then
+            if prefix == "co" then
+                entry.awaitingCo   = true
+                entry.coVerifyOnly = true   -- parse the combat reply but don't chain "nc ?"
+            else
+                entry.awaitingNc = true
+            end
+        end
+    end
+end
+
 -- Finalizes a whisper-path quest collection: swaps the staged quests into the
 -- live list and re-renders if the bot's quest frame is open. Shared by the
 -- summary-line terminator and the silence-timeout fallback below.
@@ -315,20 +376,79 @@ local function CB_FinalizeQuestCollection(key, entry)
     if f and f:IsShown() and NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
 end
 
--- Tick inventory, money, and quest timeouts for the whisper path (3s silence = done)
+-- ============================================================
+-- Premade talent-spec list cache  (per class, in-memory)
+-- "talents spec list" replies one line per premade: "1. arms pve (51-0-20)"
+-- where the name is the exact "talents spec <name>" argument (== dropdown cmd)
+-- and (t1-t2-t3) is the per-tree point spread. CB_SyncTalentSpec matches the
+-- inspected bot's tree totals against these spreads to identify its premade.
+-- ============================================================
+NS.premadeSpecs         = {}   -- [class] = { { name = "arms pve", t = {51,0,20} }, ... }
+NS.premadeSpecsFetching = {}   -- [class] = true while a list fetch is in flight
+
+-- Whispers "talents spec list" to one bot of the class and arms collection.
+-- One fetch per class per session; the reply lines are collected in the
+-- CHAT_MSG_WHISPER handler and finalized on 2s silence in invTickFrame.
+---@param key   string  Bot name-key of the bot to query.
+---@param entry table   The bot roster entry (provides name/class).
+NS.CB_FetchSpecList = function(key, entry)
+    if not entry or not entry.class then return end
+    if NS.premadeSpecs[entry.class] or NS.premadeSpecsFetching[entry.class] then return end
+    NS.premadeSpecsFetching[entry.class] = true
+    entry.awaitingSpecList = true
+    entry.specListTimeout  = 0
+    entry.specListStaging  = {}
+    NS.CB_SendBotCommand(entry.name, "talents spec list")
+end
+
+-- Publishes a collected spec list to the per-class cache and re-runs the
+-- pending talent sync that requested it.
+---@param key   string  Bot name-key.
+---@param entry table   The bot roster entry being finalized.
+local function CB_FinalizeSpecList(key, entry)
+    entry.awaitingSpecList = false
+    entry.specListTimeout  = 0
+    if entry.class then
+        NS.premadeSpecsFetching[entry.class] = nil
+        -- Publish even an empty list so a server with no premades doesn't refetch
+        -- on every inspect; the sync just falls back to tree-name display.
+        NS.premadeSpecs[entry.class] = entry.specListStaging or {}
+    end
+    entry.specListStaging = nil
+    if NS.CB_SyncTalentSpec then NS.CB_SyncTalentSpec(key) end
+end
+
+-- How long a whisper collection waits in SILENCE before declaring itself done.
+-- The clock resets on every line received, so this must cover (a) the bot's
+-- time-to-first-reply after our query and (b) the max gap between burst lines —
+-- NOT the total reply length. Bots reply fast on a healthy server; favour snappy
+-- UX when things run smoothly over graceful degradation under lag.
+-- Tune with /cbtiming (measures both first-reply latency and inter-line gaps).
+-- 0.5 chosen from /cbtiming measurements on a healthy server (2026-06).
+NS.WHISPER_SILENCE = 0.5
+
+-- Tick inventory, money, quest, and spec-list timeouts for the whisper path
+-- (silence = collection done)
 local invTickFrame = CreateFrame("Frame")
 invTickFrame:SetScript("OnUpdate", function(self, dt)
     for key, entry in pairs(CleanBot_PartyBots) do
+        if entry.awaitingSpecList then
+            entry.specListTimeout = (entry.specListTimeout or 0) + dt
+            if entry.specListTimeout >= NS.WHISPER_SILENCE then
+                CB_FinalizeSpecList(key, entry)
+            end
+        end
+
         if entry.awaitingQuests then
             entry.questTimeout = (entry.questTimeout or 0) + dt
-            if entry.questTimeout >= 3 then
+            if entry.questTimeout >= NS.WHISPER_SILENCE then
                 CB_FinalizeQuestCollection(key, entry)
             end
         end
 
         if entry.awaitingInventory then
             entry.invTimeout = (entry.invTimeout or 0) + dt
-            if entry.invTimeout >= 3 then
+            if entry.invTimeout >= NS.WHISPER_SILENCE then
                 entry.awaitingInventory = false
                 entry.invTimeout        = 0
 
@@ -359,7 +479,7 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
 
         if entry.awaitingMoney then
             entry.moneyTimeout = (entry.moneyTimeout or 0) + dt
-            if entry.moneyTimeout >= 3 then
+            if entry.moneyTimeout >= NS.WHISPER_SILENCE then
                 entry.awaitingMoney  = false
                 entry.moneyTimeout   = 0
             end
@@ -382,8 +502,15 @@ NS.CB_FetchInventory = function(key, botName)
     -- (or by the silence-timeout tick below as a safety net).
     entry.awaitingInventory = true
     entry.invTimeout        = 0
+
+    -- Overlay policy: always for a first (empty) load, but for a refresh of an
+    -- already-rendered grid only on the whisper path — bridge refreshes are
+    -- near-instant, so a "Refreshing..." flash there is distracting noise.
+    -- CB_RenderInventory consults this flag when reflecting the in-flight state.
     local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
-    if invF and invF:IsShown() and NS.CB_SetInventoryLoading then
+    entry.invOverlay = (not (invF and invF.rendered))
+        or CB_EffectiveBridgeState() ~= "present"
+    if invF and invF:IsShown() and entry.invOverlay and NS.CB_SetInventoryLoading then
         NS.CB_SetInventoryLoading(invF, true)
     end
 
@@ -468,6 +595,8 @@ local function CB_StartBridgeDetection()
         NS.loginPhaseActive = false   -- login gate lifted regardless of outcome
         if NS.bridgeState == "unknown" then
             NS.bridgeState = "absent"
+            -- Keep the Debug tab's "Auto (<state>)" label current.
+            if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
 
             -- Flush bots that said "Hello!" during detection (fresh login path).
             -- CB_ProbePartyForBots is now unblocked for mid-session joins.
@@ -529,6 +658,22 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     NS.awaitingProbe[key] = true
                     NS.CB_SendBotCommand(sender, "co ?")
                 end
+            end
+            return
+        end
+
+        -- Spec-list collection: reply lines from "talents spec list", one premade
+        -- per line, e.g. "1. arms pve (51-0-20)". Non-matching lines (headers etc.)
+        -- are ignored but still reset the silence timeout. Finalized by the 2s
+        -- silence tick in invTickFrame (CB_FinalizeSpecList).
+        if entry and entry.awaitingSpecList then
+            entry.specListTimeout = 0
+            local name, t1, t2, t3 = msg:match("^%s*%d+%.%s+(.-)%s+%((%d+)%-(%d+)%-(%d+)%)%s*$")
+            if name and entry.specListStaging then
+                entry.specListStaging[#entry.specListStaging + 1] = {
+                    name = name,
+                    t    = { tonumber(t1), tonumber(t2), tonumber(t3) },
+                }
             end
             return
         end
@@ -620,8 +765,13 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 entry.class = NS.CB_ResolveClass(sender, entry.class)
                 NS.CB_StoreCombat(entry, msg)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
-                entry.awaitingNc = true
-                NS.CB_SendBotCommand(entry.name, "nc ?")
+                if entry.coVerifyOnly then
+                    -- Combined "co +x,?" verify: consume only the combat reply.
+                    entry.coVerifyOnly = nil
+                else
+                    entry.awaitingNc = true
+                    NS.CB_SendBotCommand(entry.name, "nc ?")
+                end
             elseif entry.awaitingNc then
                 entry.awaitingNc = false
                 NS.CB_StoreNonCombat(entry, msg)
@@ -662,6 +812,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.bridgeDetecting  = false
                 NS.loginPhaseActive = false  -- bridge handles discovery; no Hello! gating needed
                 NS.pendingHello     = {}
+                -- Keep the Debug tab's "Auto (<state>)" label current.
+                if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
                 CB_BridgeRequest()
                 NS.CleanBot_FetchLinkedAccounts()
             end
@@ -876,10 +1028,15 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "UNIT_INVENTORY_CHANGED" then
+        -- Re-inspect ONLY the currently-viewed bot. Bots re-gear themselves
+        -- constantly (looting, auto-equip), so reacting for every bound bot
+        -- burns the ~6/10s NotifyInspect throttle and evicts the viewed bot's
+        -- single-unit inspect cache — non-viewed bots get fresh data anyway
+        -- when selected (SelectBot inspects on every selection).
         local unit = ...
         if unit and NS.tabList and NS.CB_QueueEquipRefresh then
             for _, info in ipairs(NS.tabList) do
-                if info.unit == unit then
+                if info.unit == unit and info.key == NS.selectedBotKey then
                     NS.CB_QueueEquipRefresh({{ key = info.key, unit = unit }})
                     break
                 end
@@ -910,6 +1067,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
         NS.bridgeDetecting  = false
+        -- Keep the Debug tab's "Auto (<state>)" label current.
+        if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
         NS.probed           = {}
         NS.awaitingProbe    = {}
         CleanBot_PartyBots  = {}

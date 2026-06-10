@@ -62,6 +62,9 @@ btn:SetScript("OnEnter", function(self)
     if NS.debugSimulate then
         GameTooltip:AddLine("|cff888888Simulate mode: ON|r")
     end
+    if NS.debugVerify then
+        GameTooltip:AddLine("|cff888888Strategy verify logging: ON|r")
+    end
 
     GameTooltip:Show()
 end)
