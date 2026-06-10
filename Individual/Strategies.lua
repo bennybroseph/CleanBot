@@ -25,9 +25,14 @@ NS.STRATEGIES = {
         column     = "left",
         type       = "roleDropdown",
         strategies = {
-            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities" },
+            -- cmdByClass: classes that implement the role under a different token.
+            -- Druid/DK have no literal "tank" rotation token — they tank via their
+            -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
+            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
+              cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
             { cmd = "dps assist", field = "isDPS",    name = "DPS",    desc = "Use DPS abilities" },
-            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing" },
+            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing",
+              cmdByClass = { DRUID = "resto" } },
         },
         subGroups = {
             { field = "isTank",   header = "Tank",    strategies = {
@@ -87,6 +92,48 @@ NS.STRATEGIES = {
     },
 }
 
+-- ============================================================
+-- Per-class registration of the gap-prone generic/role tokens.
+-- Verified against each src/Ai/Class/<Class>/<Class>AiObjectContext.cpp strategy
+-- factory (see docs/playerbot-strategies.md). A token absent from this table is
+-- registered by every class (generic StrategyContext) and is always shown. A class
+-- that implements a concept under a different token is covered by the strategy's
+-- cmdByClass override instead (e.g. druid "heal" → "resto"), not listed here.
+-- Sets keyed by class token for O(1) lookup.
+-- ============================================================
+NS.STRATEGY_CLASS_SUPPORT = {
+    ["tank"]       = { WARRIOR=true, PALADIN=true, WARLOCK=true, DRUID=true, DEATHKNIGHT=true },
+    ["heal"]       = { PALADIN=true, PRIEST=true, SHAMAN=true },
+    ["pull"]       = { WARRIOR=true, PALADIN=true, ROGUE=true, PRIEST=true, MAGE=true, WARLOCK=true, DRUID=true, DEATHKNIGHT=true },
+    ["aoe"]        = { WARRIOR=true, HUNTER=true, ROGUE=true, PRIEST=true, SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true },
+    ["healer dps"] = { PALADIN=true, PRIEST=true, SHAMAN=true, DRUID=true },
+    ["cc"]         = { PALADIN=true, HUNTER=true, ROGUE=true, PRIEST=true, MAGE=true, WARLOCK=true, DRUID=true },
+    ["boost"]      = { PALADIN=true, ROGUE=true, PRIEST=true, SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true },
+}
+
+-- Effective send/parse token for a strategy on a given class: the cmdByClass
+-- override when one exists for that class, else the base cmd.
+---@param s     table    Strategy definition { cmd, field, [cmdByClass] }.
+---@param class string?  Class token (e.g. "DRUID"); nil → base cmd.
+---@return string        The token to send / expect in the reply.
+NS.CB_EffStrategyCmd = function(s, class)
+    return (class and s.cmdByClass and s.cmdByClass[class]) or s.cmd
+end
+
+-- Whether a strategy entry should be shown for a class. Shown when: the class has a
+-- cmdByClass override (we know which token works), OR the token has no coverage gaps
+-- (absent from STRATEGY_CLASS_SUPPORT), OR the class is in the token's support set.
+---@param s     table    Strategy definition.
+---@param class string?  Class token; nil → always shown.
+---@return boolean
+NS.CB_StrategyShown = function(s, class)
+    if not class then return true end
+    if s.cmdByClass and s.cmdByClass[class] then return true end
+    local sup = NS.STRATEGY_CLASS_SUPPORT[s.cmd]
+    if not sup then return true end
+    return sup[class] == true
+end
+
 NS.STRATEGY_MAP        = {}
 NS.ROLE_STRATEGIES     = {}
 NS.TANK_STRATEGIES     = {}
@@ -107,16 +154,25 @@ do
         isDPS    = NS.DPS_STRATEGIES,
         isHealer = NS.HEAL_STRATEGIES,
     }
+    -- Map a strategy's base cmd AND every per-class override token to its field, so
+    -- the co? reply parser recognizes whichever token a class actually reports
+    -- (e.g. a druid healer reports "resto", a DK tank reports "blood").
+    local function mapTokens(s)
+        NS.STRATEGY_MAP[s.cmd] = s.field
+        if s.cmdByClass then
+            for _, alt in pairs(s.cmdByClass) do NS.STRATEGY_MAP[alt] = s.field end
+        end
+    end
     for _, grp in ipairs(NS.STRATEGIES) do
         for _, s in ipairs(grp.strategies) do
-            NS.STRATEGY_MAP[s.cmd] = s.field
+            mapTokens(s)
             local t = groupToTable[grp.group]
             if t then t[#t + 1] = s end
         end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
                 for _, s in ipairs(sg.strategies) do
-                    NS.STRATEGY_MAP[s.cmd] = s.field
+                    mapTokens(s)
                     local t = subFieldToTable[sg.field]
                     if t then t[#t + 1] = s end
                 end

@@ -114,13 +114,13 @@ NS.CLASS_STRATEGIES = {
                 header = "Blessings",
                 type   = "dropdown",
                 strategies = {
-                    { cmd = "bdps",    field = "bdps",    name = "Blessing of Might",
+                    { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
-                    { cmd = "bmana",   field = "bmana",   name = "Blessing of Wisdom",
+                    { cmd = "bwisdom", field = "bwisdom", name = "Blessing of Wisdom",
                       desc = "Apply Blessing of Wisdom to party members" },
-                    { cmd = "bstats",  field = "bstats",  name = "Blessing of Kings",
+                    { cmd = "bkings",  field = "bkings",  name = "Blessing of Kings",
                       desc = "Apply Blessing of Kings to party members" },
-                    { cmd = "bhealth", field = "bhealth", name = "Blessing of Sanctuary",
+                    { cmd = "bsanc",   field = "bsanc",   name = "Blessing of Sanctuary",
                       desc = "Apply Blessing of Sanctuary to party members" },
                 },
             },
@@ -185,8 +185,9 @@ NS.CLASS_STRATEGIES = {
                 strategies = {
                     { cmd = "bdps",    field = "bdps",    name = "Aspect of the Hawk",
                       desc = "Maintain Aspect of the Hawk for maximum ranged attack power" },
-                    { cmd = "bmana",   field = "bmana",   name = "Aspect of the Viper",
-                      desc = "Maintain Aspect of the Viper for mana regeneration" },
+                    -- Aspect of the Viper omitted: mod-playerbots' Hunter registers no
+                    -- strategy token for it (only bdps/bspeed/rnature) — Viper swapping is
+                    -- handled automatically by the bot's mana logic, not toggleable here.
                     { cmd = "bspeed",  field = "bspeed",  name = "Aspect of the Pack",
                       desc = "Maintain Aspect of the Pack/Cheetah for movement speed" },
                     { cmd = "rnature", field = "rnature", name = "Aspect of the Wild",

@@ -148,7 +148,12 @@ NS.botRegistries = {
 -- ============================================================
 -- Geometry helper — single source of truth for layout constants
 -- ============================================================
----@return table  Layout geometry (slot sizes, gaps, column widths) from the live model size.
+-- Layout geometry derived from the live model size.
+---@return number contentW  Content area width.
+---@return number contentH  Content area height.
+---@return number modelH     Model height.
+---@return number colW       Equip column width.
+---@return number modelW      Model width.
 local function CB_GetGeometry()
     local contentW = NS.individualContent and NS.individualContent:GetWidth()  or 0
     local contentH = NS.individualContent and NS.individualContent:GetHeight() or 0
@@ -305,7 +310,7 @@ local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, 
     local expect = {}
     for _, rs in ipairs(strategies) do
         local on = (rs.field == selectedField)
-        parts[#parts + 1] = (on and "+" or "-") .. rs.cmd
+        parts[#parts + 1] = (on and "+" or "-") .. NS.CB_EffStrategyCmd(rs, slot.class)
         expect[rs.field] = on
     end
     if dataTable then
@@ -331,7 +336,7 @@ end
 ---@param tag        string  Disambiguating tag for frame names.
 ---@param gi         number  Group index within the column.
 ---@param registry   table   Widget registry the created controls register into.
----@param getSource  fun()   Returns the state table the controls read/write.
+---@param getSource  fun(entry:table):table?  Returns the state table the controls read/write.
 ---@return table             The bottommost widget of the built group.
 local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, registry, getSource)
     local strategies  = group.strategies
@@ -443,6 +448,19 @@ end
 -- getSource = function(entry) -> mutable data table to read/write
 -- startGi   = first group index to process (used to skip spec group on left col)
 -- ============================================================
+-- Filters a strategy list to the entries shown for a class (NS.CB_StrategyShown),
+-- hiding tokens the bot's class doesn't register (e.g. cc/boost on a warrior).
+---@param list  table    Strategy definitions.
+---@param class string?  Class token.
+---@return table         A new list containing only the shown entries.
+local function CB_ShownStrategies(list, class)
+    local out = {}
+    for _, s in ipairs(list) do
+        if NS.CB_StrategyShown(s, class) then out[#out + 1] = s end
+    end
+    return out
+end
+
 ---@param col       table   The column frame to build into.
 ---@param groups    table   Array of group definitions for this column.
 ---@param cmd       string  Bot command prefix for the column's toggles.
@@ -450,8 +468,7 @@ end
 ---@param tag       string  Disambiguating tag for frame names.
 ---@param startGi   number  Group index of the first group in this column.
 ---@param registry  table   Widget registry the created controls register into.
----@param getSource fun()   Returns the state table the controls read/write.
----@return table            The bottommost widget of the built column.
+---@param getSource fun(entry:table):table?  Returns the state table the controls read/write.
 local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, registry, getSource)
     local entry      = CleanBot_PartyBots[slot.key]
     local prevBottom = nil
@@ -465,7 +482,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
 
         elseif group.type == "roleDropdown" then
             -- Exclusive dropdown that also shows/hides per-role sub-sections.
-            local strategies = group.strategies
+            -- Roles the bot's class can't perform are filtered out (e.g. a priest
+            -- has no Tank role token).
+            local strategies = CB_ShownStrategies(group.strategies, slot.class)
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
             else header:SetPoint("TOPLEFT", col, "TOPLEFT",
@@ -491,18 +510,19 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local maxSubH     = 0
             local initSrc     = getSource(entry) or {}
             for _, sg in ipairs(group.subGroups) do
-                local sec, cbs = CB_BuildStrategySection(col, ddAnchor, sg.strategies, slot, tag,
+                local sgStrats = CB_ShownStrategies(sg.strategies, slot.class)
+                local sec, cbs = CB_BuildStrategySection(col, ddAnchor, sgStrats, slot, tag,
                     function(s, checked)
-                        local toggle = (checked and "+" or "-") .. s.cmd
+                        local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, slot.class)
                         local ds = getSource(CleanBot_PartyBots[slot.key])
                         if ds then ds[s.field] = checked end
                         NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
                     end,
                     initSrc)
                 sec:Hide()
-                subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sg.strategies }
+                subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sgStrats }
                 local sectionH = NS.PADDING.section.top
-                    + #sg.strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom)
+                    + #sgStrats * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom)
                     + NS.PADDING.section.bottom
                 maxSubH = math.max(maxSubH, sectionH)
             end
@@ -602,16 +622,18 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             prevBottom = dd
 
         else
-            -- Checkbox group
+            -- Checkbox group — drop entries the bot's class doesn't register
+            -- (e.g. cc/boost on a warrior).
+            local groupStrats = CB_ShownStrategies(group.strategies, slot.class)
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
             else header:SetPoint("TOPLEFT", col, "TOPLEFT",
                 (col.paddingLeft or 0) + (header.marginLeft or 0),
                 -((col.paddingTop or 0) + (header.marginTop  or 0))) end
 
-            local section, checkboxes = CB_BuildStrategySection(col, header, group.strategies, slot, tag,
+            local section, checkboxes = CB_BuildStrategySection(col, header, groupStrats, slot, tag,
                 function(s, checked)
-                    local toggle = (checked and "+" or "-") .. s.cmd
+                    local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, slot.class)
                     local ds = getSource(CleanBot_PartyBots[slot.key])
                     if ds then ds[s.field] = checked end
                     NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
@@ -619,7 +641,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 getSource(entry))
             section:Show()
             if registry then
-                registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = group.strategies, getSource = getSource }
+                registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = groupStrats, getSource = getSource }
             end
             prevBottom = section
         end
@@ -692,7 +714,7 @@ end
 ---@param slot      table   The bound slot (resolves the live bot).
 ---@param tag       string  Disambiguating tag for frame names.
 ---@param registry  table   Widget registry the created controls register into.
----@param getSource fun()   Returns the state table the controls read/write.
+---@param getSource fun(entry:table):table?  Returns the state table the controls read/write.
 local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry, getSource)
     local leftGroups, rightGroups = {}, {}
     for _, grp in ipairs(groups) do
