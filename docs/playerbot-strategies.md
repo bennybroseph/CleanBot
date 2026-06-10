@@ -33,6 +33,39 @@ This is a reference, not a roadmap — nothing here is committed work.
 
 ---
 
+## Default strategy loadout
+
+What a fresh bot runs before any `co`/`nc` edit, from `AiFactory.cpp`
+(`AddDefaultCombatStrategies` L274, `AddDefaultNonCombatStrategies` L496,
+`AddDefaultDeadStrategies` L717). `PlayerbotAI::ResetStrategies` wipes and reapplies these.
+Spec branches key off the talent tab (`GetPlayerSpecTab`). This is why several CleanBot
+toggles read as **on** the moment a bot is queried.
+
+**Combat (`co`) — every class, non-BG:** `racials`, `chat`, `default`, `cast time`,
+`potions`, `duel`, `boost`; plus `formation` always; `avoid aoe` when
+`AiPlayerbot.AutoAvoidAoe` and the bot has a real-player master. Then role-conditional:
+`tank face` (tanks), `behind` (melee DPS), `save mana` + `healer dps` (healers, config-gated).
+**No movement strategy by default** — in-combat movement is `close`/`ranged` + the spec.
+Per spec (representative): Warrior prot → `tank tank assist pull pull back aoe`, arms/fury →
+`arms|fury aoe dps assist`; Priest shadow → `dps shadow debuff shadow aoe` (+`dps assist cure`),
+disc → `heal`, holy → `holy heal`; Mage → spec + `bdps|bmana` + `dps dps assist cure cc aoe`;
+Paladin prot → `tank tank assist pull pull back bthreat barmor cure`; Druid feral-cat →
+`cat aoe cc dps assist feral charge`, bear → `bear tank assist pull pull back feral charge`;
+DK blood → `blood tank assist pull pull back`, frost/unholy → `frost|unholy + *aoe + dps assist`;
+Hunter → `bm|mm|surv` + `cc dps assist aoe bdps`; Rogue → `melee|dps dps assist aoe`;
+Warlock → `affli|demo|destro` + a curse (+`meta melee` for demo) + `cc dps assist aoe`;
+Shaman → `ele|enh|resto` + totems + `dps assist cure aoe`.
+
+**Non-combat (`nc`) — every class, non-BG:** `nc`, `food`, `chat`, **`follow`**, `default`,
+`quest`, `loot`, `gather`, `duel`, `pvp`, `buff`, `mount`, `emote`. So **Follow, Eat & Drink,
+Auto Loot, Auto Gather, Enable PvP** are all **on by default**. Plus per-class `dps assist` /
+`tank assist` + class buffs/cures/pet (e.g. Hunter `bdps dps assist pet`; Paladin prot adds
+`bsanc` at L20+, else `bmight`).
+
+**Dead:** `dead`, `stay`, `chat`, `default`, `follow` (`follow` dropped for solo random bots).
+
+---
+
 ## Generic strategies (StrategyContext.h — available to every class)
 
 ### Targeting & assist
@@ -41,7 +74,7 @@ This is a reference, not a roadmap — nothing here is committed work.
 |---|---|---|
 | `tank assist` | ✅ | Trigger `"tank assist"` → peel mobs off non-tanks @ 50. |
 | `dps assist` | ✅ | `"not dps target active"` → attack the group's DPS target @ 50. |
-| `dps aoe` | ⬜ | `"not dps aoe target active"` → pick a multi-mob cluster target @ 50. The AoE *target picker* — distinct from the class `aoe` rotation strategies. |
+| `dps aoe` | ✅ | `"not dps aoe target active"` → `DpsAoeTargetValue`: honors RTI/skull, then picks the **highest-HP attacker** (`FindMaxHpTargetStrategy`) to anchor on while the class AoE rotation cleaves. The AoE *target picker* — distinct from the class `aoe` *rotation*. Exposed as the **DPS (AoE)** Role option. |
 | `attack tagged` | ⬜ | Allows attacking mobs tagged by other players. |
 | `tell target` | ⬜ | Announces target changes in chat. |
 | `focus heal targets` | ⬜ | Restricts healing to an explicit focus list. |
@@ -106,15 +139,30 @@ throw/gun/bow/crossbow from the equipped ranged weapon.)
 
 ### Movement modes (also set by the one-shot commands)
 
+These five live in `MovementStrategyContext`, built `NamedObjectContext<Strategy>(false, true)`
+→ `supportsSiblings = true`, so they are **mutually exclusive**: `Engine::addStrategy` calls
+`GetSiblingStrategy` and removes the other four before adding one (`src/Bot/Engine/Engine.cpp`,
+`NamedObjectContext.h`). Exclusivity is **per state engine**, and the two states genuinely
+differ: a fresh bot has `follow` in its **non-combat** defaults only
+(`AiFactory::AddDefaultNonCombatStrategies`, `AiFactory.cpp:575`) — the combat list has no
+movement strategy by default (combat positioning `close`/`ranged`/`kite` drives it) — but the
+combat engine *does* act on movement when set (`PlayerbotAI::ChangeEngineOnCombat` snapshots a
+combat-`stay` hold position). CleanBot therefore exposes **two** exclusive dropdowns:
+**Non-Combat Movement** (Non-Combat tab, default Follow) and **Combat Movement** (Combat tab,
+default Free Roam), each with a **Free Roam** entry that clears all five for that state.
+
 | Token | Status | What the source does |
 |---|---|---|
-| `follow` | ⬜ | Follow the master (FollowMasterStrategy). |
-| `stay` | ⬜ | Hold position. |
-| `guard` | ⬜ | Guard a spot — engage what comes, return after. |
-| `runaway` | ⬜ | Keep distance from enemies generally. |
-| `flee from adds` | ⬜ | Flee specifically from add packs. |
-| `return` | ⬜ | Return to the master after straying. |
+| `follow` | ✅ | Follow the master (FollowMasterStrategy). |
+| `stay` | ✅ | Hold position. |
+| `guard` | ✅ | Guard a spot — engage what comes, return after. |
+| `runaway` | ✅ | Keep distance from enemies generally. |
+| `flee from adds` | ✅ | Flee specifically from add packs. |
+| `return` | ⬜ | Return to the master after straying (one-shot action, not in the exclusive group). |
 | `flee` | ⬜ | One-shot flee behavior (also an action other strategies invoke). |
+
+The same `supportsSiblings` mechanism makes the **assist** group (`dps assist` / `dps aoe` /
+`tank assist`) and the **quest** group (`quest` / `accept all quests`) mutually exclusive too.
 
 ### World / system (mostly managed by the server or other commands)
 
@@ -257,13 +305,30 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   etc. report). Druid used the fictional `melee`/`caster`/`heal` tokens it never
   registers, so it never matched — now corrected to the real reported tokens
   `bear`/`cat`/`balance`/`resto` (`ClassData.lua`).
-- **`aoe` vs `dps aoe`:** CleanBot's "AoE — target many mobs" sends the class `aoe`
-  token, which is the AoE *rotation*; the AoE *target picker* is the generic
-  `dps aoe`, unused. Enabling both is the coherent combo.
+- **`aoe` vs `dps aoe` (implemented).** The Role dropdown now offers **DPS (Single)**
+  (`dps assist`) and **DPS (AoE)** (`dps aoe`) — the mutually-exclusive *target pickers* —
+  as two roles sharing one DPS sub-section (`roles` on the subgroup → `roleToSection` in
+  `Individual.lua`). The sub-section's class-rotation checkbox is relabeled **"AoE Rotation"**
+  (`aoe`) to distinguish it from the targeting choice. A full AoE bot = **DPS (AoE)** role +
+  **AoE Rotation** checked.
 - **Conflict guardrails** worth considering: warn (or auto-exclusive) on
   `focus` ↔ `aoe`, `threat` ↔ Tank role, `close` ↔ `ranged`.
-- Useful unexposed candidates: `cast time`, `dps aoe`, `formation`, `kite`,
-  `potions`, `collision`, `mount`, the movement modes, Shaman resistance totems
+- **Default seeds aligned (implemented).** `CB_DefaultCombat`/`CB_DefaultNonCombat`
+  (`Strategies.lua`) seed the server's *unconditional* defaults so a freshly discovered bot
+  shows correct state before its first reply: Non-Combat Movement = Follow, plus
+  `Eat & Drink` / `Auto Loot` / `Auto Gather` / `Enable PvP` (nc) and `Use Cooldowns` (combat)
+  on. Spec/config-gated defaults (avoid aoe, save mana, role, class buffs) are intentionally
+  left off and corrected by the authoritative `co?`/`nc?` reply. Declarative via a strategy's
+  `default = true` or a group's `defaultField`.
+- **Movement modes (implemented).** Two exclusive `dropdown` groups with
+  `noneLabel = "Free Roam"` (`NS.MOVEMENT_STRATEGIES` shared in `Strategies.lua`):
+  **Non-Combat Movement** (writes/reads the `nc` list, default Follow) and **Combat
+  Movement** (writes/reads the `co` list, default Free Roam). Each is a normal single-state
+  exclusive dropdown (reuses `CB_ApplyExclusiveSelection`); the `noneLabel` clear entry =
+  nil selection drops all five. (The Paladin Blessings dropdowns use the same `noneLabel`
+  mechanism with `"None"`.)
+- Useful unexposed candidates: `cast time`, `formation`, `kite`,
+  `potions`, `collision`, `mount`, Shaman resistance totems
   (`frost resistance` / `fire resistance` / `nature resistance`).
 
 ---
@@ -284,5 +349,11 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
 - Non-combat: `NonCombatStrategy.cpp/.h`, `UseFoodStrategy.cpp`,
   `LootNonCombatStrategy.cpp`
 - Threat math: `src/Ai/Base/Value/ThreatValues.cpp`
+- Strategy-context exclusivity (`supportsSiblings`): `src/Bot/Engine/NamedObjectContext.h`,
+  `Engine::addStrategy` in `src/Bot/Engine/Engine.cpp`
+- Default loadout per state/spec: `src/Bot/Factory/AiFactory.cpp`
+  (`AddDefaultCombatStrategies` / `AddDefaultNonCombatStrategies` / `AddDefaultDeadStrategies`),
+  applied by `PlayerbotAI::ResetStrategies`; combat-`stay` position snapshot in
+  `PlayerbotAI::ChangeEngineOnCombat`
 - Class registries: `src/Ai/Class/<Class>/<Class>AiObjectContext.cpp`
 - CleanBot's sent tokens: `Individual/Strategies.lua`, `Individual/ClassData.lua`

@@ -111,8 +111,9 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Blessings",
-                type   = "dropdown",
+                header    = "Blessings (Combat)",
+                type      = "dropdown",
+                noneLabel = "None",   -- clears all blessings (no upkeep — saves mana)
                 strategies = {
                     { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
@@ -144,6 +145,24 @@ NS.CLASS_STRATEGIES = {
                       desc = "Emit Frost Resistance Aura" },
                     { cmd = "rshadow", field = "rshadow", name = "Shadow Resist Aura",
                       desc = "Emit Shadow Resistance Aura" },
+                },
+            },
+            {
+                -- Paladins maintain blessings in BOTH states (the nc list is where the
+                -- default blessing lives — AiFactory::AddDefaultNonCombatStrategies).
+                -- "None" clears all blessings so the bot stops spending mana on upkeep.
+                header    = "Blessings (Out of Combat)",
+                type      = "dropdown",
+                noneLabel = "None",
+                strategies = {
+                    { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
+                      desc = "Apply Blessing of Might to party members" },
+                    { cmd = "bwisdom", field = "bwisdom", name = "Blessing of Wisdom",
+                      desc = "Apply Blessing of Wisdom to party members" },
+                    { cmd = "bkings",  field = "bkings",  name = "Blessing of Kings",
+                      desc = "Apply Blessing of Kings to party members" },
+                    { cmd = "bsanc",   field = "bsanc",   name = "Blessing of Sanctuary",
+                      desc = "Apply Blessing of Sanctuary to party members" },
                 },
             },
         },
