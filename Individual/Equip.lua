@@ -373,6 +373,13 @@ NS.CB_CreateEquipSlots = function(slot, model)
     end)
     bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- ── XP bar — spans the weapon row, just below it ──────────
+    -- Anchored across the three weapon slots (Main Hand → Ranged) so it stays
+    -- inside the weapon-row footprint rather than the full model width.
+    slot.xpBar = NS.CB_CreateXPBar(model)
+    slot.xpBar:SetPoint("TOPLEFT",  slot.equipSlots[16], "BOTTOMLEFT",  0, -gapYBot)
+    slot.xpBar:SetPoint("TOPRIGHT", slot.equipSlots[18], "BOTTOMRIGHT", 0, -gapYBot)
+
     NS.CB_CreateQuestButton(slot, model, slotSize)
 end
 
@@ -554,6 +561,62 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 slot.model:SetUnit(unit)
                 break
             end
+        end
+    end
+end
+
+-- ── XP bar refresh ────────────────────────────────────────────────────────
+-- Paints a slot's XP bar from the bot's level (UnitLevel — free, client-side)
+-- and entry.xpPercent ("cur/rest" percentages from the "stats" reply). At max
+-- level there is no XP, so the bar shows full with a "Max" label. Before the
+-- stats reply lands (xpPercent nil) the bar reads empty with just the level.
+---@param slot table  A live paperdoll slot (has .xpBar, .unit, .key).
+NS.CB_RefreshXPBar = function(slot)
+    local xp = slot and slot.xpBar
+    if not xp then return end
+
+    local level    = (slot.unit and UnitExists(slot.unit)) and UnitLevel(slot.unit) or nil
+    local maxLevel = MAX_PLAYER_LEVEL or 80
+
+    if level and level >= maxLevel then
+        xp.rested:Hide()
+        xp.fill:SetValue(100)
+        xp.label:SetText("Max")
+        xp.tooltipText = "Max level (" .. level .. ")"
+        return
+    end
+
+    xp.rested:Show()
+    xp.label:SetText(level and level > 0 and tostring(level) or "")
+
+    local entry = slot.key and CleanBot_PartyBots[slot.key]
+    local cur, rest
+    if entry and entry.xpPercent then
+        cur, rest = entry.xpPercent:match("(%d+)/(%d+)")
+        cur  = tonumber(cur)
+        rest = tonumber(rest)
+    end
+
+    if cur then
+        xp.fill:SetValue(cur)
+        xp.rested:SetValue(math.min(cur + (rest or 0), 100))
+        xp.tooltipText = cur .. "% into level \194\183 " .. (rest or 0) .. "% rested"
+    else
+        -- No stats reply yet — empty bar, level label only.
+        xp.fill:SetValue(0)
+        xp.rested:SetValue(0)
+        xp.tooltipText = nil
+    end
+end
+
+-- Key-based convenience: refreshes the XP bar of the live slot for a bot, if any.
+-- Used by the stats-reply handler (Bridge.lua) which only knows the bot's key.
+---@param key string  Bot name-key (lowercased lookup key).
+NS.CB_RefreshXPBarForKey = function(key)
+    for _, slot in ipairs(NS.tabList or {}) do
+        if slot.key == key then
+            NS.CB_RefreshXPBar(slot)
+            return
         end
     end
 end

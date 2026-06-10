@@ -463,9 +463,7 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                         entry.inventory.items = entry.invStaging or {}
                     end
                     entry.invStaging     = nil
-                    entry.awaitingMoney  = true
-                    entry.moneyTimeout   = 0
-                    SendChatMessage("stats", "WHISPER", nil, entry.name)
+                    NS.CB_FetchStats(entry)
                 end
 
                 local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
@@ -527,6 +525,20 @@ NS.CB_FetchInventory = function(key, botName)
         entry.invStaging        = {}
         NS.CB_SendBotCommand(botName, "items")
     end
+end
+
+-- Fetches a bot's "stats" reply (money, bag totals, durability, XP). The reply is
+-- parsed in the awaitingMoney branch of CHAT_MSG_WHISPER (below). "stats" is a query,
+-- so it always whispers (never allowlisted) and the reply returns via CHAT_MSG_WHISPER
+-- regardless of CB_EffectiveBridgeState() — no override gating needed. This is the
+-- single source of truth for the "stats" whisper: the inventory-finalize tick and the
+-- on-demand XP-bar fetch both route through here.
+---@param entry table  The CleanBot_PartyBots entry to refresh.
+NS.CB_FetchStats = function(entry)
+    if not entry or not entry.name then return end
+    entry.awaitingMoney = true
+    entry.moneyTimeout  = 0
+    SendChatMessage("stats", "WHISPER", nil, entry.name)
 end
 
 ---@param key     string  Bot name-key (lowercased lookup key).
@@ -730,6 +742,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
             local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
             if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
+
+            -- XP just landed — repaint the paperdoll XP bar if this bot is live.
+            if NS.CB_RefreshXPBarForKey then NS.CB_RefreshXPBarForKey(strlower(sender)) end
             return
         end
 
