@@ -498,9 +498,11 @@ end
 NS.CB_RefreshEquipSlots = function(key, unit)
     local slots = NS.botEquipSlots and NS.botEquipSlots[key]
     if not slots then return end
+    local gearChanged = false   -- any slot's item actually changed this refresh
     for slotId, btn in pairs(slots) do
         local itemTex  = GetInventoryItemTexture(unit, slotId)
         local itemLink = GetInventoryItemLink(unit, slotId)
+        local hadLink  = btn.itemLink
         if itemTex then
             -- Staleness guard: right after an equip the inspect data's TEXTURE
             -- updates immediately but the LINK lags a few seconds, so a link-derived
@@ -516,6 +518,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 btn.icon:Show()
                 if btn.bg then btn.bg:Hide() end
                 btn.itemLink = itemLink
+                if itemLink ~= hadLink then gearChanged = true end
                 -- Clear on unknown quality rather than skipping, so a GetItemInfo
                 -- cache miss can't leave the previous item's border colour behind.
                 local quality = select(3, GetItemInfo(itemLink))
@@ -536,15 +539,21 @@ NS.CB_RefreshEquipSlots = function(key, unit)
             btn.icon:Hide()
             if btn.bg then btn.bg:Show() end
             btn.itemLink = nil
+            if hadLink then gearChanged = true end
             NS.CB_ClearQualityBorder(btn)
         end
     end
 
-    -- Refresh the model so it renders the updated equipment appearance
-    for _, slot in ipairs(NS.tabList or {}) do
-        if slot.key == key and slot.model and slot.model:IsShown() then
-            slot.model:SetUnit(unit)
-            break
+    -- Re-snapshot the model ONLY when an item actually changed this refresh.
+    -- SetUnit visibly flashes the model, and most refreshes (select re-inspects,
+    -- background UNIT_INVENTORY_CHANGED ticks, stale-link skips) are no-ops for
+    -- gear — flashing on each made the model blink several times per selection.
+    if gearChanged then
+        for _, slot in ipairs(NS.tabList or {}) do
+            if slot.key == key and slot.model and slot.model:IsShown() then
+                slot.model:SetUnit(unit)
+                break
+            end
         end
     end
 end
