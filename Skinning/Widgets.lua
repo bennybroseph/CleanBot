@@ -520,9 +520,11 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         rows[i] = row
     end
 
-    -- Multi-select: a click on empty list space (not on a visible row — hidden
-    -- rows don't consume clicks) clears the whole selection. Attached to both the
-    -- container and the scroll frame so it fires wherever the empty click lands.
+    -- Multi-select: a click on empty list space (not on a visible row) clears the
+    -- whole selection. The handler lives on the CONTAINER only — rows are children
+    -- above it, and the scroll frame is left mouse-disabled so empty clicks fall
+    -- through to the container. (Enabling mouse on the scroll frame makes it steal
+    -- clicks from the rows that sit over it, breaking row selection/hover.)
     if multiSelect then
         local function clearSelection()
             if not next(selectedSet) then return end
@@ -533,8 +535,6 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         end
         container:EnableMouse(true)
         container:HookScript("OnMouseUp", clearSelection)
-        sf:EnableMouse(true)
-        sf:SetScript("OnMouseUp", clearSelection)
     end
 
     -- Scrolling the bar (drag, wheel, or step buttons) re-maps the visible rows.
