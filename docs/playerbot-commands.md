@@ -40,6 +40,8 @@ Prefix operators on each strategy token:
 
 Strategy *names* are hardcoded in `Individual/ClassData.lua`/`Individual/Strategies.lua`. The `help` command
 returns the live list via `GetSupportedStrategies()` if dynamic discovery is ever wanted.
+The full strategy reference — what each token does, per-class coverage, and known
+conflicts — lives in [playerbot-strategies.md](playerbot-strategies.md).
 
 ### talents (`ChangeTalentsAction.cpp`)
 Usage string from source:

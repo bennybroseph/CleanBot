@@ -81,23 +81,24 @@ local equipMenu = CreateFrame("Frame", "CleanBotEquipMenu", UIParent, "UIDropDow
 local function CB_ShowEquipMenu(btn)
     if not btn.itemLink then return end
     UIDropDownMenu_Initialize(equipMenu, function()
-        local info = UIDropDownMenu_CreateInfo()
-
-        info.text         = "Unequip"
-        info.notCheckable = true
-        info.func         = function()
+        -- A fresh info table per button (UIDropDownMenu copies it on AddButton).
+        local unequip         = UIDropDownMenu_CreateInfo()
+        unequip.text         = "Unequip"
+        unequip.notCheckable = true
+        unequip.func         = function()
             local botName = btn.slot.name
             if not botName then return end
             NS.CB_SendBotCommand(botName, "ue " .. btn.itemLink)
         end
-        UIDropDownMenu_AddButton(info)
+        UIDropDownMenu_AddButton(unequip)
 
-        NS.CB_AddWowheadMenuButton(info, btn.itemLink)
+        NS.CB_AddWowheadMenuButton(UIDropDownMenu_CreateInfo(), btn.itemLink)
 
-        info.text         = "Close"
-        info.notCheckable = true
-        info.func         = function() CloseDropDownMenus() end
-        UIDropDownMenu_AddButton(info)
+        local close         = UIDropDownMenu_CreateInfo()
+        close.text         = "Close"
+        close.notCheckable = true
+        close.func         = function() CloseDropDownMenus() end
+        UIDropDownMenu_AddButton(close)
     end, "MENU")
     ToggleDropDownMenu(1, nil, equipMenu, btn, 0, 0)
 end

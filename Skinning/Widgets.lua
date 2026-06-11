@@ -246,24 +246,65 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     return section
 end
 
--- A bordered, scrollable list of selectable string rows.
+-- Inline-texture escape ("|T...|t") for embedding an icon inside any FontString
+-- (dropdown entries, the collapsed dropdown value, labels, tab text). The icon
+-- renders to the left of whatever text follows it, with no anchor work, in both
+-- ElvUI and Blizzard skins. `coords` are the 0-1 texcoord fractions
+-- {left,right,top,bottom}; converted to the texel units the escape expects using
+-- `texDim` (the source texture's pixel size). 3.3.5a's own FrameXML uses this
+-- extended form (e.g. LFGFrame.lua role icons).
+---@param path   string  Texture path.
+---@param size   number  Rendered icon size in pixels (square).
+---@param coords table   {left,right,top,bottom} in 0-1.
+---@param texDim number? Source texture pixel size for texel conversion (default 256).
+---@param yOff   number? Vertical pixel offset for baseline tuning (default 0).
+---@return string        The "|T...|t" escape string.
+NS.CB_InlineIcon = function(path, size, coords, texDim, yOff)
+    texDim = texDim or 256
+    return string.format("|T%s:%d:%d:0:%d:%d:%d:%d:%d:%d:%d|t",
+        path, size, size, yOff or 0, texDim, texDim,
+        coords[1] * texDim, coords[2] * texDim, coords[3] * texDim, coords[4] * texDim)
+end
+
+-- A bordered, scrollable list of selectable rows.
+--
+-- Items are plain strings, or tables for decorated rows:
+--   { text = "Label", value = "key", class = "WARRIOR"|nil, grey = boolean|nil,
+--     rightIcon = { texture = path, coords = {l,r,t,b} }|nil }
+-- class colors the label (RAID_CLASS_COLORS) and shows the class icon (left);
+-- grey renders the label 50% grey with no icon (e.g. a bot missing from the
+-- party/raid); rightIcon shows a texture right-aligned in the row (e.g. a role
+-- icon). String rows keep the template's default look.
 --
 -- Returns a container frame with the following API:
---   container:SetItems({"string", ...}) — populates rows; clears any previous selection.
---   container:GetSelected()             — returns the value of the currently selected row,
---                                         or nil if nothing is selected.
+--   container:SetItems(items)           — populates rows; clears any previous selection.
+--   container:GetSelected()             — returns the currently selected item (string or
+--                                         table), or nil if nothing is selected.
+--   container:SetSelectedValue(value)   — programmatic selection by row value; no onSelect.
+-- Multi-select mode (multiSelect = true) adds:
+--   container:GetSelectedValues()       — array of selected row values, in items order.
+--   container:SetSelectedValues(list)   — programmatic multi-selection; no callback.
+--   container:SelectAllValues()         — select every row; no callback.
 --
--- onSelect(value) is called whenever the user clicks a row.
+-- onSelect(value) fires on a single-select click (item.value, falling back to text).
+-- In multi-select mode it is the SELECTION-CHANGED handler: it fires (no argument
+-- needed — read GetSelectedValues) on user clicks and empty-area clicks, with
+-- Windows-style modifiers (plain = that row only, Ctrl = toggle, Shift = range).
 -- width / height size the visible container; rows scroll inside it.
 -- ElvUI skins the inner scroll bar when present.
----@param parent   table     Parent frame.
----@param name     string    Global name; sub-frames derive from it (name.."SF", etc.).
----@param width    number    Content area width (container is width + 20 for the scrollbar).
----@param height   number    Visible container height.
----@param onSelect fun(value:string)? Called with the row value on click.
----@return table             The container frame with SetItems / GetSelected methods.
-NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
+---@param parent     table     Parent frame.
+---@param name       string    Global name; sub-frames derive from it (name.."SF", etc.).
+---@param width      number    Content area width (container is width + 20 for the scrollbar).
+---@param height     number    Visible container height.
+---@param onSelect   fun(value:string?)? Click handler (single) / selection-changed (multi).
+---@param multiSelect boolean? Enable Windows-style multi-selection.
+---@param justifyH   string?  Row label justification ("LEFT" default, or "CENTER"/"RIGHT").
+---@return table               The container frame with the list API.
+NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSelect, justifyH)
     local ROW_H      = 20
+    -- Selection highlight opacity, dimmed slightly while the selected row is hovered.
+    local SEL_ALPHA       = 0.4
+    local SEL_HOVER_ALPHA = 0.25
     -- Number of physical row buttons that fit; scrolling remaps these onto the data
     -- rather than creating a button per item.
     local numVisible = math.max(1, math.floor((height - 4) / ROW_H))
@@ -276,9 +317,13 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     NS.CB_ApplyInnerSkin(container)
 
     -- Backing data and selection. selectedIndex is an ABSOLUTE index into `items`
-    -- so the highlighted entry survives scrolling and row recycling.
+    -- so the highlighted entry survives scrolling and row recycling. In multi mode
+    -- selection is a value-keyed set (survives SetItems/refresh like SetSelectedValue),
+    -- with anchorIndex marking the Shift-range origin.
     local items         = {}
     local selectedIndex = nil
+    local selectedSet   = {}    -- multi mode: [value] = true
+    local anchorIndex   = nil   -- multi mode: Shift-range anchor (absolute index)
 
     -- FauxScrollFrame inset 2px from the container walls; 20px right gap keeps the
     -- scrollbar (18px) plus a 2px mirror of the left inset inside the container border.
@@ -298,19 +343,89 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
     local rows = {}
 
+    -- The clickable value of an item: item.value (fallback item.text) for
+    -- table items, the string itself otherwise.
+    ---@param item string|table  A list item.
+    ---@return string            The value onSelect/SetSelectedValue match on.
+    local function itemValue(item)
+        if type(item) == "table" then return item.value or item.text end
+        return item
+    end
+
     -- Re-maps the fixed row pool onto items[offset+1 .. offset+numVisible] and
-    -- refreshes the FauxScrollFrame's scrollbar range.
+    -- refreshes the FauxScrollFrame's scrollbar range. Rows are recycled, so
+    -- every visual attribute (color, icon, label anchor) is reset on each pass
+    -- — a row that held a class-colored table item must not bleed its look
+    -- into the plain string item that lands on it next.
     local function refresh()
         local offset = FauxScrollFrame_GetOffset(sf)
         for i = 1, numVisible do
             local row     = rows[i]
             local dataIdx = i + offset
-            local value   = items[dataIdx]
-            if value then
+            local item    = items[dataIdx]
+            if item then
+                local isTable = type(item) == "table"
                 row.index = dataIdx
-                row.value = value
-                row.label:SetText(value)
-                row.hl:SetAlpha(dataIdx == selectedIndex and 0.4 or 0)
+                row.value = itemValue(item)
+                row.label:SetText(isTable and item.text or item)
+
+                -- Class icon only for class-decorated, present (non-grey) rows.
+                local showIcon = isTable and item.class and not item.grey
+                if showIcon then
+                    local coords = NS.CLASS_ICON_COORDS and NS.CLASS_ICON_COORDS[item.class]
+                    if coords then row.icon:SetTexCoord(unpack(coords)) end
+                    row.icon:Show()
+                else
+                    row.icon:Hide()
+                end
+                -- Right-aligned icon (e.g. a role icon); bounds the label so a
+                -- long name can't slide under it.
+                local rIcon = isTable and item.rightIcon
+                if rIcon then
+                    row.roleIcon:SetTexture(rIcon.texture)
+                    if rIcon.coords then row.roleIcon:SetTexCoord(unpack(rIcon.coords)) else row.roleIcon:SetTexCoord(0, 1, 0, 1) end
+                    row.roleIcon:Show()
+                else
+                    row.roleIcon:Hide()
+                end
+
+                row.label:ClearAllPoints()
+                if showIcon then
+                    row.label:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
+                else
+                    row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
+                end
+                if rIcon then row.label:SetPoint("RIGHT", row.roleIcon, "LEFT", -4, 0) end
+
+                local classColor = isTable and item.class and RAID_CLASS_COLORS
+                                   and RAID_CLASS_COLORS[item.class]
+                if isTable and item.grey then
+                    row.curR, row.curG, row.curB = 0.5, 0.5, 0.5
+                elseif classColor then
+                    row.curR, row.curG, row.curB = classColor.r, classColor.g, classColor.b
+                else
+                    row.curR, row.curG, row.curB = row.defR, row.defG, row.defB
+                end
+
+                local on = multiSelect and selectedSet[row.value] or (not multiSelect and dataIdx == selectedIndex)
+                row.selected = on and true or false
+
+                -- Selected (or moused-over) rows show white text; the OnLeave
+                -- restores curR/G/B for non-selected rows.
+                if on or row:IsMouseOver() then
+                    row.label:SetTextColor(1, 1, 1)
+                else
+                    row.label:SetTextColor(row.curR, row.curG, row.curB)
+                end
+
+                -- Selection bar tinted to the row's own (pre-white) text color,
+                -- dimmed slightly while the selected row is moused-over.
+                if on then
+                    row.hl:SetVertexColor(row.curR, row.curG, row.curB)
+                    row.hl:SetAlpha(row:IsMouseOver() and SEL_HOVER_ALPHA or SEL_ALPHA)
+                else
+                    row.hl:SetAlpha(0)
+                end
                 row:Show()
             else
                 row.index = nil
@@ -333,25 +448,104 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+        -- Justify (default LEFT): a rightIcon adds a RIGHT anchor (fixed width), and
+        -- the font object would otherwise center the text within it.
+        lbl:SetJustifyH(justifyH or "LEFT")
         row.label = lbl
+        -- Snapshot the template's text color so refresh() can reset a recycled
+        -- row after a class-colored or greyed table item occupied it.
+        row.defR, row.defG, row.defB = lbl:GetTextColor()
 
-        -- Highlight texture shown at reduced alpha when the row is selected.
+        -- Class icon for decorated table items; hidden for plain string rows.
+        local icn = row:CreateTexture(nil, "ARTWORK")
+        icn:SetSize(14, 14)
+        icn:SetPoint("LEFT", row, "LEFT", 4, 0)
+        icn:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+        icn:Hide()
+        row.icon = icn
+
+        -- Optional right-aligned icon (item.rightIcon), e.g. a role icon.
+        local rIcn = row:CreateTexture(nil, "ARTWORK")
+        rIcn:SetSize(14, 14)
+        rIcn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        rIcn:Hide()
+        row.roleIcon = rIcn
+
+        -- Highlight texture shown at reduced alpha when the row is selected —
+        -- the white quest-LOG title highlight (UI-QuestLogTitleHighlight), not the
+        -- gold UI-QuestTitleHighlight.
         local hl = row:CreateTexture(nil, "BACKGROUND")
         hl:SetAllPoints()
-        hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        hl:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
         hl:SetBlendMode("ADD")
         hl:SetAlpha(0)
         row.hl = hl
 
+        -- While moused-over: white label text, and a slightly dimmer selection bar.
+        row:SetScript("OnEnter", function(self)
+            if not self.index then return end
+            self.label:SetTextColor(1, 1, 1)
+            if self.selected then self.hl:SetAlpha(SEL_HOVER_ALPHA) end
+        end)
+        row:SetScript("OnLeave", function(self)
+            if self.selected then
+                self.label:SetTextColor(1, 1, 1)
+                self.hl:SetAlpha(SEL_ALPHA)
+            else
+                self.label:SetTextColor(self.curR or 1, self.curG or 1, self.curB or 1)
+            end
+        end)
+
         row:SetScript("OnClick", function(self)
             if not self.index then return end
-            selectedIndex = self.index
-            refresh()
-            if onSelect then onSelect(self.value) end
+            if multiSelect then
+                if IsShiftKeyDown() and anchorIndex then
+                    -- Range select anchorIndex..index (replace selection).
+                    selectedSet = {}
+                    local lo, hi = anchorIndex, self.index
+                    if lo > hi then lo, hi = hi, lo end
+                    for j = lo, hi do
+                        local it = items[j]
+                        if it then selectedSet[itemValue(it)] = true end
+                    end
+                elseif IsControlKeyDown() then
+                    -- Toggle this row.
+                    if selectedSet[self.value] then selectedSet[self.value] = nil
+                    else selectedSet[self.value] = true end
+                    anchorIndex = self.index
+                else
+                    -- Plain click: this row only.
+                    selectedSet = { [self.value] = true }
+                    anchorIndex = self.index
+                end
+                refresh()
+                if onSelect then onSelect() end
+            else
+                selectedIndex = self.index
+                refresh()
+                if onSelect then onSelect(self.value) end
+            end
         end)
 
         row:Hide()
         rows[i] = row
+    end
+
+    -- Multi-select: a click on empty list space (not on a visible row) clears the
+    -- whole selection. The handler lives on the CONTAINER only — rows are children
+    -- above it, and the scroll frame is left mouse-disabled so empty clicks fall
+    -- through to the container. (Enabling mouse on the scroll frame makes it steal
+    -- clicks from the rows that sit over it, breaking row selection/hover.)
+    if multiSelect then
+        local function clearSelection()
+            if not next(selectedSet) then return end
+            selectedSet = {}
+            anchorIndex = nil
+            refresh()
+            if onSelect then onSelect() end
+        end
+        container:EnableMouse(true)
+        container:HookScript("OnMouseUp", clearSelection)
     end
 
     -- Scrolling the bar (drag, wheel, or step buttons) re-maps the visible rows.
@@ -368,6 +562,8 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     container.SetItems = function(self, newItems)
         items         = newItems or {}
         selectedIndex = nil
+        selectedSet   = {}
+        anchorIndex   = nil
         sf.offset = 0
         if scrollBar then scrollBar:SetValue(0) end
         refresh()
@@ -375,6 +571,64 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
     container.GetSelected = function(self)
         return selectedIndex and items[selectedIndex] or nil
+    end
+
+    -- Programmatic selection by row value — restores a selection across the
+    -- SetItems rebuilds that roster refreshes trigger. Does NOT fire onSelect;
+    -- callers invoke their own handler explicitly when needed.
+    ---@param value string?  The row value to select; nil clears the selection.
+    ---@return boolean       True when a matching item was found and selected.
+    container.SetSelectedValue = function(self, value)
+        selectedIndex = nil
+        if value ~= nil then
+            for i, item in ipairs(items) do
+                if itemValue(item) == value then
+                    selectedIndex = i
+                    break
+                end
+            end
+        end
+        refresh()
+        return selectedIndex ~= nil
+    end
+
+    -- ── Multi-select API ──────────────────────────────────────
+    -- Selected row values, in items order (stable for display).
+    ---@return table  Array of selected values.
+    container.GetSelectedValues = function(self)
+        local out = {}
+        for _, item in ipairs(items) do
+            local v = itemValue(item)
+            if selectedSet[v] then out[#out + 1] = v end
+        end
+        return out
+    end
+
+    -- Programmatic multi-selection by value (values absent from items are ignored
+    -- at highlight time). Does NOT fire the callback.
+    ---@param values table?  Array of values to select; nil/empty clears.
+    container.SetSelectedValues = function(self, values)
+        selectedSet = {}
+        anchorIndex = nil
+        if values then
+            for _, v in ipairs(values) do selectedSet[v] = true end
+        end
+        refresh()
+    end
+
+    -- Selects every current row. Does NOT fire the callback.
+    container.SelectAllValues = function(self)
+        selectedSet = {}
+        for _, item in ipairs(items) do selectedSet[itemValue(item)] = true end
+        anchorIndex = nil
+        refresh()
+    end
+
+    -- Re-renders the visible rows from the current items WITHOUT changing items or
+    -- selection — for callers that mutate item fields in place (e.g. a role icon
+    -- that should update live).
+    container.RefreshDisplay = function(self)
+        refresh()
     end
 
     container.marginTop    = NS.MARGIN.button.top
@@ -690,6 +944,18 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper.SetValue = function(self, v) s:SetValue(v) end
     wrapper.GetValue = function(self) return s:GetValue() end
 
+    -- Moves the thumb WITHOUT firing onChange — for sync paths, so reconciles
+    -- and group aggregates never echo a command back to the bot. `text`
+    -- overrides the editbox content (e.g. "???" for mixed group values).
+    ---@param v    number   New slider value.
+    ---@param text string?  Editbox override; defaults to the rounded value.
+    wrapper.SetValueSilent = function(self, v, text)
+        updating = true
+        s:SetValue(v)
+        updating = false
+        box:SetText(text or tostring(math.floor(v + 0.5)))
+    end
+
     -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame
     -- so ElvUI's thumb replacement is already in place. The stored values are the
     -- "enabled" colors; wrapper.SetTextColor overrides them for call sites that
@@ -697,9 +963,12 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     -- to match its neighboring checkbox labels).
     local thumbTex                    = s:GetThumbTexture()
     local thumbR, thumbG, thumbB      = thumbTex:GetVertexColor()
-    local labelR, labelG, labelB      = label and label:GetTextColor()
-    local lowR,   lowG,   lowB        = lowLabel  and lowLabel:GetTextColor()
-    local highR,  highG,  highB       = highLabel and highLabel:GetTextColor()
+    local labelR, labelG, labelB
+    if label then labelR, labelG, labelB = label:GetTextColor() end
+    local lowR, lowG, lowB
+    if lowLabel then lowR, lowG, lowB = lowLabel:GetTextColor() end
+    local highR, highG, highB
+    if highLabel then highR, highG, highB = highLabel:GetTextColor() end
     local boxR,   boxG,   boxB        = box:GetTextColor()
     local GREY                        = 0.5
 

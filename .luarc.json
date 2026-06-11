@@ -1,0 +1,68 @@
+{
+  "runtime": {
+    "version": "Lua 5.1"
+  },
+  "workspace": {
+    "library": [
+      "C:/Users/benny/.luadefs/vscode-wow-api/Annotations"
+    ],
+    "checkThirdParty": false
+  },
+  "diagnostics": {
+    "disable": [
+      "deprecated",
+      "param-type-mismatch",
+      "redundant-parameter",
+      "missing-parameter",
+      "undefined-field"
+    ],
+    "globals": [
+      "CleanBotNS",
+      "CleanBot_SavedVars",
+      "CleanBot_PartyBots",
+      "CleanBotFrame",
+      "CleanBotFrameCloseButton",
+      "CleanBotFrameText",
+      "CleanBotFrameTitle",
+      "ElvUI",
+      "Talented",
+      "ChatEdit_InsertLink",
+      "CloseDropDownMenus",
+      "ColorPickerFrame",
+      "FauxScrollFrame_GetOffset",
+      "FauxScrollFrame_OnVerticalScroll",
+      "FauxScrollFrame_Update",
+      "GetMouseFocus",
+      "GetNumPartyMembers",
+      "GetNumQuestLogEntries",
+      "GetNumRaidMembers",
+      "GetNumTalents",
+      "GetNumTalentTabs",
+      "GetQuestLogSelection",
+      "GetQuestLogTitle",
+      "GetTalentTabInfo",
+      "InspectFrame",
+      "InspectUnit",
+      "InviteUnit",
+      "IsAddOnLoaded",
+      "OpacitySliderFrame",
+      "RAID_CLASS_COLORS",
+      "SelectQuestLogEntry",
+      "SendAddonMessage",
+      "SlashCmdList",
+      "StaticPopup_Show",
+      "StaticPopupDialogs",
+      "ToggleDropDownMenu",
+      "TradeFrame",
+      "TradeFrameRecipientNameText",
+      "UIDropDownMenu_AddButton",
+      "UIDropDownMenu_CreateInfo",
+      "UIDropDownMenu_DisableDropDown",
+      "UIDropDownMenu_Initialize",
+      "UIDropDownMenu_SetSelectedValue",
+      "UIDropDownMenu_SetText",
+      "UIDropDownMenu_SetWidth",
+      "WorldFrame"
+    ]
+  }
+}

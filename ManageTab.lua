@@ -39,7 +39,7 @@ end
 ---@param key      string             Unique popup key (StaticPopupDialogs entry name).
 ---@param text      string             Prompt text shown above the edit box.
 ---@param onAccept  fun(value:string)  Called with the entered text on confirm.
-local function CB_RegisterEditPopup(key, text, onAccept)
+NS.CB_RegisterEditPopup = function(key, text, onAccept)
     StaticPopupDialogs[key] = {
         text         = text,
         button1      = "OK",
@@ -57,6 +57,9 @@ local function CB_RegisterEditPopup(key, text, onAccept)
         end,
     }
 end
+-- Local alias for this file's own popup registrations; exported on NS so other
+-- tabs (GroupTab) can reuse the same edit-popup boilerplate.
+local CB_RegisterEditPopup = NS.CB_RegisterEditPopup
 
 -- ── Popup: invite one or more bots by character name ─────────────────────────
 CB_RegisterEditPopup("CLEANBOT_INVITE_BY_NAME",

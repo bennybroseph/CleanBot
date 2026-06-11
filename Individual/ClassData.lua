@@ -41,6 +41,18 @@ NS.CLASS_ICON_COORDS = {
     DEATHKNIGHT = {0.25, 0.5,   0.5,  0.75},
 }
 
+-- "|T...|t" markup for a class icon, sized to sit inline with dropdown/menu text
+-- (the closed-button value and each open entry). Reuses NS.CB_InlineIcon, defined
+-- in Widgets.lua which loads first; called only at event time so order is fine.
+---@param class string   Class token (e.g. "WARRIOR").
+---@param size  number?  Icon size in pixels (default 14).
+---@return string        The inline-icon string, or "" for an unknown class.
+NS.CB_ClassIconMarkup = function(class, size)
+    local c = NS.CLASS_ICON_COORDS[class]
+    if not c then return "" end
+    return NS.CB_InlineIcon("Interface\\WorldStateFrame\\Icons-Classes", size or 14, c, 256)
+end
+
 NS.CLASS_STRATEGIES = {
 
     -- ──────────────────────────────────────────────────────────
@@ -111,16 +123,17 @@ NS.CLASS_STRATEGIES = {
                 },
             },
             {
-                header = "Blessings",
-                type   = "dropdown",
+                header    = "Blessings (Combat)",
+                type      = "dropdown",
+                noneLabel = "None",   -- clears all blessings (no upkeep — saves mana)
                 strategies = {
-                    { cmd = "bdps",    field = "bdps",    name = "Blessing of Might",
+                    { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
-                    { cmd = "bmana",   field = "bmana",   name = "Blessing of Wisdom",
+                    { cmd = "bwisdom", field = "bwisdom", name = "Blessing of Wisdom",
                       desc = "Apply Blessing of Wisdom to party members" },
-                    { cmd = "bstats",  field = "bstats",  name = "Blessing of Kings",
+                    { cmd = "bkings",  field = "bkings",  name = "Blessing of Kings",
                       desc = "Apply Blessing of Kings to party members" },
-                    { cmd = "bhealth", field = "bhealth", name = "Blessing of Sanctuary",
+                    { cmd = "bsanc",   field = "bsanc",   name = "Blessing of Sanctuary",
                       desc = "Apply Blessing of Sanctuary to party members" },
                 },
             },
@@ -144,6 +157,24 @@ NS.CLASS_STRATEGIES = {
                       desc = "Emit Frost Resistance Aura" },
                     { cmd = "rshadow", field = "rshadow", name = "Shadow Resist Aura",
                       desc = "Emit Shadow Resistance Aura" },
+                },
+            },
+            {
+                -- Paladins maintain blessings in BOTH states (the nc list is where the
+                -- default blessing lives — AiFactory::AddDefaultNonCombatStrategies).
+                -- "None" clears all blessings so the bot stops spending mana on upkeep.
+                header    = "Blessings (Out of Combat)",
+                type      = "dropdown",
+                noneLabel = "None",
+                strategies = {
+                    { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
+                      desc = "Apply Blessing of Might to party members" },
+                    { cmd = "bwisdom", field = "bwisdom", name = "Blessing of Wisdom",
+                      desc = "Apply Blessing of Wisdom to party members" },
+                    { cmd = "bkings",  field = "bkings",  name = "Blessing of Kings",
+                      desc = "Apply Blessing of Kings to party members" },
+                    { cmd = "bsanc",   field = "bsanc",   name = "Blessing of Sanctuary",
+                      desc = "Apply Blessing of Sanctuary to party members" },
                 },
             },
         },
@@ -185,8 +216,9 @@ NS.CLASS_STRATEGIES = {
                 strategies = {
                     { cmd = "bdps",    field = "bdps",    name = "Aspect of the Hawk",
                       desc = "Maintain Aspect of the Hawk for maximum ranged attack power" },
-                    { cmd = "bmana",   field = "bmana",   name = "Aspect of the Viper",
-                      desc = "Maintain Aspect of the Viper for mana regeneration" },
+                    -- Aspect of the Viper omitted: mod-playerbots' Hunter registers no
+                    -- strategy token for it (only bdps/bspeed/rnature) — Viper swapping is
+                    -- handled automatically by the bot's mana logic, not toggleable here.
                     { cmd = "bspeed",  field = "bspeed",  name = "Aspect of the Pack",
                       desc = "Maintain Aspect of the Pack/Cheetah for movement speed" },
                     { cmd = "rnature", field = "rnature", name = "Aspect of the Wild",
@@ -550,11 +582,17 @@ NS.CLASS_STRATEGIES = {
                 type     = "dropdown",
                 readonly = true,
                 strategies = {
-                    { cmd = "melee",  field = "isMelee",    name = "Melee",
-                      desc = "Active strategy set by the bot's talents — Feral melee" },
-                    { cmd = "caster", field = "isCaster",   name = "Caster",
+                    -- These are the bot's actual reported combat-strategy tokens
+                    -- (BearDruidStrategy:getName() == "bear", etc.), not the generic
+                    -- melee/caster/heal roles — druid never registers those, so the
+                    -- read-only display could never match the co? reply.
+                    { cmd = "bear",    field = "bear",    name = "Guardian (Bear)",
+                      desc = "Active strategy set by the bot's talents — Feral tank in Bear Form" },
+                    { cmd = "cat",     field = "cat",     name = "Feral (Cat)",
+                      desc = "Active strategy set by the bot's talents — Feral DPS in Cat Form" },
+                    { cmd = "balance", field = "balance", name = "Balance (Moonkin)",
                       desc = "Active strategy set by the bot's talents — Balance caster" },
-                    { cmd = "heal",   field = "isHealer", name = "Healer",
+                    { cmd = "resto",   field = "resto",   name = "Restoration",
                       desc = "Active strategy set by the bot's talents — Restoration healer" },
                 },
             },

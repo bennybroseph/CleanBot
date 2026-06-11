@@ -18,6 +18,23 @@ local NS = CleanBotNS
 -- Derived flat tables (NS.ROLE_STRATEGIES, NS.TANK_STRATEGIES, …) are built
 -- automatically below for any callers that still need them.
 -- ============================================================
+
+-- The five movement strategies (MovementStrategyContext, supportsSiblings=true →
+-- mutually exclusive: adding one drops the rest). Shared by TWO exclusive dropdowns —
+-- one in the combat list, one in the non-combat list — because the lists are
+-- independent engines: a fresh bot has "follow" in its NON-COMBAT defaults only
+-- (AiFactory::AddDefaultNonCombatStrategies), while the combat engine also acts on
+-- movement (e.g. PlayerbotAI::ChangeEngineOnCombat snapshots a combat "stay" position),
+-- so the two genuinely differ. Each dropdown reads/writes its own state via the normal
+-- exclusive-dropdown path; a nil selection ("Free Roam") clears all five.
+NS.MOVEMENT_STRATEGIES = {
+    { cmd = "follow",         field = "mFollow",   name = "Follow",         desc = "Follow the master at the configured distance" },
+    { cmd = "stay",           field = "mStay",     name = "Stay",           desc = "Hold current position; return to it if moved" },
+    { cmd = "guard",          field = "mGuard",    name = "Guard",          desc = "Guard this spot — engage what approaches, then return" },
+    { cmd = "runaway",        field = "mRunaway",  name = "Run Away",       desc = "Keep distance from enemies" },
+    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat specifically from add packs" },
+}
+
 NS.STRATEGIES = {
     {
         header     = "Role",
@@ -25,9 +42,18 @@ NS.STRATEGIES = {
         column     = "left",
         type       = "roleDropdown",
         strategies = {
-            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities" },
-            { cmd = "dps assist", field = "isDPS",    name = "DPS",    desc = "Use DPS abilities" },
-            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing" },
+            -- cmdByClass: classes that implement the role under a different token.
+            -- Druid/DK have no literal "tank" rotation token — they tank via their
+            -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
+            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
+              cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
+            -- dps assist / dps aoe are mutually-exclusive target-acquisition siblings
+            -- (AssistStrategyContext, supportsSiblings): single-target focus vs anchoring
+            -- on the highest-HP attacker for AoE cleave. Both are universal (no gating).
+            { cmd = "dps assist", field = "isDPS",    name = "DPS (Single)", desc = "Assist the group on one efficient kill target at a time" },
+            { cmd = "dps aoe",    field = "isDPSAoe", name = "DPS (AoE)",    desc = "Anchor on the toughest attacker so the AoE rotation cleaves the pack" },
+            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing",
+              cmdByClass = { DRUID = "resto", SHAMAN = "resto" } },
         },
         subGroups = {
             { field = "isTank",   header = "Tank",    strategies = {
@@ -36,9 +62,11 @@ NS.STRATEGIES = {
                 { cmd = "pull back",   field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
                 { cmd = "tank face",   field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
             }},
-            { field = "isDPS",    header = "DPS",     strategies = {
-                { cmd = "aoe",    field = "aoeTarget",  name = "AoE",         desc = "Target many mobs at a time" },
-                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro", desc = "DPS actively avoids grabbing threat" },
+            -- Shared by both DPS roles (single + aoe). "AoE Rotation" is the class cleave
+            -- rotation — distinct from the DPS (AoE) role's target picking.
+            { field = "isDPS", roles = { "isDPS", "isDPSAoe" }, header = "DPS", strategies = {
+                { cmd = "aoe",    field = "aoeTarget",  name = "AoE Rotation", desc = "Use the class AoE rotation — cleave / multi-target spells" },
+                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "DPS actively avoids grabbing threat" },
             }},
             { field = "isHealer", header = "Healing", strategies = {
                 { cmd = "save mana",  field = "saveMana",  name = "Save Mana",  desc = "Healers prioritize high-efficiency spells" },
@@ -52,10 +80,21 @@ NS.STRATEGIES = {
         column = "left",
         strategies = {
             { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
-            { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns" },
+            { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "focus",     field = "lowThreatCast",   name = "Low Threat Casting",    desc = "Stop casting AoE threat and debuff spells" },
             { cmd = "avoid aoe", field = "avoidAoe",        name = "Avoid AoE",             desc = "Automatically avoid harmful AoE spells" },
         },
+    },
+    {
+        -- In-combat movement. Default is empty ("Free Roam") — combat positioning
+        -- (close/ranged/kite) drives movement unless you pin a mode here (e.g. a ranged
+        -- bot set to Stay holds its combat-entry spot). Parsed from co? into entry.combat.
+        header     = "Combat Movement",
+        group      = "movement",
+        column     = "right",
+        type       = "dropdown",
+        noneLabel  = "Free Roam",
+        strategies = NS.MOVEMENT_STRATEGIES,
     },
     {
         header = "Positioning",
@@ -87,6 +126,48 @@ NS.STRATEGIES = {
     },
 }
 
+-- ============================================================
+-- Per-class registration of the gap-prone generic/role tokens.
+-- Verified against each src/Ai/Class/<Class>/<Class>AiObjectContext.cpp strategy
+-- factory (see docs/playerbot-strategies.md). A token absent from this table is
+-- registered by every class (generic StrategyContext) and is always shown. A class
+-- that implements a concept under a different token is covered by the strategy's
+-- cmdByClass override instead (e.g. druid "heal" → "resto"), not listed here.
+-- Sets keyed by class token for O(1) lookup.
+-- ============================================================
+NS.STRATEGY_CLASS_SUPPORT = {
+    ["tank"]       = { WARRIOR=true, PALADIN=true, WARLOCK=true, DRUID=true, DEATHKNIGHT=true },
+    ["heal"]       = { PALADIN=true, PRIEST=true, SHAMAN=true },
+    ["pull"]       = { WARRIOR=true, PALADIN=true, ROGUE=true, PRIEST=true, MAGE=true, WARLOCK=true, DRUID=true, DEATHKNIGHT=true },
+    ["aoe"]        = { WARRIOR=true, HUNTER=true, ROGUE=true, PRIEST=true, SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true },
+    ["healer dps"] = { PALADIN=true, PRIEST=true, SHAMAN=true, DRUID=true },
+    ["cc"]         = { PALADIN=true, HUNTER=true, ROGUE=true, PRIEST=true, MAGE=true, WARLOCK=true, DRUID=true },
+    ["boost"]      = { PALADIN=true, ROGUE=true, PRIEST=true, SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true },
+}
+
+-- Effective send/parse token for a strategy on a given class: the cmdByClass
+-- override when one exists for that class, else the base cmd.
+---@param s     table    Strategy definition { cmd, field, [cmdByClass] }.
+---@param class string?  Class token (e.g. "DRUID"); nil → base cmd.
+---@return string        The token to send / expect in the reply.
+NS.CB_EffStrategyCmd = function(s, class)
+    return (class and s.cmdByClass and s.cmdByClass[class]) or s.cmd
+end
+
+-- Whether a strategy entry should be shown for a class. Shown when: the class has a
+-- cmdByClass override (we know which token works), OR the token has no coverage gaps
+-- (absent from STRATEGY_CLASS_SUPPORT), OR the class is in the token's support set.
+---@param s     table    Strategy definition.
+---@param class string?  Class token; nil → always shown.
+---@return boolean
+NS.CB_StrategyShown = function(s, class)
+    if not class then return true end
+    if s.cmdByClass and s.cmdByClass[class] then return true end
+    local sup = NS.STRATEGY_CLASS_SUPPORT[s.cmd]
+    if not sup then return true end
+    return sup[class] == true
+end
+
 NS.STRATEGY_MAP        = {}
 NS.ROLE_STRATEGIES     = {}
 NS.TANK_STRATEGIES     = {}
@@ -107,16 +188,25 @@ do
         isDPS    = NS.DPS_STRATEGIES,
         isHealer = NS.HEAL_STRATEGIES,
     }
+    -- Map a strategy's base cmd AND every per-class override token to its field, so
+    -- the co? reply parser recognizes whichever token a class actually reports
+    -- (e.g. a druid healer reports "resto", a DK tank reports "blood").
+    local function mapTokens(s)
+        NS.STRATEGY_MAP[s.cmd] = s.field
+        if s.cmdByClass then
+            for _, alt in pairs(s.cmdByClass) do NS.STRATEGY_MAP[alt] = s.field end
+        end
+    end
     for _, grp in ipairs(NS.STRATEGIES) do
         for _, s in ipairs(grp.strategies) do
-            NS.STRATEGY_MAP[s.cmd] = s.field
+            mapTokens(s)
             local t = groupToTable[grp.group]
             if t then t[#t + 1] = s end
         end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
                 for _, s in ipairs(sg.strategies) do
-                    NS.STRATEGY_MAP[s.cmd] = s.field
+                    mapTokens(s)
                     local t = subFieldToTable[sg.field]
                     if t then t[#t + 1] = s end
                 end
@@ -137,17 +227,28 @@ NS.NC_STRATEGIES = {
         group  = "general",
         column = "left",
         strategies = {
-            { cmd = "food", field = "useFood",   name = "Eat & Drink", desc = "Automatically eat and drink when low on health or mana" },
-            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Enable PvP mode — bot will flag for PvP and engage enemy players" },
+            { cmd = "food", field = "useFood",   name = "Eat & Drink", desc = "Automatically eat and drink when low on health or mana", default = true },
+            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Enable PvP mode — bot will flag for PvP and engage enemy players", default = true },
         },
+    },
+    {
+        -- Out-of-combat movement. A fresh bot defaults to Follow here
+        -- (AiFactory::AddDefaultNonCombatStrategies). Parsed from nc? into entry.nonCombat.
+        header       = "Movement",
+        group        = "movement",
+        column       = "left",
+        type         = "dropdown",
+        noneLabel    = "Free Roam",
+        defaultField = "mFollow",
+        strategies   = NS.MOVEMENT_STRATEGIES,
     },
     {
         header = "Loot & Gather",
         group  = "lootGather",
         column = "right",
         strategies = {
-            { cmd = "loot",   field = "autoLoot",   name = "Auto Loot",   desc = "Automatically loot nearby corpses after combat" },
-            { cmd = "gather", field = "autoGather", name = "Auto Gather", desc = "Automatically gather nearby nodes after combat" },
+            { cmd = "loot",   field = "autoLoot",   name = "Auto Loot",   desc = "Automatically loot nearby corpses after combat", default = true },
+            { cmd = "gather", field = "autoGather", name = "Auto Gather", desc = "Automatically gather nearby nodes after combat", default = true },
         },
     },
 }
@@ -169,26 +270,36 @@ end
 
 -- ============================================================
 -- Default state constructors
+--
+-- Seeds mirror the server's UNCONDITIONAL defaults (AiFactory.cpp) so a freshly
+-- discovered bot shows correct toggle state before its first co?/nc? query lands:
+--   - a strategy entry with `default = true` seeds on,
+--   - a group's `defaultField` seeds that exclusive-dropdown field on.
+-- Only spec/config-independent defaults are mirrored (follow/food/loot/gather/pvp/boost);
+-- spec- or config-gated ones (avoid aoe, save mana, tank face, role, class buffs) are left
+-- off and corrected by the authoritative reply. These are transient initial values only.
 -- ============================================================
----@return table  A fresh combat-strategy state table with all flags defaulted.
+---@return table  A fresh combat-strategy state table with server-aligned defaults.
 NS.CB_DefaultCombat = function()
     local t = {}
     for _, grp in ipairs(NS.STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = nil end
+        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        if grp.defaultField then t[grp.defaultField] = true end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
-                for _, s in ipairs(sg.strategies) do t[s.field] = nil end
+                for _, s in ipairs(sg.strategies) do t[s.field] = s.default or nil end
             end
         end
     end
     return t
 end
 
----@return table  A fresh non-combat-strategy state table with all flags defaulted.
+---@return table  A fresh non-combat-strategy state table with server-aligned defaults.
 NS.CB_DefaultNonCombat = function()
     local t = {}
     for _, grp in ipairs(NS.NC_STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = nil end
+        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        if grp.defaultField then t[grp.defaultField] = true end
     end
     return t
 end
