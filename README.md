@@ -2,7 +2,7 @@
 
 A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex trees of buttons!
 
-⚠️Requires the latest version of [Playerbots](https://github.com/mod-playerbots/mod-playerbots) installed on your server!⚠️
+⚠️Requires the latest version of [Playerbots](https://github.com/mod-playerbots/mod-playerbots) installed on your server⚠️
 
 - Fully Skinned for [ElvUI](https://github.com/ElvUI-WotLK/ElvUI/tree/master) or the default UI
     - Automatically Switches
