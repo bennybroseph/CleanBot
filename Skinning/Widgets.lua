@@ -246,14 +246,22 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     return section
 end
 
--- A bordered, scrollable list of selectable string rows.
+-- A bordered, scrollable list of selectable rows.
+--
+-- Items are plain strings, or tables for decorated rows:
+--   { text = "Label", value = "key", class = "WARRIOR"|nil, grey = boolean|nil }
+-- class colors the label (RAID_CLASS_COLORS) and shows the class icon;
+-- grey renders the label 50% grey with no icon (e.g. a bot missing from the
+-- party/raid). String rows keep the template's default look.
 --
 -- Returns a container frame with the following API:
---   container:SetItems({"string", ...}) — populates rows; clears any previous selection.
---   container:GetSelected()             — returns the value of the currently selected row,
---                                         or nil if nothing is selected.
+--   container:SetItems(items)           — populates rows; clears any previous selection.
+--   container:GetSelected()             — returns the currently selected item (string or
+--                                         table), or nil if nothing is selected.
+--   container:SetSelectedValue(value)   — programmatic selection by row value; no onSelect.
 --
--- onSelect(value) is called whenever the user clicks a row.
+-- onSelect(value) is called whenever the user clicks a row; for table items the
+-- value is item.value (falling back to item.text).
 -- width / height size the visible container; rows scroll inside it.
 -- ElvUI skins the inner scroll bar when present.
 ---@param parent   table     Parent frame.
@@ -261,7 +269,7 @@ end
 ---@param width    number    Content area width (container is width + 20 for the scrollbar).
 ---@param height   number    Visible container height.
 ---@param onSelect fun(value:string)? Called with the row value on click.
----@return table             The container frame with SetItems / GetSelected methods.
+---@return table             The container frame with SetItems / GetSelected / SetSelectedValue methods.
 NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     local ROW_H      = 20
     -- Number of physical row buttons that fit; scrolling remaps these onto the data
@@ -298,18 +306,58 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
     local rows = {}
 
+    -- The clickable value of an item: item.value (fallback item.text) for
+    -- table items, the string itself otherwise.
+    ---@param item string|table  A list item.
+    ---@return string            The value onSelect/SetSelectedValue match on.
+    local function itemValue(item)
+        if type(item) == "table" then return item.value or item.text end
+        return item
+    end
+
     -- Re-maps the fixed row pool onto items[offset+1 .. offset+numVisible] and
-    -- refreshes the FauxScrollFrame's scrollbar range.
+    -- refreshes the FauxScrollFrame's scrollbar range. Rows are recycled, so
+    -- every visual attribute (color, icon, label anchor) is reset on each pass
+    -- — a row that held a class-colored table item must not bleed its look
+    -- into the plain string item that lands on it next.
     local function refresh()
         local offset = FauxScrollFrame_GetOffset(sf)
         for i = 1, numVisible do
             local row     = rows[i]
             local dataIdx = i + offset
-            local value   = items[dataIdx]
-            if value then
+            local item    = items[dataIdx]
+            if item then
+                local isTable = type(item) == "table"
                 row.index = dataIdx
-                row.value = value
-                row.label:SetText(value)
+                row.value = itemValue(item)
+                row.label:SetText(isTable and item.text or item)
+
+                -- Class icon only for class-decorated, present (non-grey) rows.
+                local showIcon = isTable and item.class and not item.grey
+                if showIcon then
+                    local coords = NS.CLASS_ICON_COORDS and NS.CLASS_ICON_COORDS[item.class]
+                    if coords then row.icon:SetTexCoord(unpack(coords)) end
+                    row.icon:Show()
+                else
+                    row.icon:Hide()
+                end
+                row.label:ClearAllPoints()
+                if showIcon then
+                    row.label:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
+                else
+                    row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
+                end
+
+                local classColor = isTable and item.class and RAID_CLASS_COLORS
+                                   and RAID_CLASS_COLORS[item.class]
+                if isTable and item.grey then
+                    row.label:SetTextColor(0.5, 0.5, 0.5)
+                elseif classColor then
+                    row.label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                else
+                    row.label:SetTextColor(row.defR, row.defG, row.defB)
+                end
+
                 row.hl:SetAlpha(dataIdx == selectedIndex and 0.4 or 0)
                 row:Show()
             else
@@ -334,6 +382,17 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
         row.label = lbl
+        -- Snapshot the template's text color so refresh() can reset a recycled
+        -- row after a class-colored or greyed table item occupied it.
+        row.defR, row.defG, row.defB = lbl:GetTextColor()
+
+        -- Class icon for decorated table items; hidden for plain string rows.
+        local icn = row:CreateTexture(nil, "ARTWORK")
+        icn:SetSize(14, 14)
+        icn:SetPoint("LEFT", row, "LEFT", 4, 0)
+        icn:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+        icn:Hide()
+        row.icon = icn
 
         -- Highlight texture shown at reduced alpha when the row is selected.
         local hl = row:CreateTexture(nil, "BACKGROUND")
@@ -375,6 +434,25 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
     container.GetSelected = function(self)
         return selectedIndex and items[selectedIndex] or nil
+    end
+
+    -- Programmatic selection by row value — restores a selection across the
+    -- SetItems rebuilds that roster refreshes trigger. Does NOT fire onSelect;
+    -- callers invoke their own handler explicitly when needed.
+    ---@param value string?  The row value to select; nil clears the selection.
+    ---@return boolean       True when a matching item was found and selected.
+    container.SetSelectedValue = function(self, value)
+        selectedIndex = nil
+        if value ~= nil then
+            for i, item in ipairs(items) do
+                if itemValue(item) == value then
+                    selectedIndex = i
+                    break
+                end
+            end
+        end
+        refresh()
+        return selectedIndex ~= nil
     end
 
     container.marginTop    = NS.MARGIN.button.top
@@ -689,6 +767,18 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     -- Proxy SetValue/GetValue so callers treat the wrapper like a slider.
     wrapper.SetValue = function(self, v) s:SetValue(v) end
     wrapper.GetValue = function(self) return s:GetValue() end
+
+    -- Moves the thumb WITHOUT firing onChange — for sync paths, so reconciles
+    -- and group aggregates never echo a command back to the bot. `text`
+    -- overrides the editbox content (e.g. "???" for mixed group values).
+    ---@param v    number   New slider value.
+    ---@param text string?  Editbox override; defaults to the rounded value.
+    wrapper.SetValueSilent = function(self, v, text)
+        updating = true
+        s:SetValue(v)
+        updating = false
+        box:SetText(text or tostring(math.floor(v + 0.5)))
+    end
 
     -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame
     -- so ElvUI's thumb replacement is already in place. The stored values are the

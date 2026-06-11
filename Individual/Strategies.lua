@@ -53,7 +53,7 @@ NS.STRATEGIES = {
             { cmd = "dps assist", field = "isDPS",    name = "DPS (Single)", desc = "Assist the group on one efficient kill target at a time" },
             { cmd = "dps aoe",    field = "isDPSAoe", name = "DPS (AoE)",    desc = "Anchor on the toughest attacker so the AoE rotation cleaves the pack" },
             { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing",
-              cmdByClass = { DRUID = "resto" } },
+              cmdByClass = { DRUID = "resto", SHAMAN = "resto" } },
         },
         subGroups = {
             { field = "isTank",   header = "Tank",    strategies = {
