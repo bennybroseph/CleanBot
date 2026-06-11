@@ -169,6 +169,68 @@ local function CB_GetGeometry()
 end
 
 -- ============================================================
+-- Group-slot support — the build engine below serves two slot shapes:
+--   * a real bot slot   ({ key, name, class, ... } — resolves one bot)
+--   * a group slot      ({ isGroup = true, members = {{key,name,class},...},
+--                          aggEntry = {...} } — GroupTab.lua)
+-- Group slots read state from their aggregate entry and fan writes out to
+-- every member, re-resolving class tokens/support per member.
+-- ============================================================
+
+-- Sentinel stored in a group aggregate entry when members disagree on a field.
+-- A unique table so it can never collide with real strategy values.
+NS.MIXED = {}
+
+-- The state entry a slot's controls read: the group aggregate for group slots,
+-- the live roster entry otherwise.
+---@param slot table  A bot slot or group slot.
+---@return table?     The entry whose combat/nonCombat/classData tables back the UI.
+local function CB_SlotEntry(slot)
+    return slot.isGroup and slot.aggEntry or CleanBot_PartyBots[slot.key]
+end
+
+-- The send/write targets for a slot: the group's members, or the slot itself.
+---@param slot table  A bot slot or group slot.
+---@return table      Array of {key,name,class} target tables.
+local function CB_SlotTargets(slot)
+    return slot.isGroup and slot.members or { slot }
+end
+
+-- Shared checkbox/sub-section toggle: per-target class gating + class token
+-- resolution + optimistic write to the target's real entry + send. For a
+-- single bot this is exactly the old inline OnClick body.
+---@param slot      table    A bot slot or group slot.
+---@param s         table    The strategy definition being toggled.
+---@param checked   boolean  New checkbox state.
+---@param cmd       string   Bot command prefix ("co" or "nc").
+---@param getSource fun(entry:table?):table?  Extracts the state table from an entry.
+local function CB_ToggleStrategy(slot, s, checked, cmd, getSource)
+    for _, m in ipairs(CB_SlotTargets(slot)) do
+        if NS.CB_StrategyShown(s, m.class) then
+            local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, m.class)
+            local ds = getSource(CleanBot_PartyBots[m.key])
+            if ds then ds[s.field] = checked end
+            NS.CB_SendStrategyToggle(m, cmd, toggle, { [s.field] = checked })
+        end
+    end
+    if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
+end
+
+-- Timer-slider value send: every target gets "cmd N" plus the optimistic
+-- entry.combat write (timer strategies only exist in the combat list).
+---@param slot  table   A bot slot or group slot.
+---@param strat table   The timerSlider strategy definition.
+---@param v     number  The new timer value.
+local function CB_SendTimerValue(slot, strat, v)
+    for _, m in ipairs(CB_SlotTargets(slot)) do
+        NS.CB_SendBotCommand(m.name, strat.cmd .. " " .. v)
+        local e = CleanBot_PartyBots[m.key]
+        if e and e.combat then e.combat[strat.field] = v end
+    end
+    if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
+end
+
+-- ============================================================
 -- Strategy section builder — shared by combat, non-combat, and class tabs.
 -- onClickFn(strategy, checked) overrides the default "co +/-cmd" whisper.
 -- sourceTable supplies each checkbox's initial checked state (entry.combat,
@@ -207,10 +269,9 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                     -- Editbox path: ready=true, dragging=false → send immediately.
                     -- Drag path: suppressed here; OnMouseUp sends once on release.
                     -- Construction path: ready=false → suppressed.
+                    -- (Sync paths use SetValueSilent and never reach here.)
                     if ready and not dragging then
-                        NS.CB_SendBotCommand(slot.name, strat.cmd .. " " .. v)
-                        local e = CleanBot_PartyBots[slot.key]
-                        if e and e.combat then e.combat[strat.field] = v end
+                        CB_SendTimerValue(slot, strat, v)
                     end
                 end)
             ready = true
@@ -225,9 +286,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             sl.slider:SetScript("OnMouseUp", function()
                 dragging = false
                 local v = math.floor(sl.slider:GetValue() + 0.5)
-                NS.CB_SendBotCommand(slot.name, strat.cmd .. " " .. v)
-                local e = CleanBot_PartyBots[slot.key]
-                if e and e.combat then e.combat[strat.field] = v end
+                CB_SendTimerValue(slot, strat, v)
             end)
 
             controls[s.field] = sl
@@ -240,6 +299,10 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
             lbl:SetText(s.name)
+            -- Stamped so CB_SyncRegistry can compose group suffixes (" (?)" mixed,
+            -- " (*)" partially supported) and reset to the base label afterwards.
+            cb.labelFS   = lbl
+            cb.labelBase = s.name
 
             cb:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -257,6 +320,8 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                     onClickFn(strat, self:GetChecked() and true or false)
                 end)
             else
+                -- Unreachable today: every live call site supplies onClickFn.
+                -- Kept as a single-bot "co" fallback should one ever omit it.
                 local cbCmd   = s.cmd
                 local cbField = s.field
                 cb:SetScript("OnClick", function(self)
@@ -297,29 +362,46 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     return section, controls
 end
 
--- Applies a mutually-exclusive strategy selection: whispers a single
--- "cmd +sel,-other,-other..." toggle list and mirrors the choice into
--- dataTable (entry.combat or a classData section), if supplied.
----@param strategies    table   The mutually-exclusive strategy group.
----@param selectedField string  Field of the chosen strategy (others are cleared).
----@param cmd           string  Bot command prefix to send for the selection.
----@param slot          table   The bound slot (resolves the live bot).
----@param dataTable     table   State table updated to reflect the selection.
-local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, dataTable)
-    local parts  = {}
-    local expect = {}
-    for _, rs in ipairs(strategies) do
-        local on = (rs.field == selectedField)
-        parts[#parts + 1] = (on and "+" or "-") .. NS.CB_EffStrategyCmd(rs, slot.class)
-        expect[rs.field] = on
-    end
-    if dataTable then
+-- Applies a mutually-exclusive strategy selection per target: each gets a
+-- single "cmd +sel,-other,-other..." toggle list built from ITS class tokens,
+-- restricted to the strategies its class supports, with the matching
+-- optimistic write into its real entry.
+--
+-- Group semantics: a member whose class can't take the SELECTED strategy is
+-- skipped entirely (it keeps its current selection — no bare "-" stripping).
+-- selectedField = nil (a noneLabel pick) clears the set on every target.
+---@param strategies    table    The mutually-exclusive strategy group.
+---@param selectedField string?  Field of the chosen strategy (nil clears all).
+---@param cmd           string   Bot command prefix to send for the selection.
+---@param slot          table    A bot slot or group slot.
+---@param getSource     fun(entry:table?):table?  Extracts the state table from an entry.
+local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, getSource)
+    local selStrat = nil
+    if selectedField then
         for _, rs in ipairs(strategies) do
-            dataTable[rs.field] = (rs.field == selectedField)
+            if rs.field == selectedField then selStrat = rs break end
         end
     end
-    -- Optimistic write above; toggle + authoritative reconcile (self-healing).
-    NS.CB_SendStrategyToggle(slot, cmd, table.concat(parts, ","), expect)
+    for _, m in ipairs(CB_SlotTargets(slot)) do
+        if not (selStrat and not NS.CB_StrategyShown(selStrat, m.class)) then
+            local parts  = {}
+            local expect = {}
+            local ds     = getSource(CleanBot_PartyBots[m.key])
+            for _, rs in ipairs(strategies) do
+                if NS.CB_StrategyShown(rs, m.class) then
+                    local on = (rs.field == selectedField)
+                    parts[#parts + 1] = (on and "+" or "-") .. NS.CB_EffStrategyCmd(rs, m.class)
+                    expect[rs.field] = on
+                    if ds then ds[rs.field] = on end
+                end
+            end
+            if #parts > 0 then
+                -- Optimistic write above; toggle + authoritative reconcile (self-healing).
+                NS.CB_SendStrategyToggle(m, cmd, table.concat(parts, ","), expect)
+            end
+        end
+    end
+    if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
 end
 
 -- ============================================================
@@ -351,56 +433,67 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             -((parent.paddingTop or 0) + (header.marginTop  or 0)))
     end
 
-    local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
-                                       "Show Talents", 100, 22, function()
-        local botName = slot.name
-        local unit = NS.CB_FindPartyUnit(botName)
-        if not unit then return end
-        InspectUnit(unit)
-        NS.CB_After(0.05, function()
-            if Talented then
-                local entry = CleanBot_PartyBots[slot.key]
-                local class = entry and entry.class or select(2, UnitClass(unit)) or "WARRIOR"
-                local template = { name = botName, class = class }
-                local numTabs = GetNumTalentTabs(true)
-                for tab = 1, numTabs do
-                    local ranks = {}
-                    for index = 1, GetNumTalents(tab, true) do
-                        ranks[index] = select(5, GetTalentInfo(tab, index, true)) or 0
+    -- "Show Talents" rides the single-unit inspect path, which has no group
+    -- equivalent — group slots skip the button and anchor the spec controls
+    -- straight below the header.
+    local specAnchor = header
+    if not slot.isGroup then
+        local showBtn = NS.CB_CreateButton(parent, "CleanBotShowTal_" .. tag .. "_" .. gi,
+                                           "Show Talents", 100, 22, function()
+            local botName = slot.name
+            local unit = NS.CB_FindPartyUnit(botName)
+            if not unit then return end
+            InspectUnit(unit)
+            NS.CB_After(0.05, function()
+                if Talented then
+                    local entry = CleanBot_PartyBots[slot.key]
+                    local class = entry and entry.class or select(2, UnitClass(unit)) or "WARRIOR"
+                    local template = { name = botName, class = class }
+                    local numTabs = GetNumTalentTabs(true)
+                    for tab = 1, numTabs do
+                        local ranks = {}
+                        for index = 1, GetNumTalents(tab, true) do
+                            ranks[index] = select(5, GetTalentInfo(tab, index, true)) or 0
+                        end
+                        template[tab] = ranks
                     end
-                    template[tab] = ranks
+                    local ok = pcall(Talented.OpenTemplate, Talented, template)
+                    if not ok then
+                        pcall(function()
+                            Talented:CreateBaseFrame()
+                            Talented:SetTemplate(template)
+                            local base = Talented.base
+                            if base and not base:IsVisible() then ShowUIPanel(base) end
+                        end)
+                    end
+                    HideUIPanel(InspectFrame)
+                else
+                    for i = 1, 10 do
+                        local tab = _G["InspectFrameTab" .. i]
+                        if not tab then break end
+                        local text = tab:GetText()
+                        if text and strfind(strlower(text), "talent") then tab:Click(); break end
+                    end
                 end
-                local ok = pcall(Talented.OpenTemplate, Talented, template)
-                if not ok then
-                    pcall(function()
-                        Talented:CreateBaseFrame()
-                        Talented:SetTemplate(template)
-                        local base = Talented.base
-                        if base and not base:IsVisible() then ShowUIPanel(base) end
-                    end)
-                end
-                HideUIPanel(InspectFrame)
-            else
-                for i = 1, 10 do
-                    local tab = _G["InspectFrameTab" .. i]
-                    if not tab then break end
-                    local text = tab:GetText()
-                    if text and strfind(strlower(text), "talent") then tab:Click(); break end
-                end
-            end
+            end)
         end)
-    end)
-    NS.CB_AnchorBelow(showBtn, header)
+        NS.CB_AnchorBelow(showBtn, header)
+        specAnchor = showBtn
+    end
 
     local setBtn = NS.CB_CreateButton(parent, "CleanBotSetTal_" .. tag .. "_" .. gi .. "s",
                                       "Set Talents", 100, 22)
-    NS.CB_AnchorBelow(setBtn, showBtn)
+    NS.CB_AnchorBelow(setBtn, specAnchor)
 
     local dd = NS.CB_CreateDropdown(parent, "CleanBotClassDD_" .. tag .. "_" .. gi, 130)
     NS.CB_AnchorAhead(dd, setBtn)
 
+    -- Group note: the aggregate pass skips whisper groups (spec state is
+    -- inspect-driven, not parseable from co?/nc?), so a group's spec dropdown
+    -- stays blank until the user picks one here — the optimistic write below
+    -- then survives aggregate rebuilds.
     UIDropDownMenu_Initialize(dd, function(self)
-        local e  = CleanBot_PartyBots[slot.key]
+        local e  = CB_SlotEntry(slot)
         local cd = getSource(e)
         for _, s in ipairs(strategies) do
             local info           = UIDropDownMenu_CreateInfo()
@@ -411,7 +504,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                local cd2 = getSource(CleanBot_PartyBots[slot.key])
+                local cd2 = getSource(CB_SlotEntry(slot))
                 if cd2 then
                     for _, rs in ipairs(strategies) do
                         cd2[rs.field] = (rs.field == s.field)
@@ -423,11 +516,13 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
         end
     end)
     setBtn:SetScript("OnClick", function()
-        local cd = getSource(CleanBot_PartyBots[slot.key])
+        local cd = getSource(CB_SlotEntry(slot))
         if not cd then return end
         for _, s in ipairs(strategies) do
             if cd[s.field] == true then
-                NS.CB_SendBotCommand(slot.name, specWhisper .. " " .. s.cmd)
+                for _, m in ipairs(CB_SlotTargets(slot)) do
+                    NS.CB_SendBotCommand(m.name, specWhisper .. " " .. s.cmd)
+                end
                 return
             end
         end
@@ -461,6 +556,22 @@ local function CB_ShownStrategies(list, class)
     return out
 end
 
+-- " (*)" when a group slot's members only PARTIALLY support a strategy (the
+-- send will skip the unsupported ones). Mirrors the partial map the aggregate
+-- pass computes, but cheap enough to evaluate live for dropdown menu entries.
+---@param slot table  A bot slot or group slot.
+---@param s    table  Strategy definition.
+---@return string     " (*)" or "".
+local function CB_PartialSuffix(slot, s)
+    if not slot.isGroup then return "" end
+    local supported, total = 0, 0
+    for _, m in ipairs(slot.members) do
+        total = total + 1
+        if NS.CB_StrategyShown(s, m.class) then supported = supported + 1 end
+    end
+    return (supported > 0 and supported < total) and " (*)" or ""
+end
+
 ---@param col       table   The column frame to build into.
 ---@param groups    table   Array of group definitions for this column.
 ---@param cmd       string  Bot command prefix for the column's toggles.
@@ -470,7 +581,7 @@ end
 ---@param registry  table   Widget registry the created controls register into.
 ---@param getSource fun(entry:table):table?  Returns the state table the controls read/write.
 local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, registry, getSource)
-    local entry      = CleanBot_PartyBots[slot.key]
+    local entry      = CB_SlotEntry(slot)
     local prevBottom = nil
 
     for gi = (startGi or 1), #groups do
@@ -513,10 +624,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 local sgStrats = CB_ShownStrategies(sg.strategies, slot.class)
                 local sec, cbs = CB_BuildStrategySection(col, ddAnchor, sgStrats, slot, tag,
                     function(s, checked)
-                        local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, slot.class)
-                        local ds = getSource(CleanBot_PartyBots[slot.key])
-                        if ds then ds[s.field] = checked end
-                        NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
+                        CB_ToggleStrategy(slot, s, checked, cmd, getSource)
                     end,
                     initSrc)
                 sec:Hide()
@@ -551,18 +659,17 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             end
 
             UIDropDownMenu_Initialize(dd, function(self)
-                local src = getSource(CleanBot_PartyBots[slot.key]) or {}
+                local src = getSource(CB_SlotEntry(slot)) or {}
                 for _, s in ipairs(strategies) do
                     local info           = UIDropDownMenu_CreateInfo()
-                    info.text            = s.name
+                    info.text            = s.name .. CB_PartialSuffix(slot, s)
                     info.value           = s.field
                     info.tooltipTitle    = s.name
                     info.tooltipText     = s.desc
                     info.tooltipOnButton = 1
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
-                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot,
-                            getSource(CleanBot_PartyBots[slot.key]))
+                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
                         multiRoleLabel:Hide()
                         for _, sub in pairs(subSections) do sub.section:Hide() end
                         local sec = roleToSection[s.field]
@@ -587,6 +694,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     dd             = dd,
                     strategies     = strategies,
                     getSource      = getSource,
+                    groupId        = cmd .. ":" .. (group.group or group.header),
                     subSections    = subSections,
                     roleToSection  = roleToSection,
                     multiRoleLabel = multiRoleLabel,
@@ -614,31 +722,33 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             NS.CB_AnchorBelow(dd, header)
 
             UIDropDownMenu_Initialize(dd, function(self)
-                local cd = getSource(CleanBot_PartyBots[slot.key]) or {}
+                local cd = getSource(CB_SlotEntry(slot)) or {}
                 if noneLabel then
                     local info        = UIDropDownMenu_CreateInfo()
                     info.text         = noneLabel
+                    -- NS.MIXED counts as active: members disagree, so "None"
+                    -- must not show as the settled choice.
                     local anyActive = false
-                    for _, s in ipairs(strategies) do if cd[s.field] == true then anyActive = true break end end
+                    for _, s in ipairs(strategies) do
+                        if cd[s.field] == true or cd[s.field] == NS.MIXED then anyActive = true break end
+                    end
                     info.checked      = not anyActive
                     info.func         = function()
                         UIDropDownMenu_SetText(self, noneLabel)
-                        CB_ApplyExclusiveSelection(strategies, nil, cmd, slot,
-                            getSource(CleanBot_PartyBots[slot.key]))
+                        CB_ApplyExclusiveSelection(strategies, nil, cmd, slot, getSource)
                     end
                     UIDropDownMenu_AddButton(info)
                 end
                 for _, s in ipairs(strategies) do
                     local info           = UIDropDownMenu_CreateInfo()
-                    info.text            = s.name
+                    info.text            = s.name .. CB_PartialSuffix(slot, s)
                     info.value           = s.field
                     info.tooltipTitle    = s.name
                     info.tooltipText     = s.desc
                     info.tooltipOnButton = 1
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
-                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot,
-                            getSource(CleanBot_PartyBots[slot.key]))
+                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
                     end
                     info.checked = cd[s.field] == true
                     UIDropDownMenu_AddButton(info)
@@ -647,7 +757,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
 
             if registry then
-                registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource, noneLabel = noneLabel }
+                -- groupId is cmd-prefixed: the combat and non-combat Movement groups
+                -- share group="movement", and the none-state map must keep them apart.
+                registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource, noneLabel = noneLabel, groupId = cmd .. ":" .. (group.group or group.header) }
             end
             prevBottom = dd
 
@@ -663,10 +775,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
 
             local section, checkboxes = CB_BuildStrategySection(col, header, groupStrats, slot, tag,
                 function(s, checked)
-                    local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, slot.class)
-                    local ds = getSource(CleanBot_PartyBots[slot.key])
-                    if ds then ds[s.field] = checked end
-                    NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
+                    CB_ToggleStrategy(slot, s, checked, cmd, getSource)
                 end,
                 getSource(entry))
             section:Show()
@@ -735,6 +844,9 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
 
     return classRegistry
 end
+-- Exported for GroupTab.lua, which builds the same class content against a
+-- per-class group slot so ClassData.lua changes reach both tabs for free.
+NS.CB_BuildClassTabContent = CB_BuildClassTabContent
 
 -- Splits groups by `column` field and renders them into two side-by-side
 -- columns inside `parent`. Groups without a column field go left by default.
@@ -774,6 +886,9 @@ local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry
     CB_BuildColumnGroups(leftCol,  leftGroups,  cmd, slot, tag, 1, registry, getSource)
     CB_BuildColumnGroups(rightCol, rightGroups, cmd, slot, tag, 1, registry, getSource)
 end
+-- Exported for GroupTab.lua, which renders NS.STRATEGIES / NS.NC_STRATEGIES
+-- against its group slot so Strategies.lua changes reach both tabs for free.
+NS.CB_BuildTwoColumnContent = CB_BuildTwoColumnContent
 
 -- ============================================================
 -- CB_BuildBotContent
@@ -1112,7 +1227,11 @@ SelectBot = function(key, silent)
     CleanBot_SelectTab(idx, silent)
 
     if NS.selectorMode == "dropdown" and NS.botDropdown then
-        UIDropDownMenu_SetText(NS.botDropdown, slot.name)
+        -- Match the open entries: class icon + class-colored name on the closed selector.
+        local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[slot.class]
+        local label = NS.CB_ClassIconMarkup(slot.class) .. " "
+            .. (c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, slot.name) or slot.name)
+        UIDropDownMenu_SetText(NS.botDropdown, label)
     end
 end
 
@@ -1195,6 +1314,8 @@ NS.CleanBot_RefreshTabs = function()
         if NS.botDropdown then NS.botDropdown:Hide() end
         for _, slot in ipairs(NS.tabPool) do slot.tabBtn:Hide() end
         NS.selectedTabIndex = 0
+        -- The Group tab swaps to its empty state on this exit too.
+        if NS.CB_RefreshGroupTab then NS.CB_RefreshGroupTab() end
         return
     end
 
@@ -1246,7 +1367,10 @@ NS.CleanBot_RefreshTabs = function()
             UIDropDownMenu_Initialize(NS.botDropdown, function()
                 for _, d in ipairs(NS.desiredBots) do
                     local info = UIDropDownMenu_CreateInfo()
-                    info.text         = d.name
+                    -- Class icon (inline markup) + name; colorCode tints the name only
+                    -- (color codes don't affect the inline texture). Mirrors the Group
+                    -- tab's class-colored, icon-on-left select-list rows.
+                    info.text         = NS.CB_ClassIconMarkup(d.class) .. " " .. d.name
                     info.value        = d.key
                     info.notCheckable = true
                     local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.class]
@@ -1263,19 +1387,37 @@ NS.CleanBot_RefreshTabs = function()
     local selKey = NS.selectedBotKey
     if not selKey or not desiredByKey[selKey] then selKey = desired[1].key end
     SelectBot(selKey, true)
+
+    -- ── 5. Mirror the roster change into the Group tab ──────────
+    -- (group list contents, grey states, selected group's member set).
+    if NS.CB_RefreshGroupTab then NS.CB_RefreshGroupTab() end
 end
 
 -- ============================================================
--- NS.CB_UpdateTabData — refreshes all UI elements for one tab
--- from CleanBot_PartyBots[key] without touching layout.
--- Call after any code that modifies a bot's combat/nonCombat data.
+-- NS.CB_SyncRegistry — pushes an entry's state into one registry of built
+-- strategy controls (the array CB_BuildColumnGroups appends to). Shared by
+-- the Individual tab (real bot entries, groupCtx = nil — behavior identical
+-- to the original per-bot sync) and the Group tab (aggregate entries whose
+-- fields may hold NS.MIXED, plus the suffix maps in groupCtx).
+--
+-- groupCtx (Group tab only):
+--   partial    field→true:   some-but-not-all members support the strategy → " (*)"
+--   noneActive groupId→true: some member has nothing active in a noneLabel
+--                             set → the noneLabel joins the dropdown display
 -- ============================================================
----@param key string  Bot name-key whose bound slot should refresh its displayed data.
-NS.CB_UpdateTabData = function(key)
-    local entry = CleanBot_PartyBots[key]
-    if not entry then return end
+---@param frames   table   Registry array (NS.botFrames[key] or a group registry).
+---@param entry    table   Bot entry or group aggregate entry.
+---@param groupCtx table?  { partial = table?, noneActive = table? }; nil on the Individual path.
+NS.CB_SyncRegistry = function(frames, entry, groupCtx)
+    local partial    = groupCtx and groupCtx.partial    or nil
+    local noneActive = groupCtx and groupCtx.noneActive or nil
 
-    if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
+    -- " (*)" when the group only partially supports this field.
+    ---@param f string  Strategy field name.
+    ---@return string   The suffix, or "".
+    local function starSuffix(f)
+        return (partial and partial[f]) and " (*)" or ""
+    end
 
     local function syncControls(controls, stratList, source)
         if not controls or not source then return end
@@ -1283,36 +1425,72 @@ NS.CB_UpdateTabData = function(key)
             local ctrl = controls[s.field]
             if not ctrl then
             elseif s.type == "timerSlider" then
-                local val = source[s.field]
-                ctrl:SetValue(val or s.min or 0)
+                -- SetValueSilent: sync must never fire the slider's onChange,
+                -- which would echo the value back as a command (fatal for a
+                -- group slot — the default would fan out to every member).
+                local val  = source[s.field]
+                local star = starSuffix(s.field)
+                if val == NS.MIXED then
+                    ctrl:SetValueSilent(s.default or s.min or 0, "???" .. star)
+                else
+                    local v = val or s.min or 0
+                    ctrl:SetValueSilent(v, star ~= "" and (math.floor(v + 0.5) .. star) or nil)
+                end
                 if s.dependsOn then
+                    -- NS.MIXED is truthy on purpose: a half-checked controller
+                    -- still leaves the timer settable for the whole group.
                     local enabled = source[s.dependsOn] and true or false
                     if enabled then ctrl:Enable() else ctrl:Disable() end
                 end
             else
-                ctrl:SetChecked(source[s.field] == true)
+                local v = source[s.field]
+                ctrl:SetChecked(v == true)
+                if ctrl.labelFS then
+                    ctrl.labelFS:SetText(ctrl.labelBase
+                        .. (v == NS.MIXED and " (?)" or "")
+                        .. starSuffix(s.field))
+                end
             end
         end
-    end
-    local function syncDropdown(dd, stratList, source)
-        if not dd or not source then return nil end
-        UIDropDownMenu_SetText(dd, "")
-        for _, s in ipairs(stratList) do
-            if source[s.field] == true then
-                UIDropDownMenu_SetText(dd, s.name)
-                return s.field
-            end
-        end
-        return nil
     end
 
-    local frames = NS.botFrames[key]
-    if not frames then return end
+    -- Sets the dropdown text and returns (settledField, shownCount).
+    -- Display list, in strategies order: every field that is set (true) or
+    -- contested (NS.MIXED) contributes its name + " (*)" suffix; the
+    -- noneLabel leads the list when noneActive flags this group (a member
+    -- sits at none). Multiple entries comma-join ("Tank, DPS (Single)");
+    -- exactly one uniformly-true entry renders classically and is returned
+    -- as settledField for the role sub-section logic.
+    local function syncDropdown(dd, stratList, source, noneLabel, groupId)
+        if not dd or not source then return nil, 0 end
+        local names       = {}
+        local activeField = nil
+        local trueCount   = 0
+        if noneLabel and noneActive and groupId and noneActive[groupId] then
+            names[#names + 1] = noneLabel
+        end
+        for _, s in ipairs(stratList) do
+            local v = source[s.field]
+            if v == true or v == NS.MIXED then
+                names[#names + 1] = s.name .. starSuffix(s.field)
+                if v == true then
+                    trueCount   = trueCount + 1
+                    activeField = s.field
+                end
+            end
+        end
+        UIDropDownMenu_SetText(dd, table.concat(names, ", "))
+        if #names == 1 and trueCount == 1 then
+            return activeField, 1
+        end
+        return nil, #names
+    end
 
     for _, cf in ipairs(frames) do
         local cd = cf.getSource and cf.getSource(entry)
         if cf.type == "dropdown" then
-            if not syncDropdown(cf.dd, cf.strategies, cd) and cf.noneLabel then
+            local _, shown = syncDropdown(cf.dd, cf.strategies, cd, cf.noneLabel, cf.groupId)
+            if shown == 0 and cf.noneLabel then
                 UIDropDownMenu_SetText(cf.dd, cf.noneLabel)
             end
 
@@ -1320,7 +1498,7 @@ NS.CB_UpdateTabData = function(key)
             syncControls(cf.checkboxes, cf.strategies, cd)
 
         elseif cf.type == "roleDropdown" then
-            local activeRole = syncDropdown(cf.dd, cf.strategies, cd)
+            local activeRole = syncDropdown(cf.dd, cf.strategies, cd, nil, cf.groupId)
             local count = 0
             if cd then
                 for _, s in ipairs(cf.strategies) do
@@ -1337,6 +1515,28 @@ NS.CB_UpdateTabData = function(key)
             end
         end
     end
+end
+
+-- ============================================================
+-- NS.CB_UpdateTabData — refreshes all UI elements for one tab
+-- from CleanBot_PartyBots[key] without touching layout.
+-- Call after any code that modifies a bot's combat/nonCombat data.
+-- ============================================================
+---@param key string  Bot name-key whose bound slot should refresh its displayed data.
+NS.CB_UpdateTabData = function(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+
+    if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
+
+    -- Group hook BEFORE the botFrames guard: a member that isn't bound to an
+    -- Individual slot must still refresh the Group tab's aggregate view.
+    if NS.CB_OnMemberDataChanged then NS.CB_OnMemberDataChanged(key) end
+
+    local frames = NS.botFrames[key]
+    if not frames then return end
+
+    NS.CB_SyncRegistry(frames, entry, nil)
 end
 
 -- ============================================================

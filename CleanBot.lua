@@ -233,10 +233,11 @@ NS.COLLAPSED_WIDTH   = nil  -- computed in CleanBot_BuildIndividualTab after geo
 NS.managePanel      = nil
 NS.manageScrollFrame = nil
 NS.manageScrollChild = nil
+NS.groupPanel    = nil
 NS.settingsPanel = nil
 
 -- ============================================================
--- Top-level tab management  (Manage = 1, Individual = 2, Settings = 3)
+-- Top-level tab management  (Manage = 1, Individual = 2, Group = 3, Settings = 4)
 -- ============================================================
 NS.activeTopTabIndex = 0
 NS.topTabs           = {}
@@ -267,12 +268,24 @@ NS.CleanBot_SelectTopTab = function(index)
 
     if NS.managePanel     then if index == 1 then NS.managePanel:Show()     else NS.managePanel:Hide()     end end
     if NS.individualPanel    then if index == 2 then NS.individualPanel:Show()    else NS.individualPanel:Hide()    end end
-    if NS.settingsPanel then if index == 3 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
+    if NS.groupPanel    then if index == 3 then NS.groupPanel:Show()    else NS.groupPanel:Hide()    end end
+    if NS.settingsPanel then if index == 4 then NS.settingsPanel:Show() else NS.settingsPanel:Hide() end end
     if NS.individualExpandBtn then if index == 2 then NS.individualExpandBtn:Show() else NS.individualExpandBtn:Hide() end end
 
-    -- Resize the frame: Individual tab restores saved expand state; all other tabs use collapsed width.
+    -- Resize the frame: Individual restores the saved expand state; Group is always
+    -- expanded while bots are present (no collapse affordance) and follows the saved
+    -- state only in the empty roster case; other tabs use collapsed width.
     if NS.COLLAPSED_WIDTH then
-        local targetW = (index == 2) and (NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH) or NS.COLLAPSED_WIDTH
+        local savedW = NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH
+        local targetW
+        if index == 2 then
+            targetW = savedW
+        elseif index == 3 then
+            local haveBots = NS.desiredBots and #NS.desiredBots > 0
+            targetW = haveBots and NS.EXPANDED_WIDTH or savedW
+        else
+            targetW = NS.COLLAPSED_WIDTH
+        end
         NS.CB_ResizeFrame(targetW)
     end
 
@@ -318,7 +331,7 @@ NS.CB_BuildFrames = function()
     NS.topTabBar:SetPoint("TOPRIGHT", CleanBotFrame, "TOPRIGHT", 0, -NS.TITLE_H)
     NS.topTabBar:SetHeight(NS.TOP_BAR_H)
 
-    local tabLabels = { "Manage", "Individual", "Settings" }
+    local tabLabels = { "Manage", "Individual", "Group", "Settings" }
     local prevTopTab = nil
     for i, label in ipairs(tabLabels) do
         local idx = i
@@ -347,6 +360,12 @@ NS.CB_BuildFrames = function()
     -- ── Manage panel ───────────────────────────────────────────
     -- Defined in ManageTab.lua (loads after this file).
     NS.CleanBot_BuildManageTab()
+
+    -- ── Group panel ────────────────────────────────────────────
+    -- Defined in GroupTab.lua (loads after this file). Must run after
+    -- CleanBot_BuildIndividualTab: it reads NS.individualModelPanel's width so
+    -- the mirrored strategy panel lines up with the Individual tab's.
+    NS.CleanBot_BuildGroupTab()
 
     -- ── Settings panel ─────────────────────────────────────────
     -- Defined in SettingsTab.lua (loads after this file).
@@ -388,6 +407,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
         if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
+        if type(CleanBot_SavedVars.botGroups)           ~= "table" then CleanBot_SavedVars.botGroups           = {} end
 
         -- Seed the protected "Favorites" preset, migrating the old favoriteBots set
         -- (format: { [lowercaseName] = true }) into the preset array format on first run.

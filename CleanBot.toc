@@ -23,6 +23,7 @@ Individual\Model.lua
 Individual\Individual.lua
 Trade.lua
 ManageTab.lua
+GroupTab.lua
 SettingsTab.lua
 Debug.lua
 Commands.lua
