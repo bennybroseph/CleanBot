@@ -57,8 +57,8 @@ local function CB_GroupClassSlot(class)
 end
 
 -- ── UI state (assigned in CleanBot_BuildGroupTab) ─────────────────────────────
-local selectedGroupValue = nil   ---@type string?  "class:WARRIOR" | "custom:Name"; survives refreshes
-local lastAppliedGroupValue = nil ---@type string?  the value CB_OnGroupSelected last applied (detects group change vs refresh)
+local selectedGroupValues = nil  ---@type table?   selected group values in list order; nil = first show, {} = deliberately cleared
+local lastAppliedSignature = nil ---@type string?  signature of the group set last applied (detects set change vs refresh)
 local currentMembers     = {}    ---@type table    live members ({key,name,class,value}) of the selected group
 local currentItems       = {}    ---@type table    the member list's current item tables (mutated in place for live role icons)
 local groupList, memberList      -- the two select lists
@@ -160,10 +160,24 @@ local function CB_LiveByKey()
     return map
 end
 
--- The selected group's custom name, or nil for class groups / no selection.
+-- The selected group's custom name — only when EXACTLY ONE group is selected and
+-- it's custom; nil otherwise (managed groups and multi-selections can't be edited).
 ---@return string?  The custom group name.
 local function CB_SelectedCustomGroupName()
-    return selectedGroupValue and selectedGroupValue:match("^custom:(.+)$") or nil
+    if selectedGroupValues and #selectedGroupValues == 1 then
+        return selectedGroupValues[1]:match("^custom:(.+)$")
+    end
+    return nil
+end
+
+-- The error to print when a group-editing action can't run: no selection, more
+-- than one group selected, or the single selected group is managed.
+---@return string
+local function CB_SingleSelectionProblem()
+    local n = selectedGroupValues and #selectedGroupValues or 0
+    if n == 0 then return "No group selected." end
+    if n > 1 then return "Select a single custom group first." end
+    return "Class and role groups are managed automatically and cannot be edited."
 end
 
 -- Whether a name collides with a built-in (class or role) group label — those
@@ -231,30 +245,32 @@ local function CB_GroupItems()
     return items
 end
 
--- Resolves a group value into its LIVE members (send/aggregate targets) and
--- the member-list items. A stored custom-group member missing from the
--- roster renders grey but stays selectable so it can be removed.
--- Each live member carries `.value` matching its member-list item value, so a
--- multiselect value maps back to a member (greys have an item but no member).
----@param value string  "class:CLASS" or "custom:Name".
----@return table members  Array of {key,name,class,value}.
----@return table items    Select-list item tables for the member list.
-local function CB_ResolveMembers(value)
-    local members, items = {}, {}
+-- Appends one group's LIVE members (send/aggregate targets) and member-list
+-- items into the accumulators, deduping across groups (a bot in several selected
+-- groups appears once). Live member/item values are the bot KEY for every kind;
+-- a stored custom-group member missing from the roster gets a grey item keyed by
+-- its stored name (selectable so it can still be removed).
+---@param value     string  "all:all" | "class:CLASS" | "role:..." | "custom:Name".
+---@param members   table   Accumulator: array of {key,name,class,value}.
+---@param items     table   Accumulator: select-list item tables.
+---@param seenLive  table   key → true (dedup across groups).
+---@param seenGrey  table   strlower(stored name) → true (dedup across groups).
+local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+    -- Adds one live roster bot (if not already collected).
+    local function addLive(d)
+        if seenLive[d.key] then return end
+        seenLive[d.key] = true
+        members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
+        items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
+                                  botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
+    end
+
     local kind, rest = value:match("^(%a+):(.+)$")
     if kind == "all" then
-        for _, d in ipairs(NS.desiredBots or {}) do
-            members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
-            items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
-                                      botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
-        end
+        for _, d in ipairs(NS.desiredBots or {}) do addLive(d) end
     elseif kind == "class" then
         for _, d in ipairs(NS.desiredBots or {}) do
-            if d.class == rest then
-                members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
-                items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
-                                          botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
-            end
+            if d.class == rest then addLive(d) end
         end
     elseif kind == "role" then
         -- Dynamic membership: every live bot currently filling the role. A
@@ -263,11 +279,7 @@ local function CB_ResolveMembers(value)
         local rg = roleByValue[value]
         if rg then
             for _, d in ipairs(NS.desiredBots or {}) do
-                if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then
-                    members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
-                    items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
-                                              botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
-                end
+                if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then addLive(d) end
             end
         end
     elseif kind == "custom" then
@@ -276,19 +288,32 @@ local function CB_ResolveMembers(value)
         for _, botName in ipairs(stored) do
             local d = live[strlower(botName)]
             if d then
-                members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = botName }
-                items[#items + 1]     = { text = d.name, value = botName, class = d.class,
-                                          botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
-            else
-                items[#items + 1]     = { text = botName, value = botName, grey = true }
+                addLive(d)
+            elseif not seenGrey[strlower(botName)] then
+                seenGrey[strlower(botName)] = true
+                items[#items + 1] = { text = botName, value = botName, grey = true }
             end
         end
     end
+end
 
-    -- Sort key depends on the group kind: "all" → Class → Role → Name; a single
-    -- class group → Role → Name (class is constant); role/custom → Class → Name.
-    -- Members follow the same order so the class tabs appear sorted; greyed items
-    -- sort last. Compares (class, key, name) tuples shared by members and items.
+-- Resolves the SELECTED group set into the union of their members + items,
+-- sorted. Sort rule: a single selected group keeps its kind-specific order
+-- ("all" → Class → Role → Name; one class → Role → Name; role/custom → Class →
+-- Name); several groups use the "all" rule. Greyed items sort last.
+---@param values table  Selected group values, in list order.
+---@return table members  Array of {key,name,class,value}.
+---@return table items    Select-list item tables for the member list.
+local function CB_ResolveSelectedMembers(values)
+    local members, items = {}, {}
+    local seenLive, seenGrey = {}, {}
+    for _, value in ipairs(values) do
+        CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+    end
+
+    local kind = #values == 1 and values[1]:match("^(%a+):") or "all"
+    -- Compares (class, key, name) tuples shared by members and items; members
+    -- follow the same order so the class tabs appear sorted.
     local function cmp(aClass, aKey, aName, bClass, bKey, bName)
         if kind ~= "class" then
             local ac, bc = classDisplay(aClass), classDisplay(bClass)
@@ -647,7 +672,10 @@ local function CB_ApplyMemberSelection()
     end
 
     if #managed == 0 then
-        -- Nothing managed: hide the strategy controls, show the prompt.
+        -- Nothing managed: hide the strategy controls, show the prompt — which
+        -- depends on whether a group is even selected.
+        local anyGroup = selectedGroupValues and #selectedGroupValues > 0
+        emptyStratLabel:SetText(anyGroup and "Select a Bot to Begin" or "Select a Group to Begin")
         managingLabel:Hide()
         groupContainer:Hide()
         emptyStratLabel:Show()
@@ -669,41 +697,39 @@ local function CB_ApplyMemberSelection()
     CB_SyncGroupViews()
 end
 
--- Applies a group selection: resolves the members, sets the member list, picks
--- the managed selection (all by default; preserved across an internal refresh of
--- the same group), then applies it. Kicks a silent bridge-path state re-read.
--- (The whisper path deliberately relies on the per-toggle ",?" self-heal instead
--- of mass co?/nc? probes per selection.)
----@param value         string   "class:CLASS" | "role:..." | "custom:Name".
----@param fromUserClick boolean?  True when the user clicked the group row (→ reselect all).
-local function CB_OnGroupSelected(value, fromUserClick)
-    local newGroup = (value ~= lastAppliedGroupValue)
-    selectedGroupValue = value
+-- Applies the group list's current selection: resolves the union of the selected
+-- groups' members, sets the member list, picks the managed selection (all by
+-- default; preserved across an internal refresh of the SAME group set so a state
+-- packet can't reset a narrowed selection), then applies it. Kicks a silent
+-- bridge-path state re-read. (The whisper path deliberately relies on the
+-- per-toggle ",?" self-heal instead of mass co?/nc? probes per selection.)
+---@param fromUserClick boolean?  True on a group-list click (→ reselect all members).
+local function CB_ApplyGroupSelection(fromUserClick)
+    selectedGroupValues = groupList:GetSelectedValues()
+    local signature = table.concat(selectedGroupValues, "\1")
+    local sameSet   = (signature == lastAppliedSignature)
 
-    -- Preserve the current selection only when an internal refresh re-applies the
-    -- SAME group (so a state packet can't reset a narrowed selection); a user
-    -- click, a new group, or the first show all (re)select every row.
-    local prev = (not fromUserClick and not newGroup) and memberList:GetSelectedValues() or nil
+    local prev = (not fromUserClick and sameSet) and memberList:GetSelectedValues() or nil
 
-    local members, items = CB_ResolveMembers(value)
+    local members, items = CB_ResolveSelectedMembers(selectedGroupValues)
     currentMembers = members
     currentItems   = items
     memberList:SetItems(items)
     if prev then memberList:SetSelectedValues(prev) else memberList:SelectAllValues() end
 
-    lastAppliedGroupValue = value
+    lastAppliedSignature = signature
     CB_ApplyMemberSelection()
-    NS.CB_RequestStates()
+    if #selectedGroupValues > 0 then NS.CB_RequestStates() end
 end
 
 -- Rebuilds only the left group list (items + re-highlight) without touching the
--- selected group's member list, aggregate, or fetching states. Lets dynamic role
+-- selected groups' member list, aggregate, or fetching states. Lets dynamic role
 -- groups appear/disappear as role state changes, with no disruption to the open
--- group (SetSelectedValue re-highlights without firing onSelect).
+-- selection (SetSelectedValues re-highlights without firing the callback).
 local function CB_RebuildGroupListOnly()
     if not (NS.groupPanel and groupList) then return end
     groupList:SetItems(CB_GroupItems())
-    if selectedGroupValue then groupList:SetSelectedValue(selectedGroupValue) end
+    if selectedGroupValues then groupList:SetSelectedValues(selectedGroupValues) end
 end
 
 -- Rebuilds the Group tab from the current roster: group items, grey states,
@@ -734,15 +760,19 @@ NS.CB_RefreshGroupTab = function()
 
     local items = CB_GroupItems()
     groupList:SetItems(items)
-    if not (selectedGroupValue and groupList:SetSelectedValue(selectedGroupValue)) then
-        selectedGroupValue = items[1] and items[1].value or nil
-        if selectedGroupValue then groupList:SetSelectedValue(selectedGroupValue) end
+
+    -- Restore the previous group selection, dropping groups that vanished. Fall
+    -- back to the first item ("All") on the first show, or when a non-empty
+    -- selection lost every group; a deliberate clear ({}) stays cleared.
+    if selectedGroupValues then
+        groupList:SetSelectedValues(selectedGroupValues)
     end
-    if selectedGroupValue then
-        CB_OnGroupSelected(selectedGroupValue)
-    else
-        memberList:SetItems({})
+    local survived = groupList:GetSelectedValues()
+    if #survived == 0 and (selectedGroupValues == nil or #selectedGroupValues > 0) then
+        if items[1] then groupList:SetSelectedValues({ items[1].value }) end
     end
+
+    CB_ApplyGroupSelection()
 end
 
 -- Updates the member list's right-aligned role icon for a bot whose role just
@@ -889,9 +919,10 @@ NS.CleanBot_BuildGroupTab = function()
         "Remove Bot", removeW, 24)
 
     -- ── Lists ─────────────────────────────────────────────────
-    -- Group list: single-select; a user click reselects all members of that group.
+    -- Group list: Windows-style multi-select; the member list shows the union of
+    -- the selected groups. A plain click = that group alone, all members selected.
     groupList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupList", listW, listH,
-        function(value) CB_OnGroupSelected(value, true) end)
+        function() CB_ApplyGroupSelection(true) end, true)
     NS.CB_AnchorBelow(groupList, removeGroupBtn)
 
     -- Member list: Windows-style multi-select; the selection is the managed set.
@@ -941,7 +972,7 @@ NS.CleanBot_BuildGroupTab = function()
     local legendBottom = groupContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     legendBottom:SetPoint("BOTTOMLEFT", groupContainer, "BOTTOMLEFT",
         (groupCtrl.paddingLeft or 0), (groupCtrl.paddingBottom or 0))
-    legendBottom:SetText("? - Strategy is different for some characters")
+    legendBottom:SetText("? - Strategy value is different for some characters")
     local legendTop = groupContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     legendTop:SetPoint("BOTTOMLEFT", legendBottom, "TOPLEFT", 0, 2)
     legendTop:SetText("* - Strategy is not available for some characters")
@@ -1028,7 +1059,7 @@ NS.CleanBot_BuildGroupTab = function()
                 return
             end
             CleanBot_SavedVars.botGroups[name] = {}
-            selectedGroupValue = "custom:" .. name
+            selectedGroupValues = { "custom:" .. name }
             NS.CB_RefreshGroupTab()
         end)
 
@@ -1053,7 +1084,7 @@ NS.CleanBot_BuildGroupTab = function()
             end
             CleanBot_SavedVars.botGroups[newName] = CleanBot_SavedVars.botGroups[oldName]
             CleanBot_SavedVars.botGroups[oldName] = nil
-            selectedGroupValue = "custom:" .. newName
+            selectedGroupValues = { "custom:" .. newName }
             NS.CB_RefreshGroupTab()
         end)
 
@@ -1063,7 +1094,7 @@ NS.CleanBot_BuildGroupTab = function()
             if data and CleanBot_SavedVars.botGroups then
                 CleanBot_SavedVars.botGroups[data] = nil
             end
-            selectedGroupValue = nil
+            selectedGroupValues = nil   -- fall back to the first group ("All")
             NS.CB_RefreshGroupTab()
         end)
 
@@ -1118,26 +1149,18 @@ NS.CleanBot_BuildGroupTab = function()
     end)
 
     renameGroupBtn:SetScript("OnClick", function()
-        if not selectedGroupValue then
-            NS.CB_Print("No group selected.")
-            return
-        end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class and role groups are managed automatically and cannot be renamed.")
+            NS.CB_Print(CB_SingleSelectionProblem())
             return
         end
         StaticPopup_Show("CLEANBOT_RENAME_GROUP", name, nil, name)
     end)
 
     removeGroupBtn:SetScript("OnClick", function()
-        if not selectedGroupValue then
-            NS.CB_Print("No group selected.")
-            return
-        end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class and role groups are managed automatically and cannot be removed.")
+            NS.CB_Print(CB_SingleSelectionProblem())
             return
         end
         local popup = StaticPopup_Show("CLEANBOT_REMOVE_GROUP", name, nil, name)
@@ -1148,26 +1171,18 @@ NS.CleanBot_BuildGroupTab = function()
     end)
 
     addBotBtn:SetScript("OnClick", function()
-        if not selectedGroupValue then
-            NS.CB_Print("No group selected.")
-            return
-        end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
+            NS.CB_Print(CB_SingleSelectionProblem())
             return
         end
         StaticPopup_Show("CLEANBOT_ADD_BOT_TO_GROUP", name, nil, name)
     end)
 
     addTargetBtn:SetScript("OnClick", function()
-        if not selectedGroupValue then
-            NS.CB_Print("No group selected.")
-            return
-        end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
+            NS.CB_Print(CB_SingleSelectionProblem())
             return
         end
         if not UnitExists("target") then
@@ -1183,16 +1198,19 @@ NS.CleanBot_BuildGroupTab = function()
 
     removeBotBtn:SetScript("OnClick", function()
         local name = CB_SelectedCustomGroupName()
-        if not selectedGroupValue then
-            NS.CB_Print("No group selected.")
-            return
-        end
         if not name then
-            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
+            NS.CB_Print(CB_SingleSelectionProblem())
             return
         end
-        -- Remove every selected bot (values are the stored names for custom groups).
-        local bots = memberList:GetSelectedValues()
+        -- Member values are bot KEYS for live members; map back to display/stored
+        -- names for removal (greys carry their stored name as the value).
+        local byValue = {}
+        for _, m in ipairs(currentMembers) do byValue[m.value] = m end
+        local bots = {}
+        for _, v in ipairs(memberList:GetSelectedValues()) do
+            local m = byValue[v]
+            bots[#bots + 1] = m and m.name or v
+        end
         if #bots == 0 then
             NS.CB_Print("No bots selected.")
             return
