@@ -302,6 +302,9 @@ end
 ---@return table               The container frame with the list API.
 NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSelect, justifyH)
     local ROW_H      = 20
+    -- Selection highlight opacity, dimmed slightly while the selected row is hovered.
+    local SEL_ALPHA       = 0.4
+    local SEL_HOVER_ALPHA = 0.25
     -- Number of physical row buttons that fit; scrolling remaps these onto the data
     -- rather than creating a button per item.
     local numVisible = math.max(1, math.floor((height - 4) / ROW_H))
@@ -415,10 +418,11 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
                     row.label:SetTextColor(row.curR, row.curG, row.curB)
                 end
 
-                -- Selection bar tinted to the row's own (pre-white) text color.
+                -- Selection bar tinted to the row's own (pre-white) text color,
+                -- dimmed slightly while the selected row is moused-over.
                 if on then
                     row.hl:SetVertexColor(row.curR, row.curG, row.curB)
-                    row.hl:SetAlpha(0.4)
+                    row.hl:SetAlpha(row:IsMouseOver() and SEL_HOVER_ALPHA or SEL_ALPHA)
                 else
                     row.hl:SetAlpha(0)
                 end
@@ -477,13 +481,16 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         hl:SetAlpha(0)
         row.hl = hl
 
-        -- White label text while moused-over; restore the item's color on leave.
+        -- While moused-over: white label text, and a slightly dimmer selection bar.
         row:SetScript("OnEnter", function(self)
-            if self.index then self.label:SetTextColor(1, 1, 1) end
+            if not self.index then return end
+            self.label:SetTextColor(1, 1, 1)
+            if self.selected then self.hl:SetAlpha(SEL_HOVER_ALPHA) end
         end)
         row:SetScript("OnLeave", function(self)
             if self.selected then
                 self.label:SetTextColor(1, 1, 1)
+                self.hl:SetAlpha(SEL_ALPHA)
             else
                 self.label:SetTextColor(self.curR or 1, self.curG or 1, self.curB or 1)
             end
