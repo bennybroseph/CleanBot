@@ -83,24 +83,21 @@ local activeInnerKey = 1         ---@type number|string  1 | 2 | "class"
 -- (entry.combat role fields), shown only when populated.
 -- ============================================================
 -- LFG role icons (Interface\LFGFrame\UI-LFG-ICON-PORTRAITROLES, 64x64; texel
--- coords lifted from FrameXML LFGFrame.lua, expressed as 0-1 fractions — shared by
--- the inline group-list markup (NS.CB_InlineIcon, texDim 64) and the member-list
--- right-icon textures (SetTexCoord).
+-- coords lifted from FrameXML LFGFrame.lua, as 0-1 fractions for the right-icon
+-- textures (SetTexCoord) on both the group list (role groups) and member list.
 local ROLE_TEX  = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
 local ROLE_TANK = { 0,     19 / 64, 22 / 64, 41 / 64 }
 local ROLE_HEAL = { 20/64, 39 / 64,  1 / 64, 20 / 64 }
 local ROLE_DMG  = { 20/64, 39 / 64, 22 / 64, 41 / 64 }
-local TANK_I    = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_TANK, 64)
-local HEAL_I    = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_HEAL, 64)
-local DMG_I     = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_DMG,  64)
 
--- A bot belongs to a role group if ANY of the listed combat fields is set.
+-- A bot belongs to a role group if ANY of the listed combat fields is set; coords
+-- give the role's right-aligned list icon.
 local ROLE_GROUPS = {
-    { label = "Tanks",        value = "role:tank",      icon = TANK_I, fields = { "isTank" } },
-    { label = "DPS",          value = "role:dps",       icon = DMG_I,  fields = { "isDPS", "isDPSAoe" } },
-    { label = "DPS (Single)", value = "role:dpsSingle", icon = DMG_I,  fields = { "isDPS" } },
-    { label = "DPS (AoE)",    value = "role:dpsAoe",    icon = DMG_I,  fields = { "isDPSAoe" } },
-    { label = "Healers",      value = "role:healer",    icon = HEAL_I, fields = { "isHealer" } },
+    { label = "Tanks",        value = "role:tank",      coords = ROLE_TANK, fields = { "isTank" } },
+    { label = "DPS",          value = "role:dps",       coords = ROLE_DMG,  fields = { "isDPS", "isDPSAoe" } },
+    { label = "DPS (Single)", value = "role:dpsSingle", coords = ROLE_DMG,  fields = { "isDPS" } },
+    { label = "DPS (AoE)",    value = "role:dpsAoe",    coords = ROLE_DMG,  fields = { "isDPSAoe" } },
+    { label = "Healers",      value = "role:healer",    coords = ROLE_HEAL, fields = { "isHealer" } },
 }
 local roleByValue = {}
 for _, rg in ipairs(ROLE_GROUPS) do roleByValue[rg.value] = rg end
@@ -206,14 +203,15 @@ local function CB_GroupItems()
     end
 
     -- Role groups (dynamic; only when ≥1 live bot currently fills the role).
-    -- The role icon is inline in the label text, so no `class`/real-texture field.
+    -- The role icon is right-aligned (rightIcon), matching the member list.
     for _, rg in ipairs(ROLE_GROUPS) do
         local count = 0
         for _, d in ipairs(NS.desiredBots or {}) do
             if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then count = count + 1 end
         end
         if count > 0 then
-            items[#items + 1] = { text = rg.icon .. " " .. rg.label, value = rg.value }
+            items[#items + 1] = { text = rg.label, value = rg.value,
+                                  rightIcon = { texture = ROLE_TEX, coords = rg.coords } }
         end
     end
 
@@ -897,8 +895,9 @@ NS.CleanBot_BuildGroupTab = function()
     NS.CB_AnchorBelow(groupList, removeGroupBtn)
 
     -- Member list: Windows-style multi-select; the selection is the managed set.
+    -- Center-justified row labels (bot names).
     memberList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupMemberList", listW, listH,
-        function() CB_ApplyMemberSelection() end, true)
+        function() CB_ApplyMemberSelection() end, true, "CENTER")
     memberList.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(memberList, groupList)
 

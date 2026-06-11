@@ -298,8 +298,9 @@ end
 ---@param height     number    Visible container height.
 ---@param onSelect   fun(value:string?)? Click handler (single) / selection-changed (multi).
 ---@param multiSelect boolean? Enable Windows-style multi-selection.
+---@param justifyH   string?  Row label justification ("LEFT" default, or "CENTER"/"RIGHT").
 ---@return table               The container frame with the list API.
-NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSelect)
+NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSelect, justifyH)
     local ROW_H      = 20
     -- Number of physical row buttons that fit; scrolling remaps these onto the data
     -- rather than creating a button per item.
@@ -443,6 +444,9 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
 
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+        -- Justify (default LEFT): a rightIcon adds a RIGHT anchor (fixed width), and
+        -- the font object would otherwise center the text within it.
+        lbl:SetJustifyH(justifyH or "LEFT")
         row.label = lbl
         -- Snapshot the template's text color so refresh() can reset a recycled
         -- row after a class-colored or greyed table item occupied it.
