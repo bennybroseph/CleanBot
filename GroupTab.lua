@@ -74,6 +74,41 @@ local presentClasses = {}        ---@type table    unique classes in the selecte
 local activeInnerKey = 1         ---@type number|string  1 | 2 | "class"
 
 -- ============================================================
+-- Dynamic role groups — auto-derived from each bot's current role state
+-- (entry.combat role fields), shown only when populated.
+-- ============================================================
+-- LFG role icons (Interface\LFGFrame\UI-LFG-ICON-PORTRAITROLES, 64x64; texel
+-- coords lifted from FrameXML LFGFrame.lua, expressed as 0-1 fractions for
+-- NS.CB_InlineIcon with texDim 64).
+local ROLE_TEX = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local TANK_I   = NS.CB_InlineIcon(ROLE_TEX, 14, { 0,     19 / 64, 22 / 64, 41 / 64 }, 64)
+local HEAL_I   = NS.CB_InlineIcon(ROLE_TEX, 14, { 20/64, 39 / 64,  1 / 64, 20 / 64 }, 64)
+local DMG_I    = NS.CB_InlineIcon(ROLE_TEX, 14, { 20/64, 39 / 64, 22 / 64, 41 / 64 }, 64)
+
+-- A bot belongs to a role group if ANY of the listed combat fields is set.
+local ROLE_GROUPS = {
+    { label = "Tanks",        value = "role:tank",      icon = TANK_I, fields = { "isTank" } },
+    { label = "DPS",          value = "role:dps",       icon = DMG_I,  fields = { "isDPS", "isDPSAoe" } },
+    { label = "DPS (Single)", value = "role:dpsSingle", icon = DMG_I,  fields = { "isDPS" } },
+    { label = "DPS (AoE)",    value = "role:dpsAoe",    icon = DMG_I,  fields = { "isDPSAoe" } },
+    { label = "Healers",      value = "role:healer",    icon = HEAL_I, fields = { "isHealer" } },
+}
+local roleByValue = {}
+for _, rg in ipairs(ROLE_GROUPS) do roleByValue[rg.value] = rg end
+
+-- Whether a bot entry currently fills a role group (any field true).
+---@param entry  table?  CleanBot_PartyBots[key].
+---@param fields table   Role field names to test.
+---@return boolean
+local function CB_BotInRole(entry, fields)
+    if not (entry and entry.combat) then return false end
+    for _, f in ipairs(fields) do
+        if entry.combat[f] == true then return true end
+    end
+    return false
+end
+
+-- ============================================================
 -- Data helpers
 -- ============================================================
 
@@ -91,6 +126,22 @@ local function CB_SelectedCustomGroupName()
     return selectedGroupValue and selectedGroupValue:match("^custom:(.+)$") or nil
 end
 
+-- Whether a name collides with a built-in (class or role) group label — those
+-- are managed automatically, so a custom group can't reuse the name (the list
+-- would show two indistinguishable entries).
+---@param name string  Candidate custom-group name.
+---@return boolean
+local function CB_IsReservedGroupName(name)
+    local lower = strlower(name)
+    for _, display in pairs(NS.CLASS_DISPLAY or {}) do
+        if strlower(display) == lower then return true end
+    end
+    for _, rg in ipairs(ROLE_GROUPS) do
+        if strlower(rg.label) == lower then return true end
+    end
+    return false
+end
+
 -- Items for the groups list: class groups first (order of first appearance in
 -- the roster, class-colored + icon), then custom groups sorted by name. A
 -- custom group greys when ANY stored member is missing from the party/raid.
@@ -106,6 +157,18 @@ local function CB_GroupItems()
                 value = "class:" .. d.class,
                 class = d.class,
             }
+        end
+    end
+
+    -- Role groups (dynamic; only when ≥1 live bot currently fills the role).
+    -- The role icon is inline in the label text, so no `class`/real-texture field.
+    for _, rg in ipairs(ROLE_GROUPS) do
+        local count = 0
+        for _, d in ipairs(NS.desiredBots or {}) do
+            if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then count = count + 1 end
+        end
+        if count > 0 then
+            items[#items + 1] = { text = rg.icon .. " " .. rg.label, value = rg.value }
         end
     end
 
@@ -139,6 +202,19 @@ local function CB_ResolveMembers(value)
             if d.class == rest then
                 members[#members + 1] = { key = d.key, name = d.name, class = d.class }
                 items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
+            end
+        end
+    elseif kind == "role" then
+        -- Dynamic membership: every live bot currently filling the role. A
+        -- snapshot at selection time (like a custom group's stored list), so the
+        -- aggregate stays stable while you edit it; re-resolves on reselection.
+        local rg = roleByValue[value]
+        if rg then
+            for _, d in ipairs(NS.desiredBots or {}) do
+                if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then
+                    members[#members + 1] = { key = d.key, name = d.name, class = d.class }
+                    items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
+                end
             end
         end
     elseif kind == "custom" then
@@ -483,6 +559,16 @@ local function CB_OnGroupSelected(value)
     NS.CB_RequestStates()
 end
 
+-- Rebuilds only the left group list (items + re-highlight) without touching the
+-- selected group's member list, aggregate, or fetching states. Lets dynamic role
+-- groups appear/disappear as role state changes, with no disruption to the open
+-- group (SetSelectedValue re-highlights without firing onSelect).
+local function CB_RebuildGroupListOnly()
+    if not (NS.groupPanel and groupList) then return end
+    groupList:SetItems(CB_GroupItems())
+    if selectedGroupValue then groupList:SetSelectedValue(selectedGroupValue) end
+end
+
 -- Rebuilds the Group tab from the current roster: group items, grey states,
 -- selection restore, and the empty state. Hooked from CleanBot_RefreshTabs
 -- (both exits), so every roster change flows through here.
@@ -528,6 +614,11 @@ end
 ---@param key string  Bot name-key whose entry just changed.
 NS.CB_OnMemberDataChanged = function(key)
     if not NS.groupPanel then return end
+
+    -- Role-group presence depends on every bot's role state, not just the
+    -- selected group's members — refresh the list whenever any bot changes.
+    CB_RebuildGroupListOnly()
+
     local isMember = false
     for _, m in ipairs(NS.groupSlot.members) do
         if m.key == key then isMember = true break end
@@ -571,7 +662,8 @@ NS.CleanBot_BuildGroupTab = function()
 
     -- Content area: the Group tab has no per-bot selector row, so content
     -- starts at the panel's own top padding (unlike individualContent's
-    -- extra BOT_BAR_H inset).
+    -- extra BOT_BAR_H inset). Keep the normal right padding so the strategy
+    -- panel isn't flush against the frame border.
     local content = CreateFrame("Frame", "CleanBotGroupContent", panel)
     content:SetPoint("TOPLEFT",     panel, "TOPLEFT",      panel.paddingLeft,  -panel.paddingTop)
     content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -panel.paddingRight,  panel.paddingBottom)
@@ -589,6 +681,13 @@ NS.CleanBot_BuildGroupTab = function()
     --    so the mirrored strategy panel matches the Individual tab's) ──────
     local listsW = (NS.individualModelPanel and NS.individualModelPanel:GetWidth() or 0)
     if listsW == 0 then listsW = 360 end
+    -- The Individual tab puts a wide MODEL_GAP between its model and strategy
+    -- panels; the Group tab has no model, so the lists expand into most of that
+    -- gap (leaving LIST_STRAT_GAP) while the strategy panel stays exactly where
+    -- it is — its left edge = listsRegion.right + LIST_STRAT_GAP, and listsW grows
+    -- by (MODEL_GAP - LIST_STRAT_GAP) so that sum is unchanged.
+    local LIST_STRAT_GAP = 8
+    listsW = listsW + (NS.MODEL_GAP - LIST_STRAT_GAP)
     listsRegion = CreateFrame("Frame", "CleanBotGroupLists", content)
     listsRegion:SetPoint("TOPLEFT",    content, "TOPLEFT",    0, 0)
     listsRegion:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
@@ -600,45 +699,61 @@ NS.CleanBot_BuildGroupTab = function()
     local listW = colW - 20
     local bm    = NS.MARGIN.button
     local btnW  = math.floor((colW - bm.right - bm.left) / 2)
+    -- Two button rows now (Add/Rename over Remove; Add Bot/Add Target over Remove Bot).
     local listH = math.floor(contentH
-        - (bm.top + 24 + bm.bottom)   -- button row
-        - (bm.top + bm.bottom))       -- list container margins (stamped from button margins)
+        - 2 * (bm.top + 24 + bm.bottom)   -- two button rows
+        - (bm.top + bm.bottom))           -- list container margins (stamped from button margins)
 
-    -- ── Button row ────────────────────────────────────────────
+    -- Row 1 is the Add/Rename (Add Bot/Add Target) pair; the Remove button sits
+    -- centered on row 2 and is wider so its label doesn't clip.
+    local btnGap  = bm.right + bm.left   -- horizontal gap CB_AnchorAhead inserts
+    local vGap    = bm.bottom + bm.top   -- inter-row vertical gap (CB_AnchorBelow)
+    local removeW = btnW + 30            -- wider so "Remove Group"/"Remove Bot" fit
+
+    -- ── Group column buttons: [Add] [Rename] / [Remove] (centered) ──
     local addGroupBtn = NS.CB_CreateButton(listsRegion, "CleanBotAddGroupBtn",
         "Add Group", btnW, 24)
     addGroupBtn:SetPoint("TOPLEFT", listsRegion, "TOPLEFT",
         (addGroupBtn.marginLeft or 0), -(addGroupBtn.marginTop or 0))
 
-    local removeGroupBtn = NS.CB_CreateButton(listsRegion, "CleanBotRemoveGroupBtn",
-        "Remove Group", btnW, 24)
-    NS.CB_AnchorAhead(removeGroupBtn, addGroupBtn)
+    local renameGroupBtn = NS.CB_CreateButton(listsRegion, "CleanBotRenameGroupBtn",
+        "Rename Group", btnW, 24)
+    NS.CB_AnchorAhead(renameGroupBtn, addGroupBtn)
 
-    local addBotBtn = NS.CB_CreateButton(listsRegion, "CleanBotGroupAddBotBtn",
+    local removeGroupBtn = NS.CB_CreateButton(listsRegion, "CleanBotRemoveGroupBtn",
+        "Remove Group", removeW, 24)
+    -- Top-center pinned to the Add/Rename pair's midpoint (addGroupBtn right edge
+    -- + half the inter-button gap).
+    removeGroupBtn:SetPoint("TOP", addGroupBtn, "BOTTOMRIGHT", btnGap / 2, -vGap)
+
+    -- ── Bot column buttons: [Add Bot] [Add Target] / [Remove Bot] (centered) ──
+    local addBotBtn    = NS.CB_CreateButton(listsRegion, "CleanBotGroupAddBotBtn",
         "Add Bot", btnW, 24)
+    local addTargetBtn = NS.CB_CreateButton(listsRegion, "CleanBotGroupAddTargetBtn",
+        "Add Target", btnW, 24)
     local removeBotBtn = NS.CB_CreateButton(listsRegion, "CleanBotGroupRemoveBotBtn",
-        "Remove Bot", btnW, 24)
-    NS.CB_AnchorAhead(removeBotBtn, addBotBtn)
+        "Remove Bot", removeW, 24)
 
     -- ── Lists ─────────────────────────────────────────────────
     groupList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupList", listW, listH,
         function(value) CB_OnGroupSelected(value) end)
-    NS.CB_AnchorBelow(groupList, addGroupBtn)
+    NS.CB_AnchorBelow(groupList, removeGroupBtn)
 
     memberList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupMemberList", listW, listH)
     memberList.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(memberList, groupList)
 
-    -- Align the bot buttons with the member list's left edge (mirror of the
-    -- ManageTab presets layout: pin BOTTOMLEFT → list TOPLEFT with the
-    -- combined facing margins as the gap).
-    addBotBtn:ClearAllPoints()
-    addBotBtn:SetPoint("BOTTOMLEFT", memberList, "TOPLEFT",
-        0, (memberList.marginTop or 0) + (addBotBtn.marginBottom or 0))
+    -- Bot column anchored top-down at the member list's column so both columns'
+    -- rows line up (x mirrors how memberList lands ahead of groupList); Remove Bot
+    -- centered below the Add Bot / Add Target pair.
+    local rightColX = (groupList.marginLeft or 0) + colW + (groupList.marginRight or 0) + NS.COLUMN_GAP
+    addBotBtn:SetPoint("TOPLEFT", listsRegion, "TOPLEFT", rightColX, -(addBotBtn.marginTop or 0))
+    NS.CB_AnchorAhead(addTargetBtn, addBotBtn)
+    removeBotBtn:SetPoint("TOP", addBotBtn, "BOTTOMRIGHT", btnGap / 2, -vGap)
 
     -- ── Mirrored strategy panel (right column) ────────────────
     groupStratPanel = CreateFrame("Frame", "CleanBotGroupStratPanel", content)
-    groupStratPanel:SetPoint("TOPLEFT",     listsRegion, "TOPRIGHT",    NS.MODEL_GAP, 0)
+    groupStratPanel:SetPoint("TOPLEFT",     listsRegion, "TOPRIGHT",    LIST_STRAT_GAP, 0)
     groupStratPanel:SetPoint("BOTTOMRIGHT", content,     "BOTTOMRIGHT", 0,            0)
 
     groupCtrl = NS.CB_CreatePanel(groupStratPanel, "CleanBotGroupCtrl", 3, "panel")
@@ -736,16 +851,37 @@ NS.CleanBot_BuildGroupTab = function()
                 NS.CB_Print("A group named '" .. name .. "' already exists.")
                 return
             end
-            -- Refuse names that collide with the built-in class groups —
-            -- two identical labels in the list would be indistinguishable.
-            for _, display in pairs(NS.CLASS_DISPLAY or {}) do
-                if strlower(display) == strlower(name) then
-                    NS.CB_Print("'" .. name .. "' matches a built-in class group and cannot be used.")
-                    return
-                end
+            if CB_IsReservedGroupName(name) then
+                NS.CB_Print("'" .. name .. "' matches a built-in class/role group and cannot be used.")
+                return
             end
             CleanBot_SavedVars.botGroups[name] = {}
             selectedGroupValue = "custom:" .. name
+            NS.CB_RefreshGroupTab()
+        end)
+
+    NS.CB_RegisterEditPopup("CLEANBOT_RENAME_GROUP",
+        "Enter a new name for the '%s' group:",
+        function(self, data)
+            local newName = self.editBox and self.editBox:GetText()
+            newName = newName and newName:match("^%s*(.-)%s*$")
+            if not newName or newName == "" then
+                NS.CB_Print("Please enter a group name.")
+                return
+            end
+            local oldName = data
+            if not oldName or not CleanBot_SavedVars.botGroups[oldName] then return end
+            if CleanBot_SavedVars.botGroups[newName] then
+                NS.CB_Print("A group named '" .. newName .. "' already exists.")
+                return
+            end
+            if CB_IsReservedGroupName(newName) then
+                NS.CB_Print("'" .. newName .. "' matches a built-in class/role group and cannot be used.")
+                return
+            end
+            CleanBot_SavedVars.botGroups[newName] = CleanBot_SavedVars.botGroups[oldName]
+            CleanBot_SavedVars.botGroups[oldName] = nil
+            selectedGroupValue = "custom:" .. newName
             NS.CB_RefreshGroupTab()
         end)
 
@@ -759,29 +895,35 @@ NS.CleanBot_BuildGroupTab = function()
             NS.CB_RefreshGroupTab()
         end)
 
+    -- Title-cases + strips spaces, dedupes, and appends a bot name to a custom
+    -- group. Shared by the Add Bot popup and the Add Target button.
+    ---@param groupName string  Custom group name.
+    ---@param rawName   string  Raw bot name (any casing/spacing).
+    local function CB_AddBotToCustomGroup(groupName, rawName)
+        local botName = rawName and rawName:match("^%s*(.-)%s*$")
+        if not botName or botName == "" then
+            NS.CB_Print("Please enter a bot name.")
+            return
+        end
+        botName = botName:gsub("(%a)([%a]*)", function(first, rest)
+            return first:upper() .. rest:lower()
+        end):gsub("%s+", "")
+        local group = CleanBot_SavedVars.botGroups[groupName]
+        if not group then return end
+        for _, existing in ipairs(group) do
+            if strlower(existing) == strlower(botName) then
+                NS.CB_Print("'" .. botName .. "' is already in the '" .. groupName .. "' group.")
+                return
+            end
+        end
+        group[#group + 1] = botName
+        NS.CB_RefreshGroupTab()
+    end
+
     NS.CB_RegisterEditPopup("CLEANBOT_ADD_BOT_TO_GROUP",
         "Enter a bot name to add to the '%s' group:",
         function(self, data)
-            local botName = self.editBox and self.editBox:GetText()
-            botName = botName and botName:match("^%s*(.-)%s*$")
-            if not botName or botName == "" then
-                NS.CB_Print("Please enter a bot name.")
-                return
-            end
-            -- Title-case and strip spaces (matches the bot add command convention).
-            botName = botName:gsub("(%a)([%a]*)", function(first, rest)
-                return first:upper() .. rest:lower()
-            end):gsub("%s+", "")
-            local group = data and CleanBot_SavedVars.botGroups[data]
-            if not group then return end
-            for _, existing in ipairs(group) do
-                if strlower(existing) == strlower(botName) then
-                    NS.CB_Print("'" .. botName .. "' is already in the '" .. data .. "' group.")
-                    return
-                end
-            end
-            group[#group + 1] = botName
-            NS.CB_RefreshGroupTab()
+            CB_AddBotToCustomGroup(data, self.editBox and self.editBox:GetText())
         end)
 
     NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_BOT_FROM_GROUP",
@@ -803,6 +945,19 @@ NS.CleanBot_BuildGroupTab = function()
         StaticPopup_Show("CLEANBOT_ADD_GROUP")
     end)
 
+    renameGroupBtn:SetScript("OnClick", function()
+        if not selectedGroupValue then
+            NS.CB_Print("No group selected.")
+            return
+        end
+        local name = CB_SelectedCustomGroupName()
+        if not name then
+            NS.CB_Print("Class and role groups are managed automatically and cannot be renamed.")
+            return
+        end
+        StaticPopup_Show("CLEANBOT_RENAME_GROUP", name, nil, name)
+    end)
+
     removeGroupBtn:SetScript("OnClick", function()
         if not selectedGroupValue then
             NS.CB_Print("No group selected.")
@@ -810,7 +965,7 @@ NS.CleanBot_BuildGroupTab = function()
         end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class groups are managed automatically and cannot be removed.")
+            NS.CB_Print("Class and role groups are managed automatically and cannot be removed.")
             return
         end
         local popup = StaticPopup_Show("CLEANBOT_REMOVE_GROUP", name, nil, name)
@@ -827,10 +982,31 @@ NS.CleanBot_BuildGroupTab = function()
         end
         local name = CB_SelectedCustomGroupName()
         if not name then
-            NS.CB_Print("Class groups are managed automatically and cannot be edited.")
+            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
             return
         end
         StaticPopup_Show("CLEANBOT_ADD_BOT_TO_GROUP", name, nil, name)
+    end)
+
+    addTargetBtn:SetScript("OnClick", function()
+        if not selectedGroupValue then
+            NS.CB_Print("No group selected.")
+            return
+        end
+        local name = CB_SelectedCustomGroupName()
+        if not name then
+            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
+            return
+        end
+        if not UnitExists("target") then
+            NS.CB_Print("You have no target.")
+            return
+        end
+        if not UnitIsPlayer("target") then
+            NS.CB_Print("Your target is not a player.")
+            return
+        end
+        CB_AddBotToCustomGroup(name, UnitName("target"))
     end)
 
     removeBotBtn:SetScript("OnClick", function()
@@ -840,7 +1016,7 @@ NS.CleanBot_BuildGroupTab = function()
             return
         end
         if not name then
-            NS.CB_Print("Class groups are managed automatically and cannot be edited.")
+            NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
             return
         end
         local sel = memberList:GetSelected()
@@ -848,7 +1024,7 @@ NS.CleanBot_BuildGroupTab = function()
             NS.CB_Print("No bot selected.")
             return
         end
-        local botName = type(sel) == "table" and sel.value or sel
+        local botName = type(sel) == "table" and (sel.value or sel.text) or sel
         local popup = StaticPopup_Show("CLEANBOT_REMOVE_BOT_FROM_GROUP",
             botName, name, { group = name, bot = botName })
         if popup then
