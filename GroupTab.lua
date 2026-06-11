@@ -63,12 +63,15 @@ local listsRegion                -- container for buttons + both lists (hidden i
 local groupStratPanel            -- right-hand mirrored strategy panel
 local groupEmptyLabel            -- "No bots found..." (mirrors the Individual tab)
 local groupCtrl, groupContainer  -- ctrl panel + content container (class tabs build into it)
-local innerTabBar                -- inner tab bar (Combat / Non-Combat / class tabs)
+local innerTabBar                -- inner tab bar (Combat / Non-Combat / Class)
 local innerTabBtns = {}          -- [1] = Combat, [2] = Non-Combat
-local classTabBtns   = {}        -- [class] = lazily created class tab button
+local sharedClassTab             -- single "Class" inner tab (labeled per-class when only one)
+local classDropdown              -- class switcher (shown only when >1 unique class)
 local classContents  = {}        -- [class] = lazily built class content frame
 local combatContent, nonCombatContent
-local activeInnerKey = 1         ---@type number|string  1 | 2 | class token
+local selectedClass              ---@type string?  class token shown by the Class tab
+local presentClasses = {}        ---@type table    unique classes in the selected group (roster order)
+local activeInnerKey = 1         ---@type number|string  1 | 2 | "class"
 
 -- ============================================================
 -- Data helpers
@@ -285,42 +288,65 @@ local function CB_SyncGroupViews()
 end
 
 -- ============================================================
--- Inner tab bar — fixed Combat / Non-Combat tabs plus one lazily-built tab
--- per class present in the selected group.
+-- Inner tab bar — fixed Combat / Non-Combat tabs plus a single "Class" tab.
+-- With one unique class the Class tab is labeled with that class's name; with
+-- several it collapses to "Class" + a class-switcher dropdown (avoids tab
+-- overflow, mirroring the Individual tab's bot tab-vs-dropdown behavior).
 -- ============================================================
 
--- Shows the content frame matching tabKey (1 = Combat, 2 = Non-Combat, class
--- token = that class tab) and toggles the tab button active states.
----@param tabKey number|string  Inner tab key.
+-- The class dropdown belongs to the Class tab: visible only while that tab is
+-- active and the group spans more than one class (single-class groups have no
+-- dropdown). Anchored in a reserved row that the class content sits below.
+local function CB_UpdateClassDropdownShown()
+    if not classDropdown then return end
+    if activeInnerKey == "class" and #presentClasses > 1 then
+        classDropdown:Show()
+    else
+        classDropdown:Hide()
+    end
+end
+
+-- Shows the content frame matching tabKey (1 = Combat, 2 = Non-Combat,
+-- "class" = the selected class's content) and toggles the tab active states.
+---@param tabKey number|string  Inner tab key: 1 | 2 | "class".
 local function CB_SelectGroupInnerTab(tabKey)
     activeInnerKey = tabKey
     innerTabBtns[1]:SetActive(tabKey == 1)
     innerTabBtns[2]:SetActive(tabKey == 2)
-    for class, btn in pairs(classTabBtns) do btn:SetActive(tabKey == class) end
+    if sharedClassTab then sharedClassTab:SetActive(tabKey == "class") end
 
     if tabKey == 1 then combatContent:Show()    else combatContent:Hide()    end
     if tabKey == 2 then nonCombatContent:Show() else nonCombatContent:Hide() end
     for class, frame in pairs(classContents) do
-        if tabKey == class then frame:Show() else frame:Hide() end
+        if tabKey == "class" and class == selectedClass then frame:Show() else frame:Hide() end
     end
+    CB_UpdateClassDropdownShown()
 end
 
--- Builds (once) the tab button + class content for a class, rendering the
--- same ClassData strategies the Individual tab shows — against the per-class
--- group slot, so writes fan out to that class's members only.
----@param class string  Class token.
-local function CB_EnsureGroupClassTab(class)
-    if classTabBtns[class] then return end
+-- Re-anchors a class content frame's top: pushed down by a dropdown row when the
+-- group is multi-class (the dropdown occupies that row), flush under the tab bar
+-- otherwise. Bottom reserves the legend-footer height (GROUP_LEGEND_H = NS.BOT_BAR_H).
+---@param frame        table    A class content frame.
+---@param dropdownRow  boolean  Whether to reserve the class-dropdown row at the top.
+local function CB_AnchorClassContentTop(frame, dropdownRow)
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",
+        0, -(NS.BOT_BAR_H + (dropdownRow and NS.BOT_BAR_H or 0)))
+    frame:SetPoint("BOTTOMRIGHT", groupContainer, "BOTTOMRIGHT", 0, NS.BOT_BAR_H)
+end
 
-    local display = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
-    classTabBtns[class] = NS.CB_CreateTab(innerTabBar, "CleanBotGroupInnerTab_" .. class,
-                                          display, function() CB_SelectGroupInnerTab(class) end)
+-- Builds (once) the class content frame + registry for a class, rendering the
+-- same ClassData strategies the Individual tab shows — against the per-class
+-- group slot, so writes fan out to that class's members only. No tab button:
+-- navigation is the shared Class tab + dropdown.
+---@param class string  Class token.
+local function CB_EnsureGroupClassContent(class)
+    if classContents[class] then return end
 
     local frame = CreateFrame("Frame", nil, groupContainer)
-    frame:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",     0, -NS.BOT_BAR_H)
-    -- Reserve the legend-footer height (GROUP_LEGEND_H = NS.BOT_BAR_H) so class
-    -- strategies don't overlap the "*"/"?" legend at the panel bottom.
-    frame:SetPoint("BOTTOMRIGHT", groupContainer, "BOTTOMRIGHT", 0, NS.BOT_BAR_H)
+    -- Base anchor (no dropdown row); CB_LayoutGroupInnerTabs re-anchors with the
+    -- reserved dropdown row when the group turns out to be multi-class.
+    CB_AnchorClassContentTop(frame, false)
     frame:Hide()
     frame.paddingLeft   = groupCtrl.paddingLeft
     frame.paddingRight  = groupCtrl.paddingRight
@@ -332,31 +358,88 @@ local function CB_EnsureGroupClassTab(class)
         CB_GroupClassSlot(class), "G_" .. class)
 end
 
--- Lays the inner tab row out for the classes present in the selected group:
--- Combat → Non-Combat → class tabs in roster order. Class tabs for absent
--- classes hide (their built content is kept for the next group that needs
--- it). Falls back to the Combat tab when the active class tab vanishes.
+-- Class-colored display name for the dropdown entries and collapsed value.
+---@param class string  Class token.
+---@return string       Color-coded display name.
+local function CB_ClassColoredName(class)
+    local display = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
+    local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    if c then return string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, display) end
+    return display
+end
+
+-- Switches the Class tab to a specific class: updates the dropdown's collapsed
+-- value (icon + colored name, mirroring the bot dropdown) and shows that class's
+-- content. Used by the class dropdown entries.
+---@param class string  Class token to display.
+local function CB_SelectGroupClass(class)
+    selectedClass = class
+    if classDropdown then
+        UIDropDownMenu_SetText(classDropdown,
+            NS.CB_ClassIconMarkup(class) .. " " .. CB_ClassColoredName(class))
+    end
+    CB_SelectGroupInnerTab("class")
+end
+
+-- Lays the inner tab row out for the classes present in the selected group.
+-- One class: the Class tab is labeled with that class's name, no dropdown.
+-- Several: the Class tab reads "Class" and a class-switcher dropdown appears.
+-- Class content frames for absent classes stay built for the next group that
+-- needs them. Falls back to the Combat tab when no class is present.
 ---@param classesPresent table  Array of class tokens in roster order.
 local function CB_LayoutGroupInnerTabs(classesPresent)
-    for _, btn in pairs(classTabBtns) do btn:Hide() end
+    presentClasses = classesPresent
+    for _, class in ipairs(classesPresent) do CB_EnsureGroupClassContent(class) end
 
-    local prev = innerTabBtns[2]
+    if #classesPresent == 0 then
+        sharedClassTab:Hide()
+        selectedClass = nil
+        if activeInnerKey == "class" then CB_SelectGroupInnerTab(1) end
+        CB_UpdateClassDropdownShown()
+        return
+    end
+
+    -- Keep the current class if it's still present, else default to the first.
+    local keep = false
     for _, class in ipairs(classesPresent) do
-        CB_EnsureGroupClassTab(class)
-        local btn = classTabBtns[class]
-        btn:ClearAllPoints()
-        NS.CB_AnchorAhead(btn, prev)
-        btn:Show()
-        prev = btn
+        if class == selectedClass then keep = true break end
+    end
+    if not keep then selectedClass = classesPresent[1] end
+
+    -- Multi-class groups reserve a dropdown row at the top of the class content.
+    local multi = #classesPresent > 1
+    for _, class in ipairs(classesPresent) do
+        CB_AnchorClassContentTop(classContents[class], multi)
     end
 
-    if type(activeInnerKey) == "string" then
-        local found = false
-        for _, class in ipairs(classesPresent) do
-            if class == activeInnerKey then found = true break end
-        end
-        if not found then CB_SelectGroupInnerTab(1) end
+    sharedClassTab:ClearAllPoints()
+    NS.CB_AnchorAhead(sharedClassTab, innerTabBtns[2])
+    sharedClassTab:Show()
+
+    if multi then
+        sharedClassTab:SetText("Class")
+        UIDropDownMenu_Initialize(classDropdown, function()
+            for _, class in ipairs(presentClasses) do
+                local info        = UIDropDownMenu_CreateInfo()
+                info.text         = NS.CB_ClassIconMarkup(class) .. " "
+                                    .. ((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class)
+                info.value        = class
+                info.notCheckable = true
+                local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+                if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+                info.func         = function() CB_SelectGroupClass(class) end
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+        UIDropDownMenu_SetText(classDropdown,
+            NS.CB_ClassIconMarkup(selectedClass) .. " " .. CB_ClassColoredName(selectedClass))
+    else
+        sharedClassTab:SetText((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[selectedClass]) or selectedClass)
     end
+
+    -- If the Class tab is active, re-show content for the (possibly new) class.
+    if activeInnerKey == "class" then CB_SelectGroupInnerTab("class") end
+    CB_UpdateClassDropdownShown()
 end
 
 -- ============================================================
@@ -612,6 +695,23 @@ NS.CleanBot_BuildGroupTab = function()
         end
         innerTabBtns[j] = itab
     end
+
+    -- Single Class tab. With several unique classes it collapses to "Class" and a
+    -- class-switcher dropdown appears at the TOP OF THE CLASS CONTENT (a reserved
+    -- row), both toggled by CB_LayoutGroupInnerTabs / CB_SelectGroupInnerTab.
+    sharedClassTab = NS.CB_CreateTab(innerTabBar, "CleanBotGroupClassTab", "Class",
+                                     function() CB_SelectGroupInnerTab("class") end)
+    NS.CB_AnchorAhead(sharedClassTab, innerTabBtns[2])
+    sharedClassTab:Hide()
+
+    -- Lives inside the class content region (parented to groupContainer), pinned to
+    -- the reserved top row; class content frames are pushed down by CLASS_DD_ROW
+    -- when it's shown. x pulls left to offset the template's built-in inset.
+    classDropdown = NS.CB_CreateDropdown(groupContainer, "CleanBotGroupClassDropdown", 160)
+    classDropdown:ClearAllPoints()
+    classDropdown:SetPoint("TOPLEFT", groupContainer, "TOPLEFT",
+        (groupCtrl.paddingLeft or 0) - 16, -(NS.BOT_BAR_H + 2))
+    classDropdown:Hide()
 
     -- The generic content is built exactly once against the mutable group
     -- slot — selecting a group only swaps members and re-syncs, so changes
