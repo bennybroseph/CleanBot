@@ -396,15 +396,31 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
                 local classColor = isTable and item.class and RAID_CLASS_COLORS
                                    and RAID_CLASS_COLORS[item.class]
                 if isTable and item.grey then
-                    row.label:SetTextColor(0.5, 0.5, 0.5)
+                    row.curR, row.curG, row.curB = 0.5, 0.5, 0.5
                 elseif classColor then
-                    row.label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                    row.curR, row.curG, row.curB = classColor.r, classColor.g, classColor.b
                 else
-                    row.label:SetTextColor(row.defR, row.defG, row.defB)
+                    row.curR, row.curG, row.curB = row.defR, row.defG, row.defB
                 end
 
                 local on = multiSelect and selectedSet[row.value] or (not multiSelect and dataIdx == selectedIndex)
-                row.hl:SetAlpha(on and 0.4 or 0)
+                row.selected = on and true or false
+
+                -- Selected (or moused-over) rows show white text; the OnLeave
+                -- restores curR/G/B for non-selected rows.
+                if on or row:IsMouseOver() then
+                    row.label:SetTextColor(1, 1, 1)
+                else
+                    row.label:SetTextColor(row.curR, row.curG, row.curB)
+                end
+
+                -- Selection bar tinted to the row's own (pre-white) text color.
+                if on then
+                    row.hl:SetVertexColor(row.curR, row.curG, row.curB)
+                    row.hl:SetAlpha(0.4)
+                else
+                    row.hl:SetAlpha(0)
+                end
                 row:Show()
             else
                 row.index = nil
@@ -447,13 +463,27 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         rIcn:Hide()
         row.roleIcon = rIcn
 
-        -- Highlight texture shown at reduced alpha when the row is selected.
+        -- Highlight texture shown at reduced alpha when the row is selected —
+        -- the white quest-LOG title highlight (UI-QuestLogTitleHighlight), not the
+        -- gold UI-QuestTitleHighlight.
         local hl = row:CreateTexture(nil, "BACKGROUND")
         hl:SetAllPoints()
-        hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        hl:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
         hl:SetBlendMode("ADD")
         hl:SetAlpha(0)
         row.hl = hl
+
+        -- White label text while moused-over; restore the item's color on leave.
+        row:SetScript("OnEnter", function(self)
+            if self.index then self.label:SetTextColor(1, 1, 1) end
+        end)
+        row:SetScript("OnLeave", function(self)
+            if self.selected then
+                self.label:SetTextColor(1, 1, 1)
+            else
+                self.label:SetTextColor(self.curR or 1, self.curG or 1, self.curB or 1)
+            end
+        end)
 
         row:SetScript("OnClick", function(self)
             if not self.index then return end
