@@ -68,6 +68,59 @@ NS.CB_GetQualityColor = function(quality)
     return r or 1, g or 1, b or 1
 end
 
+-- Persistent rarity overlay (Blizz UI path only). Draws the action-button border art
+-- over an item/equip button, tinted to the item's quality colour, and shown at all
+-- times (not just on hover) so the rarity reads at a glance. The art is greyscale
+-- (Blizzard tints it green in code via SetVertexColor), so it recolours cleanly to any
+-- quality. Created once and cached on btn.cbRarityOverlay; shown/coloured per item and
+-- hidden on empty slots. No-op on ElvUI, which shows quality via its own border.
+local RARITY_OVERLAY_TEX = "Interface\\Buttons\\UI-ActionButton-Border"
+
+-- Every button that has been given a rarity overlay, so the "Enable Item Glow" setting
+-- can re-evaluate them all live when toggled. Buttons persist for the session, so this
+-- registry never needs pruning.
+local rarityOverlayBtns = {}
+
+--- Shows/updates a persistent rarity-coloured overlay on an item or equip button.
+---@param btn     table   The item/equip button.
+---@param quality number? Item quality 0–6, or nil/empty to hide the overlay.
+NS.CB_SetRarityOverlay = function(btn, quality)
+    if NS.ElvUI_S then return end
+    local ov = btn.cbRarityOverlay
+    if not ov then
+        ov = btn:CreateTexture(nil, "OVERLAY")
+        ov:SetTexture(RARITY_OVERLAY_TEX)
+        ov:SetBlendMode("ADD")
+        -- The art has wide transparent margins and is meant to be drawn larger than its
+        -- button so the glow ring lands at the button's edges. Blizzard sizes it 62px
+        -- over a 36px action button (~1.72×); mirror that ratio off our button's size,
+        -- centered, with full texcoords — anything smaller leaves the ring inset and tiny.
+        local scale = 62 / 36
+        local w, h  = btn:GetWidth(), btn:GetHeight()
+        ov:SetSize(w * scale, h * scale)
+        ov:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        btn.cbRarityOverlay = ov
+        rarityOverlayBtns[#rarityOverlayBtns + 1] = btn
+    end
+    -- Gated by the "Enable Item Glow" setting (default on), and only for uncommon
+    -- (green, quality 2) and above — poor/common/empty/disabled get no overlay.
+    if NS.itemGlow ~= false and quality and quality >= 2 then
+        ov:SetVertexColor(NS.CB_GetQualityColor(quality))
+        ov:Show()
+    else
+        ov:Hide()
+    end
+end
+
+--- Re-evaluates every rarity overlay against the current NS.itemGlow setting, reading
+--- each button's quality from its live itemLink. Called when the setting is toggled.
+NS.CB_RefreshRarityOverlays = function()
+    for _, btn in ipairs(rarityOverlayBtns) do
+        local quality = btn.itemLink and select(3, GetItemInfo(btn.itemLink)) or nil
+        NS.CB_SetRarityOverlay(btn, quality)
+    end
+end
+
 -- Creates a rounded quality-colour border on an item button for the Blizz UI path
 -- using a child frame with Interface\Tooltips\UI-Tooltip-Border as the edgeFile.
 -- The child frame renders above the parent's texture layers so the border is visible

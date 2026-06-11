@@ -1135,6 +1135,140 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     return wrapper
 end
 
+-- ============================================================
+-- XP bar — a thin experience bar (fill + rested overlay + centred label).
+-- Used by the paperdoll under the weapon row. The returned frame is a bordered
+-- container; callers anchor it and feed it via NS.CB_RefreshXPBar (Equip.lua),
+-- reading .fill / .rested / .label off it.
+--
+-- Layering (low → high): rested overlay (lighter, extends past the fill) sits
+-- behind the main fill, which sits behind the label. Both bars share the 0–100
+-- range so values are percentages straight from the bot's "stats" reply.
+-- ============================================================
+-- Exact Blizzard default XP-bar colours (FrameXML MainMenuBar.lua): the blue it
+-- uses while rested for the earned fill, and the purple normal-XP colour for the
+-- rested-bonus overlay behind it.
+local XP_FILL_COLOR   = { 0.0,  0.39, 0.88 }
+local XP_RESTED_COLOR = { 0.58, 0.0,  0.55 }
+
+--- Creates a thin XP status bar (fill + rested overlay + label) for the paperdoll.
+---@param parent table  Parent frame to anchor against.
+---@return table        Bordered container frame; has .fill, .rested, .label.
+NS.CB_CreateXPBar = function(parent)
+    local E = NS.ElvUI_E
+
+    -- Container carries the border so both bars stay inside it.
+    local xp = CreateFrame("Frame", nil, parent)
+    xp:SetHeight(9)
+
+    -- Bar texture: ElvUI's flat statusbar texture when present, else a Blizzard solid
+    -- (the same UI-StatusBar the default MainMenuExpBar uses), tinted purple either way.
+    local barTex = (E and E.media and (E.media.normTex or E.media.statusbar or E.media.blank))
+                   or "Interface\\TargetingFrame\\UI-StatusBar"
+
+    -- A flat 1px border drawn on the container itself (mirrors CB_SkinEditBoxSafe —
+    -- no child .backdrop frame, so no level-stacking issues). PANEL_BACKDROP's 12px
+    -- tooltip border is far too chunky for a ~9px bar, so a thin solid edge is used
+    -- on both paths; only the border colour differs (ElvUI's theme vs a neutral grey).
+    local borderTex = NS.ElvUI_S and barTex or "Interface\\BUTTONS\\WHITE8X8"
+    xp:SetBackdrop({
+        bgFile   = borderTex,
+        edgeFile = borderTex,
+        tile     = false,
+        edgeSize = 1,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    xp:SetBackdropColor(0.06, 0.06, 0.06, 1)
+    if NS.ElvUI_S then
+        local bc = (E and E.db and E.db.general and E.db.general.bordercolor) or {}
+        xp:SetBackdropBorderColor(bc.r or 0.3, bc.g or 0.3, bc.b or 0.3, 1)
+    else
+        xp:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    end
+
+    -- Inset both bars from the 1px border.
+    local inset = 1
+
+    -- Rested overlay (drawn first / lowest): extends from 0 to cur+rest.
+    local rested = CreateFrame("StatusBar", nil, xp)
+    rested:SetPoint("TOPLEFT",     xp, "TOPLEFT",      inset, -inset)
+    rested:SetPoint("BOTTOMRIGHT", xp, "BOTTOMRIGHT", -inset,  inset)
+    rested:SetStatusBarTexture(barTex)
+    rested:SetStatusBarColor(unpack(XP_RESTED_COLOR))
+    rested:SetMinMaxValues(0, 100)
+    rested:SetValue(0)
+
+    -- Main fill (drawn above rested): 0 to cur. Child of rested so it sits on top.
+    local fill = CreateFrame("StatusBar", nil, rested)
+    fill:SetAllPoints(rested)
+    fill:SetFrameLevel(rested:GetFrameLevel() + 1)
+    fill:SetStatusBarTexture(barTex)
+    fill:SetStatusBarColor(unpack(XP_FILL_COLOR))
+    fill:SetMinMaxValues(0, 100)
+    fill:SetValue(0)
+
+    -- Overlay frame above the fill: carries the segmented "bubble" divider art and
+    -- the label, so both draw on top of the status bars (child frames outrank parent
+    -- texture layers regardless of DrawLayer, so a dedicated higher-level frame is
+    -- needed rather than an OVERLAY texture on xp).
+    local overlay = CreateFrame("Frame", nil, xp)
+    overlay:SetPoint("TOPLEFT",     xp, "TOPLEFT",      inset, -inset)
+    overlay:SetPoint("BOTTOMRIGHT", xp, "BOTTOMRIGHT", -inset,  inset)
+    overlay:SetFrameLevel(fill:GetFrameLevel() + 1)
+
+    -- The default XP bar's grey tick/divider overlay is stored in the racial
+    -- main-menu-bar art as four stacked 256-wide rows, each one quarter of the full
+    -- 1024-wide overlay. We reassemble them left→right across the bar (relative
+    -- quarters via OnSizeChanged) so the segments scale to any width. The XP-bar rows
+    -- are identical across racial files, so a fixed file is fine.
+    -- ElvUI path: skip the grey divider art entirely for a clean flat bar.
+    if not NS.ElvUI_S then
+        local OVERLAY_FILE = "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf"
+        local OVERLAY_ROWS = {
+            { 0.79296875, 0.83203125 },
+            { 0.54296875, 0.58203125 },
+            { 0.29296875, 0.33203125 },
+            { 0.04296875, 0.08203125 },
+        }
+        local segs = {}
+        for i = 1, 4 do
+            local seg = overlay:CreateTexture(nil, "ARTWORK")
+            seg:SetTexture(OVERLAY_FILE)
+            seg:SetTexCoord(0, 1, OVERLAY_ROWS[i][1], OVERLAY_ROWS[i][2])
+            segs[i] = seg
+        end
+        overlay:SetScript("OnSizeChanged", function(self, w)
+            local qw = w / 4
+            for i = 1, 4 do
+                segs[i]:ClearAllPoints()
+                segs[i]:SetPoint("TOPLEFT",     self, "TOPLEFT", (i - 1) * qw, 0)
+                segs[i]:SetPoint("BOTTOMRIGHT", self, "TOPLEFT",  i      * qw, -self:GetHeight())
+            end
+        end)
+    end
+
+    -- Centred label on top of everything.
+    local label = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("CENTER", xp, "CENTER", 0, 0)
+    label:SetText("")
+
+    -- Tooltip — text is filled in by CB_RefreshXPBar (xp.tooltipText). The bar
+    -- lives on the (interactive) paperdoll model, so it can take mouse events.
+    xp:EnableMouse(true)
+    xp:SetScript("OnEnter", function(self)
+        if not self.tooltipText then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(self.tooltipText, 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    xp:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    xp.fill   = fill
+    xp.rested = rested
+    xp.label  = label
+    return xp
+end
+
 -- Clears keyboard focus from any focused EditBox (e.g. a slider EditBox) when
 -- the user clicks in the 3D world or on the CleanBot frame's own background.
 -- Without this, EditBoxes hold focus indefinitely until Escape is pressed.

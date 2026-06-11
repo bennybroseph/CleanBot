@@ -45,6 +45,7 @@
       "InspectUnit",
       "InviteUnit",
       "IsAddOnLoaded",
+      "MAX_PLAYER_LEVEL",
       "OpacitySliderFrame",
       "RAID_CLASS_COLORS",
       "SelectQuestLogEntry",

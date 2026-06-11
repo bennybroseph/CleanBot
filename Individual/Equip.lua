@@ -236,6 +236,9 @@ NS.CB_CreateEquipSlots = function(slot, model)
         -- ── Interaction textures ──────────────────────────────
         btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+        -- Persistent rarity overlay (Blizz path; no-op on ElvUI). Hidden until an item
+        -- is equipped; tinted to the item's quality in CB_RefreshEquipSlots.
+        NS.CB_SetRarityOverlay(btn, nil)
 
         NS.CB_ApplyQualityBackdrop(btn)
 
@@ -375,6 +378,14 @@ NS.CB_CreateEquipSlots = function(slot, model)
     bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     NS.CB_CreateQuestButton(slot, model, slotSize)
+
+    -- ── XP bar — spans the bottom button row, touching it ──────────
+    -- Anchored from the bag button's left edge to the quest button's right edge,
+    -- with its top flush against the bottoms of those buttons (no gap) so it spans
+    -- the full bag→quest width and touches the button row above it.
+    slot.xpBar = NS.CB_CreateXPBar(model)
+    slot.xpBar:SetPoint("TOPLEFT",  bagBtn,        "BOTTOMLEFT",  0, 0)
+    slot.xpBar:SetPoint("TOPRIGHT", slot.questBtn, "BOTTOMRIGHT", 0, 0)
 end
 
 -- ── Equipment refresh via NotifyInspect ───────────────────────────────────
@@ -528,6 +539,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 else
                     NS.CB_ClearQualityBorder(btn)
                 end
+                NS.CB_SetRarityOverlay(btn, quality)
             elseif not itemLink then
                 -- Texture present but no link at all (link not yet populated): show
                 -- the fresh icon now; the border lands on the next consistent read.
@@ -542,6 +554,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
             btn.itemLink = nil
             if hadLink then gearChanged = true end
             NS.CB_ClearQualityBorder(btn)
+            NS.CB_SetRarityOverlay(btn, nil)
         end
     end
 
@@ -555,6 +568,62 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 slot.model:SetUnit(unit)
                 break
             end
+        end
+    end
+end
+
+-- ── XP bar refresh ────────────────────────────────────────────────────────
+-- Paints a slot's XP bar from the bot's level (UnitLevel — free, client-side)
+-- and entry.xpPercent ("cur/rest" percentages from the "stats" reply). At max
+-- level there is no XP, so the bar shows full with a "Max" label. Before the
+-- stats reply lands (xpPercent nil) the bar reads empty with just the level.
+---@param slot table  A live paperdoll slot (has .xpBar, .unit, .key).
+NS.CB_RefreshXPBar = function(slot)
+    local xp = slot and slot.xpBar
+    if not xp then return end
+
+    local level    = (slot.unit and UnitExists(slot.unit)) and UnitLevel(slot.unit) or nil
+    local maxLevel = MAX_PLAYER_LEVEL or 80
+
+    if level and level >= maxLevel then
+        xp.rested:Hide()
+        xp.fill:SetValue(100)
+        xp.label:SetText("Max")
+        xp.tooltipText = "Max level (" .. level .. ")"
+        return
+    end
+
+    xp.rested:Show()
+    xp.label:SetText(level and level > 0 and tostring(level) or "")
+
+    local entry = slot.key and CleanBot_PartyBots[slot.key]
+    local cur, rest
+    if entry and entry.xpPercent then
+        cur, rest = entry.xpPercent:match("(%d+)/(%d+)")
+        cur  = tonumber(cur)
+        rest = tonumber(rest)
+    end
+
+    if cur then
+        xp.fill:SetValue(cur)
+        xp.rested:SetValue(math.min(cur + (rest or 0), 100))
+        xp.tooltipText = cur .. "% into level \194\183 " .. (rest or 0) .. "% rested"
+    else
+        -- No stats reply yet — empty bar, level label only.
+        xp.fill:SetValue(0)
+        xp.rested:SetValue(0)
+        xp.tooltipText = nil
+    end
+end
+
+-- Key-based convenience: refreshes the XP bar of the live slot for a bot, if any.
+-- Used by the stats-reply handler (Bridge.lua) which only knows the bot's key.
+---@param key string  Bot name-key (lowercased lookup key).
+NS.CB_RefreshXPBarForKey = function(key)
+    for _, slot in ipairs(NS.tabList or {}) do
+        if slot.key == key then
+            NS.CB_RefreshXPBar(slot)
+            return
         end
     end
 end

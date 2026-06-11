@@ -1151,6 +1151,7 @@ local function CB_BindSlot(slot, info)
     -- Sync everything from data
     if slot.updateStar then slot.updateStar() end
     if NS.CB_RefreshEquipSlots then NS.CB_RefreshEquipSlots(slot.key, slot.unit) end
+    if NS.CB_RefreshXPBar then NS.CB_RefreshXPBar(slot) end
     NS.CB_UpdateTabData(info.key)
 end
 
@@ -1217,6 +1218,13 @@ SelectBot = function(key, silent)
     if NS.CB_QueueEquipRefresh and slot.unit and UnitExists(slot.unit) then
         NS.CB_QueueEquipRefresh({ { key = slot.key, unit = slot.unit } })
     end
+
+    -- Fetch the bot's "stats" so the XP bar populates on both bridge and whisper
+    -- paths (the bridge's INV_SUMMARY carries no XP). The reply repaints the bar
+    -- via CB_RefreshXPBarForKey. Refresh now too so the level label shows instantly.
+    local entry = CleanBot_PartyBots[slot.key]
+    if entry and NS.CB_FetchStats then NS.CB_FetchStats(entry) end
+    if NS.CB_RefreshXPBar then NS.CB_RefreshXPBar(slot) end
 
     NS.lruClock = NS.lruClock + 1
     slot.lru = NS.lruClock
