@@ -782,6 +782,43 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.botEmotes = checked
     end)
 
+    -- ── Enable Item Glow (Blizz UI path only) ──────────────────
+    -- The rarity overlay only exists on the Blizz path, so the toggle is created only
+    -- there; ElvUI shows item quality through its own button border.
+    if not NS.ElvUI_S then
+        local itemGlowCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotItemGlowCB")
+        itemGlowCB:SetChecked(NS.itemGlow ~= false)
+        NS.CB_AnchorBelow(itemGlowCB, botEmotesCB)
+
+        local itemGlowCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Item Glow")
+        itemGlowCBLbl:SetPoint("LEFT", itemGlowCB, "RIGHT", 2, 0)
+
+        local itemGlowCBLblHit = CreateFrame("Frame", nil, otherPanel)
+        itemGlowCBLblHit:SetPoint("LEFT",  itemGlowCBLbl, "LEFT",  0, 0)
+        itemGlowCBLblHit:SetPoint("RIGHT", itemGlowCBLbl, "RIGHT", 0, 0)
+        itemGlowCBLblHit:SetHeight(20)
+        itemGlowCBLblHit:EnableMouse(true)
+
+        local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-coloured glow."
+        local function showItemGlowTooltip(anchor)
+            GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+            GameTooltip:SetText(ITEM_GLOW_TOOLTIP, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end
+        itemGlowCB:SetScript("OnEnter",       function(self) showItemGlowTooltip(self) end)
+        itemGlowCB:SetScript("OnLeave",       function()     GameTooltip:Hide()        end)
+        itemGlowCBLblHit:SetScript("OnEnter", function(self) showItemGlowTooltip(self) end)
+        itemGlowCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()        end)
+
+        itemGlowCB:SetScript("OnClick", function(self)
+            local checked = self:GetChecked() and true or false
+            self:SetChecked(checked)
+            NS.itemGlow = checked
+            CleanBot_SavedVars.itemGlow = checked
+            if NS.CB_RefreshRarityOverlays then NS.CB_RefreshRarityOverlays() end
+        end)
+    end
+
     -- ── Debug tab ──────────────────────────────────────────────
     -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:
     -- every control routes through the shared setters in Debug.lua, which

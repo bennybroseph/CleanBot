@@ -236,6 +236,9 @@ NS.CB_CreateEquipSlots = function(slot, model)
         -- ── Interaction textures ──────────────────────────────
         btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+        -- Persistent rarity overlay (Blizz path; no-op on ElvUI). Hidden until an item
+        -- is equipped; tinted to the item's quality in CB_RefreshEquipSlots.
+        NS.CB_SetRarityOverlay(btn, nil)
 
         NS.CB_ApplyQualityBackdrop(btn)
 
@@ -374,14 +377,15 @@ NS.CB_CreateEquipSlots = function(slot, model)
     end)
     bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- ── XP bar — spans the weapon row, just below it ──────────
-    -- Anchored across the three weapon slots (Main Hand → Ranged) so it stays
-    -- inside the weapon-row footprint rather than the full model width.
-    slot.xpBar = NS.CB_CreateXPBar(model)
-    slot.xpBar:SetPoint("TOPLEFT",  slot.equipSlots[16], "BOTTOMLEFT",  0, -gapYBot)
-    slot.xpBar:SetPoint("TOPRIGHT", slot.equipSlots[18], "BOTTOMRIGHT", 0, -gapYBot)
-
     NS.CB_CreateQuestButton(slot, model, slotSize)
+
+    -- ── XP bar — spans the bottom button row, touching it ──────────
+    -- Anchored from the bag button's left edge to the quest button's right edge,
+    -- with its top flush against the bottoms of those buttons (no gap) so it spans
+    -- the full bag→quest width and touches the button row above it.
+    slot.xpBar = NS.CB_CreateXPBar(model)
+    slot.xpBar:SetPoint("TOPLEFT",  bagBtn,        "BOTTOMLEFT",  0, 0)
+    slot.xpBar:SetPoint("TOPRIGHT", slot.questBtn, "BOTTOMRIGHT", 0, 0)
 end
 
 -- ── Equipment refresh via NotifyInspect ───────────────────────────────────
@@ -535,6 +539,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 else
                     NS.CB_ClearQualityBorder(btn)
                 end
+                NS.CB_SetRarityOverlay(btn, quality)
             elseif not itemLink then
                 -- Texture present but no link at all (link not yet populated): show
                 -- the fresh icon now; the border lands on the next consistent read.
@@ -549,6 +554,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
             btn.itemLink = nil
             if hadLink then gearChanged = true end
             NS.CB_ClearQualityBorder(btn)
+            NS.CB_SetRarityOverlay(btn, nil)
         end
     end
 

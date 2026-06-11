@@ -1145,9 +1145,11 @@ end
 -- behind the main fill, which sits behind the label. Both bars share the 0–100
 -- range so values are percentages straight from the bot's "stats" reply.
 -- ============================================================
--- Standard WoW XP purples: solid fill + a lighter rested tint.
-local XP_FILL_COLOR   = { 0.58, 0.0,  0.55 }
-local XP_RESTED_COLOR = { 0.40, 0.39, 0.78 }
+-- Exact Blizzard default XP-bar colours (FrameXML MainMenuBar.lua): the blue it
+-- uses while rested for the earned fill, and the purple normal-XP colour for the
+-- rested-bonus overlay behind it.
+local XP_FILL_COLOR   = { 0.0,  0.39, 0.88 }
+local XP_RESTED_COLOR = { 0.58, 0.0,  0.55 }
 
 --- Creates a thin XP status bar (fill + rested overlay + label) for the paperdoll.
 ---@param parent table  Parent frame to anchor against.
@@ -1159,7 +1161,8 @@ NS.CB_CreateXPBar = function(parent)
     local xp = CreateFrame("Frame", nil, parent)
     xp:SetHeight(9)
 
-    -- Bar texture: ElvUI's flat statusbar texture when present, else a Blizzard solid.
+    -- Bar texture: ElvUI's flat statusbar texture when present, else a Blizzard solid
+    -- (the same UI-StatusBar the default MainMenuExpBar uses), tinted purple either way.
     local barTex = (E and E.media and (E.media.normTex or E.media.statusbar or E.media.blank))
                    or "Interface\\TargetingFrame\\UI-StatusBar"
 
@@ -1204,8 +1207,48 @@ NS.CB_CreateXPBar = function(parent)
     fill:SetMinMaxValues(0, 100)
     fill:SetValue(0)
 
+    -- Overlay frame above the fill: carries the segmented "bubble" divider art and
+    -- the label, so both draw on top of the status bars (child frames outrank parent
+    -- texture layers regardless of DrawLayer, so a dedicated higher-level frame is
+    -- needed rather than an OVERLAY texture on xp).
+    local overlay = CreateFrame("Frame", nil, xp)
+    overlay:SetPoint("TOPLEFT",     xp, "TOPLEFT",      inset, -inset)
+    overlay:SetPoint("BOTTOMRIGHT", xp, "BOTTOMRIGHT", -inset,  inset)
+    overlay:SetFrameLevel(fill:GetFrameLevel() + 1)
+
+    -- The default XP bar's grey tick/divider overlay is stored in the racial
+    -- main-menu-bar art as four stacked 256-wide rows, each one quarter of the full
+    -- 1024-wide overlay. We reassemble them left→right across the bar (relative
+    -- quarters via OnSizeChanged) so the segments scale to any width. The XP-bar rows
+    -- are identical across racial files, so a fixed file is fine.
+    -- ElvUI path: skip the grey divider art entirely for a clean flat bar.
+    if not NS.ElvUI_S then
+        local OVERLAY_FILE = "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf"
+        local OVERLAY_ROWS = {
+            { 0.79296875, 0.83203125 },
+            { 0.54296875, 0.58203125 },
+            { 0.29296875, 0.33203125 },
+            { 0.04296875, 0.08203125 },
+        }
+        local segs = {}
+        for i = 1, 4 do
+            local seg = overlay:CreateTexture(nil, "ARTWORK")
+            seg:SetTexture(OVERLAY_FILE)
+            seg:SetTexCoord(0, 1, OVERLAY_ROWS[i][1], OVERLAY_ROWS[i][2])
+            segs[i] = seg
+        end
+        overlay:SetScript("OnSizeChanged", function(self, w)
+            local qw = w / 4
+            for i = 1, 4 do
+                segs[i]:ClearAllPoints()
+                segs[i]:SetPoint("TOPLEFT",     self, "TOPLEFT", (i - 1) * qw, 0)
+                segs[i]:SetPoint("BOTTOMRIGHT", self, "TOPLEFT",  i      * qw, -self:GetHeight())
+            end
+        end)
+    end
+
     -- Centred label on top of everything.
-    local label = fill:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local label = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("CENTER", xp, "CENTER", 0, 0)
     label:SetText("")
 

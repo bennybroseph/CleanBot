@@ -131,6 +131,7 @@ local function CB_ShowInvMenu(cell, key)
                     cell.countText:Hide()
                     cell.itemLink = nil
                     NS.CB_ClearQualityBorder(cell)
+                    NS.CB_SetRarityOverlay(cell, nil)
                 end
                 NS.CB_After(1.5, function() NS.CB_FetchInventory(key, entry.name) end)
             end
@@ -231,6 +232,7 @@ if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_Re
             src.itemLink = nil
             if src.countText then src.countText:Hide() end
             NS.CB_ClearQualityBorder(src)
+            NS.CB_SetRarityOverlay(src, nil)
         end
         -- Optimistic slot update (mirrors the unequip drag's inventory-cell
         -- update): show the dragged item's icon + rarity border immediately;
@@ -243,6 +245,7 @@ if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_Re
         dropBtn.itemLink = link
         local q = select(3, GetItemInfo(link))
         if q then NS.CB_SetQualityBorder(dropBtn, q) else NS.CB_ClearQualityBorder(dropBtn) end
+        NS.CB_SetRarityOverlay(dropBtn, q)
     elseif invDropCell and src then
         -- ── Drop onto inventory cell → visual swap ─────────────
         local tmpTex   = src.icon:GetTexture()
@@ -272,14 +275,18 @@ if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_Re
         if src.itemLink then
             local _, _, q = GetItemInfo(src.itemLink)
             if q then NS.CB_SetQualityBorder(src, q) else NS.CB_ClearQualityBorder(src) end
+            NS.CB_SetRarityOverlay(src, q)
         else
             NS.CB_ClearQualityBorder(src)
+            NS.CB_SetRarityOverlay(src, nil)
         end
         if invDropCell.itemLink then
             local _, _, q = GetItemInfo(invDropCell.itemLink)
             if q then NS.CB_SetQualityBorder(invDropCell, q) else NS.CB_ClearQualityBorder(invDropCell) end
+            NS.CB_SetRarityOverlay(invDropCell, q)
         else
             NS.CB_ClearQualityBorder(invDropCell)
+            NS.CB_SetRarityOverlay(invDropCell, nil)
         end
 
         src.icon:SetDesaturated(false)
@@ -590,6 +597,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
                 cell.itemLink = nil
                 cell.countText:Hide()
                 NS.CB_ClearQualityBorder(cell)
+                NS.CB_SetRarityOverlay(cell, nil)
             end
         end
     end
@@ -618,6 +626,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.itemLink = item.link
             local _, _, quality = GetItemInfo(item.link)
             if quality then NS.CB_SetQualityBorder(cell, quality) end
+            NS.CB_SetRarityOverlay(cell, quality)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -775,6 +784,10 @@ NS.CB_RenderInventory = function(key)
             cell.countText = _G[cellName .. "Count"]
 
             NS.CB_SkinInventoryCell(cell)
+            -- Persistent rarity overlay (Blizz path; no-op on ElvUI). Created hidden;
+            -- shown and tinted to the item's quality on render. Leaves the template's
+            -- own mouse-over highlight untouched.
+            NS.CB_SetRarityOverlay(cell, nil)
             cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
             cell:SetScript("OnClick", function(self, btn)
@@ -828,6 +841,7 @@ NS.CB_RenderInventory = function(key)
             cell.itemLink = item.link
             local _, _, quality = GetItemInfo(item.link)
             if quality then NS.CB_SetQualityBorder(cell, quality) end
+            NS.CB_SetRarityOverlay(cell, quality)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -839,6 +853,7 @@ NS.CB_RenderInventory = function(key)
             cell.countText:Hide()
             cell.itemLink = nil
             NS.CB_ClearQualityBorder(cell)
+            NS.CB_SetRarityOverlay(cell, nil)
         end
 
         cell:Show()

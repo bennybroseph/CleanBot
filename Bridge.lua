@@ -675,19 +675,24 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Spec-list collection: reply lines from "talents spec list", one premade
-        -- per line, e.g. "1. arms pve (51-0-20)". Non-matching lines (headers etc.)
-        -- are ignored but still reset the silence timeout. Finalized by the 2s
-        -- silence tick in invTickFrame (CB_FinalizeSpecList).
+        -- per line, e.g. "1. arms pve (51-0-20)". Only actual spec lines are consumed
+        -- (and reset the silence timeout); any other line falls through to the branches
+        -- below. This matters because a "stats" fetch on the same select interleaves its
+        -- reply ("… 92/150% XP") with the spec stream — if we returned on every line we
+        -- would swallow that stats reply and the XP bar would never populate.
+        -- Finalized by the silence tick in invTickFrame (CB_FinalizeSpecList).
         if entry and entry.awaitingSpecList then
-            entry.specListTimeout = 0
             local name, t1, t2, t3 = msg:match("^%s*%d+%.%s+(.-)%s+%((%d+)%-(%d+)%-(%d+)%)%s*$")
-            if name and entry.specListStaging then
-                entry.specListStaging[#entry.specListStaging + 1] = {
-                    name = name,
-                    t    = { tonumber(t1), tonumber(t2), tonumber(t3) },
-                }
+            if name then
+                entry.specListTimeout = 0
+                if entry.specListStaging then
+                    entry.specListStaging[#entry.specListStaging + 1] = {
+                        name = name,
+                        t    = { tonumber(t1), tonumber(t2), tonumber(t3) },
+                    }
+                end
+                return
             end
-            return
         end
 
         -- Inventory collection (whisper path): grab any item link, ignore everything
@@ -713,39 +718,48 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- The bag count is FREE/TOTAL (not used/total); convert to used to match
         -- the bridge's INV_SUMMARY semantics (which reports used/total).
         -- Each money denomination is optional (e.g. a broke bot omits gold).
-        if entry and entry.awaitingMoney then
-            entry.moneyTimeout  = 0
-            entry.awaitingMoney = false
-
+        -- Identify the stats reply by its CONTENT SIGNATURE — it always carries the
+        -- "Bag" and "Dur" fields — rather than trusting the awaitingMoney flag alone.
+        -- This is essential because other replies (e.g. talent spec-list lines) can
+        -- interleave with the stats reply while awaitingMoney is still set; keying off
+        -- the flag would mis-parse such a line and clear awaitingMoney prematurely.
+        -- Signature matching also rescues a reply that arrives after the 0.5s
+        -- WHISPER_SILENCE window has already cleared awaitingMoney (cold bot / slow
+        -- round-trip) — otherwise the XP bar would never populate until a warm refetch.
+        if entry and strfind(msg, "Bag", 1, true) and strfind(msg, "Dur", 1, true) then
             local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
+            local xpCur, xpMax = clean:match("(%d+)/(%d+)%%%s*XP")
+            if clean:match("%d+/%d+%s*Bag") then
+                entry.moneyTimeout  = 0
+                entry.awaitingMoney = false
 
-            local gold   = tonumber(clean:match("(%d+)g")) or 0
-            local silver = tonumber(clean:match("(%d+)s")) or 0
-            local copper = tonumber(clean:match("(%d+)c")) or 0
-            entry.money  = { gold = gold, silver = silver, copper = copper }
+                local gold   = tonumber(clean:match("(%d+)g")) or 0
+                local silver = tonumber(clean:match("(%d+)s")) or 0
+                local copper = tonumber(clean:match("(%d+)c")) or 0
+                entry.money  = { gold = gold, silver = silver, copper = copper }
 
-            -- Bag totals are not available from the "items" whisper, but stats gives them.
-            local bagFree, bagTotal = clean:match("(%d+)/(%d+)%s*Bag")
-            if bagFree and entry.inventory then
-                bagFree  = tonumber(bagFree)
-                bagTotal = tonumber(bagTotal)
-                entry.inventory.bagTotal = bagTotal
-                entry.inventory.bagUsed  = bagTotal - bagFree
+                -- Bag totals are not available from the "items" whisper, but stats gives them.
+                local bagFree, bagTotal = clean:match("(%d+)/(%d+)%s*Bag")
+                if bagFree and entry.inventory then
+                    bagFree  = tonumber(bagFree)
+                    bagTotal = tonumber(bagTotal)
+                    entry.inventory.bagTotal = bagTotal
+                    entry.inventory.bagUsed  = bagTotal - bagFree
+                end
+
+                -- Durability and XP are whisper-only — store for future display.
+                -- Dur is "N% (repair cost) Dur"; XP is "cur/rest% XP".
+                local durPct     = tonumber(clean:match("(%d+)%%%s*%(.-%)%s*Dur"))
+                entry.durability = durPct
+                entry.xpPercent  = xpCur and (tonumber(xpCur) .. "/" .. tonumber(xpMax)) or nil
+
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
+                if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
+
+                -- XP just landed — repaint the paperdoll XP bar if this bot is live.
+                if NS.CB_RefreshXPBarForKey then NS.CB_RefreshXPBarForKey(strlower(sender)) end
+                return
             end
-
-            -- Durability and XP are whisper-only — store for future display.
-            -- Dur is "N% (repair cost) Dur"; XP is "cur/rest% XP".
-            local durPct        = tonumber(clean:match("(%d+)%%%s*%(.-%)%s*Dur"))
-            local xpCur, xpMax  = clean:match("(%d+)/(%d+)%%%s*XP")
-            entry.durability    = durPct
-            entry.xpPercent     = xpCur and (tonumber(xpCur) .. "/" .. tonumber(xpMax)) or nil
-
-            local f = NS.botInventoryFrames and NS.botInventoryFrames[strlower(sender)]
-            if f and f:IsShown() then NS.CB_RenderInventory(strlower(sender)) end
-
-            -- XP just landed — repaint the paperdoll XP bar if this bot is live.
-            if NS.CB_RefreshXPBarForKey then NS.CB_RefreshXPBarForKey(strlower(sender)) end
-            return
         end
 
         -- Quest list collection (whisper path): reply to the "quests" command.

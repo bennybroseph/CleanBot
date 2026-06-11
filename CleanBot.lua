@@ -203,6 +203,7 @@ NS.THEME_DEFAULTS = {
 
 -- Feature flags and theme values — mutated at login from SavedVars, and by the Settings Apply button.
 NS.botEmotes    = true
+NS.itemGlow     = true   -- Blizz-path rarity overlay on items/equipment (uncommon+); see ItemVisuals
 NS.scale        = NS.THEME_DEFAULTS.scale
 NS.transparency = NS.THEME_DEFAULTS.transparency
 NS.accentColor  = { r = NS.THEME_DEFAULTS.accentColor.r, g = NS.THEME_DEFAULTS.accentColor.g, b = NS.THEME_DEFAULTS.accentColor.b, a = NS.THEME_DEFAULTS.accentColor.a }
@@ -426,6 +427,9 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- Restore feature flags.
         if type(CleanBot_SavedVars.botEmotes) == "boolean" then
             NS.botEmotes = CleanBot_SavedVars.botEmotes
+        end
+        if type(CleanBot_SavedVars.itemGlow) == "boolean" then
+            NS.itemGlow = CleanBot_SavedVars.itemGlow
         end
         NS.individualExpanded = CleanBot_SavedVars.individualExpanded == true
 
