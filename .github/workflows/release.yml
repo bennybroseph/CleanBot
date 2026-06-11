@@ -1,0 +1,68 @@
+name: Release
+
+# Cuts a GitHub Release whenever a version tag is pushed, e.g.:
+#   git tag v1.0.0 && git push origin v1.0.0
+# The release gets an auto-generated changelog (commits since the previous tag)
+# and a packaged zip of the addon with dev/bloat files stripped out.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required for softprops/action-gh-release to publish
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so the changelog can diff against the previous tag
+
+      - name: Build changelog
+        run: |
+          CURRENT="${GITHUB_REF_NAME}"
+          # Nearest tag before this one (empty on the very first release).
+          PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            echo "## Changes since ${PREV}" > CHANGELOG.md
+            RANGE="${PREV}..${CURRENT}"
+          else
+            echo "## Initial release" > CHANGELOG.md
+            RANGE="${CURRENT}"
+          fi
+          echo "" >> CHANGELOG.md
+          git log "$RANGE" --no-merges --pretty=format:'- %s (%h)' >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+      - name: Stage addon files
+        run: |
+          # Copy the repo into dist/CleanBot/, dropping anything users don't need.
+          # ── Edit this exclude list to change what ships in the zip ──
+          mkdir -p dist/CleanBot
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitattributes' \
+            --exclude='.gitignore' \
+            --exclude='.luarc.json' \
+            --exclude='docs' \
+            --exclude='dist' \
+            --exclude='CHANGELOG.md' \
+            ./ dist/CleanBot/
+
+      - name: Create zip
+        run: |
+          # Zip contains a top-level CleanBot/ folder so it extracts straight
+          # into Interface/AddOns/.
+          cd dist
+          zip -r "../CleanBot-${GITHUB_REF_NAME}.zip" CleanBot
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "CleanBot ${{ github.ref_name }}"
+          body_path: CHANGELOG.md
+          files: CleanBot-${{ github.ref_name }}.zip
