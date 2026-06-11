@@ -1227,7 +1227,11 @@ SelectBot = function(key, silent)
     CleanBot_SelectTab(idx, silent)
 
     if NS.selectorMode == "dropdown" and NS.botDropdown then
-        UIDropDownMenu_SetText(NS.botDropdown, slot.name)
+        -- Match the open entries: class icon + class-colored name on the closed selector.
+        local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[slot.class]
+        local label = NS.CB_ClassIconMarkup(slot.class) .. " "
+            .. (c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, slot.name) or slot.name)
+        UIDropDownMenu_SetText(NS.botDropdown, label)
     end
 end
 
@@ -1363,7 +1367,10 @@ NS.CleanBot_RefreshTabs = function()
             UIDropDownMenu_Initialize(NS.botDropdown, function()
                 for _, d in ipairs(NS.desiredBots) do
                     local info = UIDropDownMenu_CreateInfo()
-                    info.text         = d.name
+                    -- Class icon (inline markup) + name; colorCode tints the name only
+                    -- (color codes don't affect the inline texture). Mirrors the Group
+                    -- tab's class-colored, icon-on-left select-list rows.
+                    info.text         = NS.CB_ClassIconMarkup(d.class) .. " " .. d.name
                     info.value        = d.key
                     info.notCheckable = true
                     local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.class]

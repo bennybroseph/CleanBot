@@ -246,6 +246,26 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     return section
 end
 
+-- Inline-texture escape ("|T...|t") for embedding an icon inside any FontString
+-- (dropdown entries, the collapsed dropdown value, labels, tab text). The icon
+-- renders to the left of whatever text follows it, with no anchor work, in both
+-- ElvUI and Blizzard skins. `coords` are the 0-1 texcoord fractions
+-- {left,right,top,bottom}; converted to the texel units the escape expects using
+-- `texDim` (the source texture's pixel size). 3.3.5a's own FrameXML uses this
+-- extended form (e.g. LFGFrame.lua role icons).
+---@param path   string  Texture path.
+---@param size   number  Rendered icon size in pixels (square).
+---@param coords table   {left,right,top,bottom} in 0-1.
+---@param texDim number? Source texture pixel size for texel conversion (default 256).
+---@param yOff   number? Vertical pixel offset for baseline tuning (default 0).
+---@return string        The "|T...|t" escape string.
+NS.CB_InlineIcon = function(path, size, coords, texDim, yOff)
+    texDim = texDim or 256
+    return string.format("|T%s:%d:%d:0:%d:%d:%d:%d:%d:%d:%d|t",
+        path, size, size, yOff or 0, texDim, texDim,
+        coords[1] * texDim, coords[2] * texDim, coords[3] * texDim, coords[4] * texDim)
+end
+
 -- A bordered, scrollable list of selectable rows.
 --
 -- Items are plain strings, or tables for decorated rows:

@@ -41,6 +41,18 @@ NS.CLASS_ICON_COORDS = {
     DEATHKNIGHT = {0.25, 0.5,   0.5,  0.75},
 }
 
+-- "|T...|t" markup for a class icon, sized to sit inline with dropdown/menu text
+-- (the closed-button value and each open entry). Reuses NS.CB_InlineIcon, defined
+-- in Widgets.lua which loads first; called only at event time so order is fine.
+---@param class string   Class token (e.g. "WARRIOR").
+---@param size  number?  Icon size in pixels (default 14).
+---@return string        The inline-icon string, or "" for an unknown class.
+NS.CB_ClassIconMarkup = function(class, size)
+    local c = NS.CLASS_ICON_COORDS[class]
+    if not c then return "" end
+    return NS.CB_InlineIcon("Interface\\WorldStateFrame\\Icons-Classes", size or 14, c, 256)
+end
+
 NS.CLASS_STRATEGIES = {
 
     -- ──────────────────────────────────────────────────────────
