@@ -25,7 +25,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 - Manage gear through drag and drop or context menus
     - View Gold and Items in an intuitive and familiar interface
 
-<img width="500" alt="image" src="https://github.com/user-attachments/assets/8472ff0d-6a2a-4628-b9f2-2a4e7c55a159" />
+<img width="500" alt="image" src="https://github.com/user-attachments/assets/dc808972-03ca-414a-8a1a-70af408bcb1b" />
 <img width="300" alt="603430857-b9f2179f-db59-44a8-880e-b999b6505b41" src="https://github.com/user-attachments/assets/e747a2d9-e461-402c-97ad-d386d6e49ec6" />
 
 ## Quest Log
@@ -34,6 +34,17 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 - Abandon Bot Quests
 
 <img width="700" alt="image" src="https://github.com/user-attachments/assets/083d79cc-d36a-443e-bc55-7d21d037e57f" />
+
+# Group Tab
+- Multiselect groups and bots using the standard windows shortcuts
+    - CTRL + Click to add/remove selection
+    - Shift + Click for range selection
+- Add groups, rename them,
+- Add bots to the group via name or by current target
+- Dynamic default groups for class and role
+    - With multiselect, these groups may be all you need to perfectly manage your next raid
+
+<img width="700" alt="image" src="https://github.com/user-attachments/assets/35b672aa-a48c-4b41-805d-12ebec7209dc" />
 
 # Settings Tab
 - Change Transparency, Scale, Accent Color, and Layout Values
