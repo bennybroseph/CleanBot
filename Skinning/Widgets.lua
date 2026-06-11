@@ -279,18 +279,25 @@ end
 --   container:GetSelected()             — returns the currently selected item (string or
 --                                         table), or nil if nothing is selected.
 --   container:SetSelectedValue(value)   — programmatic selection by row value; no onSelect.
+-- Multi-select mode (multiSelect = true) adds:
+--   container:GetSelectedValues()       — array of selected row values, in items order.
+--   container:SetSelectedValues(list)   — programmatic multi-selection; no callback.
+--   container:SelectAllValues()         — select every row; no callback.
 --
--- onSelect(value) is called whenever the user clicks a row; for table items the
--- value is item.value (falling back to item.text).
+-- onSelect(value) fires on a single-select click (item.value, falling back to text).
+-- In multi-select mode it is the SELECTION-CHANGED handler: it fires (no argument
+-- needed — read GetSelectedValues) on user clicks and empty-area clicks, with
+-- Windows-style modifiers (plain = that row only, Ctrl = toggle, Shift = range).
 -- width / height size the visible container; rows scroll inside it.
 -- ElvUI skins the inner scroll bar when present.
----@param parent   table     Parent frame.
----@param name     string    Global name; sub-frames derive from it (name.."SF", etc.).
----@param width    number    Content area width (container is width + 20 for the scrollbar).
----@param height   number    Visible container height.
----@param onSelect fun(value:string)? Called with the row value on click.
----@return table             The container frame with SetItems / GetSelected / SetSelectedValue methods.
-NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
+---@param parent     table     Parent frame.
+---@param name       string    Global name; sub-frames derive from it (name.."SF", etc.).
+---@param width      number    Content area width (container is width + 20 for the scrollbar).
+---@param height     number    Visible container height.
+---@param onSelect   fun(value:string?)? Click handler (single) / selection-changed (multi).
+---@param multiSelect boolean? Enable Windows-style multi-selection.
+---@return table               The container frame with the list API.
+NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSelect)
     local ROW_H      = 20
     -- Number of physical row buttons that fit; scrolling remaps these onto the data
     -- rather than creating a button per item.
@@ -304,9 +311,13 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     NS.CB_ApplyInnerSkin(container)
 
     -- Backing data and selection. selectedIndex is an ABSOLUTE index into `items`
-    -- so the highlighted entry survives scrolling and row recycling.
+    -- so the highlighted entry survives scrolling and row recycling. In multi mode
+    -- selection is a value-keyed set (survives SetItems/refresh like SetSelectedValue),
+    -- with anchorIndex marking the Shift-range origin.
     local items         = {}
     local selectedIndex = nil
+    local selectedSet   = {}    -- multi mode: [value] = true
+    local anchorIndex   = nil   -- multi mode: Shift-range anchor (absolute index)
 
     -- FauxScrollFrame inset 2px from the container walls; 20px right gap keeps the
     -- scrollbar (18px) plus a 2px mirror of the left inset inside the container border.
@@ -378,7 +389,8 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
                     row.label:SetTextColor(row.defR, row.defG, row.defB)
                 end
 
-                row.hl:SetAlpha(dataIdx == selectedIndex and 0.4 or 0)
+                local on = multiSelect and selectedSet[row.value] or (not multiSelect and dataIdx == selectedIndex)
+                row.hl:SetAlpha(on and 0.4 or 0)
                 row:Show()
             else
                 row.index = nil
@@ -424,13 +436,54 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
 
         row:SetScript("OnClick", function(self)
             if not self.index then return end
-            selectedIndex = self.index
-            refresh()
-            if onSelect then onSelect(self.value) end
+            if multiSelect then
+                if IsShiftKeyDown() and anchorIndex then
+                    -- Range select anchorIndex..index (replace selection).
+                    selectedSet = {}
+                    local lo, hi = anchorIndex, self.index
+                    if lo > hi then lo, hi = hi, lo end
+                    for j = lo, hi do
+                        local it = items[j]
+                        if it then selectedSet[itemValue(it)] = true end
+                    end
+                elseif IsControlKeyDown() then
+                    -- Toggle this row.
+                    if selectedSet[self.value] then selectedSet[self.value] = nil
+                    else selectedSet[self.value] = true end
+                    anchorIndex = self.index
+                else
+                    -- Plain click: this row only.
+                    selectedSet = { [self.value] = true }
+                    anchorIndex = self.index
+                end
+                refresh()
+                if onSelect then onSelect() end
+            else
+                selectedIndex = self.index
+                refresh()
+                if onSelect then onSelect(self.value) end
+            end
         end)
 
         row:Hide()
         rows[i] = row
+    end
+
+    -- Multi-select: a click on empty list space (not on a visible row — hidden
+    -- rows don't consume clicks) clears the whole selection. Attached to both the
+    -- container and the scroll frame so it fires wherever the empty click lands.
+    if multiSelect then
+        local function clearSelection()
+            if not next(selectedSet) then return end
+            selectedSet = {}
+            anchorIndex = nil
+            refresh()
+            if onSelect then onSelect() end
+        end
+        container:EnableMouse(true)
+        container:HookScript("OnMouseUp", clearSelection)
+        sf:EnableMouse(true)
+        sf:SetScript("OnMouseUp", clearSelection)
     end
 
     -- Scrolling the bar (drag, wheel, or step buttons) re-maps the visible rows.
@@ -447,6 +500,8 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
     container.SetItems = function(self, newItems)
         items         = newItems or {}
         selectedIndex = nil
+        selectedSet   = {}
+        anchorIndex   = nil
         sf.offset = 0
         if scrollBar then scrollBar:SetValue(0) end
         refresh()
@@ -473,6 +528,38 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect)
         end
         refresh()
         return selectedIndex ~= nil
+    end
+
+    -- ── Multi-select API ──────────────────────────────────────
+    -- Selected row values, in items order (stable for display).
+    ---@return table  Array of selected values.
+    container.GetSelectedValues = function(self)
+        local out = {}
+        for _, item in ipairs(items) do
+            local v = itemValue(item)
+            if selectedSet[v] then out[#out + 1] = v end
+        end
+        return out
+    end
+
+    -- Programmatic multi-selection by value (values absent from items are ignored
+    -- at highlight time). Does NOT fire the callback.
+    ---@param values table?  Array of values to select; nil/empty clears.
+    container.SetSelectedValues = function(self, values)
+        selectedSet = {}
+        anchorIndex = nil
+        if values then
+            for _, v in ipairs(values) do selectedSet[v] = true end
+        end
+        refresh()
+    end
+
+    -- Selects every current row. Does NOT fire the callback.
+    container.SelectAllValues = function(self)
+        selectedSet = {}
+        for _, item in ipairs(items) do selectedSet[itemValue(item)] = true end
+        anchorIndex = nil
+        refresh()
     end
 
     container.marginTop    = NS.MARGIN.button.top

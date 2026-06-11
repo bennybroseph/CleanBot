@@ -58,10 +58,14 @@ end
 
 -- ── UI state (assigned in CleanBot_BuildGroupTab) ─────────────────────────────
 local selectedGroupValue = nil   ---@type string?  "class:WARRIOR" | "custom:Name"; survives refreshes
+local lastAppliedGroupValue = nil ---@type string?  the value CB_OnGroupSelected last applied (detects group change vs refresh)
+local currentMembers     = {}    ---@type table    live members ({key,name,class,value}) of the selected group
 local groupList, memberList      -- the two select lists
 local listsRegion                -- container for buttons + both lists (hidden in the empty state)
 local groupStratPanel            -- right-hand mirrored strategy panel
 local groupEmptyLabel            -- "No bots found..." (mirrors the Individual tab)
+local managingLabel              -- "Managing: <bots>" header atop the strategy panel
+local emptyStratLabel            -- "Select a Bot to Begin" (shown when nothing is selected)
 local groupCtrl, groupContainer  -- ctrl panel + content container (class tabs build into it)
 local innerTabBar                -- inner tab bar (Combat / Non-Combat / Class)
 local innerTabBtns = {}          -- [1] = Combat, [2] = Non-Combat
@@ -191,8 +195,10 @@ end
 -- Resolves a group value into its LIVE members (send/aggregate targets) and
 -- the member-list items. A stored custom-group member missing from the
 -- roster renders grey but stays selectable so it can be removed.
+-- Each live member carries `.value` matching its member-list item value, so a
+-- multiselect value maps back to a member (greys have an item but no member).
 ---@param value string  "class:CLASS" or "custom:Name".
----@return table members  Array of {key,name,class}.
+---@return table members  Array of {key,name,class,value}.
 ---@return table items    Select-list item tables for the member list.
 local function CB_ResolveMembers(value)
     local members, items = {}, {}
@@ -200,7 +206,7 @@ local function CB_ResolveMembers(value)
     if kind == "class" then
         for _, d in ipairs(NS.desiredBots or {}) do
             if d.class == rest then
-                members[#members + 1] = { key = d.key, name = d.name, class = d.class }
+                members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
                 items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
             end
         end
@@ -212,7 +218,7 @@ local function CB_ResolveMembers(value)
         if rg then
             for _, d in ipairs(NS.desiredBots or {}) do
                 if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then
-                    members[#members + 1] = { key = d.key, name = d.name, class = d.class }
+                    members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
                     items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
                 end
             end
@@ -223,7 +229,7 @@ local function CB_ResolveMembers(value)
         for _, botName in ipairs(stored) do
             local d = live[strlower(botName)]
             if d then
-                members[#members + 1] = { key = d.key, name = d.name, class = d.class }
+                members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = botName }
                 items[#items + 1]     = { text = d.name, value = botName, class = d.class }
             else
                 items[#items + 1]     = { text = botName, value = botName, grey = true }
@@ -522,24 +528,42 @@ end
 -- Selection and refresh
 -- ============================================================
 
--- Applies a group selection: swaps the slot member sets, (lazily) builds the
--- class tabs, re-aggregates, syncs the strategy panel, and kicks a silent
--- bridge-path state re-read so the aggregate reflects fresh server state.
--- (The whisper path deliberately relies on the per-toggle ",?" self-heal
--- instead of mass co?/nc? probes per selection.)
----@param value string  "class:CLASS" or "custom:Name".
-local function CB_OnGroupSelected(value)
-    selectedGroupValue = value
-    local members, items = CB_ResolveMembers(value)
-    memberList:SetItems(items)
+-- Builds the "Managing: <bots>" header text — each managed bot shown as its class
+-- icon + class-colored name. Falls back to a plain count past a handful so the
+-- single-line label can't overflow (and to keep many icons from getting busy).
+---@param managed table  Managed members ({name, class, ...}).
+---@return string
+local function CB_ManagingText(managed)
+    if #managed > 6 then return "Managing: " .. #managed .. " bots" end
+    local parts = {}
+    for _, m in ipairs(managed) do
+        local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[m.class]
+        local name = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, m.name) or m.name
+        parts[#parts + 1] = NS.CB_ClassIconMarkup(m.class) .. " " .. name
+    end
+    return "Managing: " .. table.concat(parts, ", ")
+end
 
-    NS.groupSlot.members = members
+-- Applies the member list's current selection as the managed set: the strategy
+-- panel aggregates over and fans out to only the selected (live) bots. Greys map
+-- to no member and are filtered out. No selection → the empty state.
+local function CB_ApplyMemberSelection()
+    local byValue = {}
+    for _, m in ipairs(currentMembers) do byValue[m.value] = m end
 
-    -- Classes present, in roster order; class slots get the filtered member
-    -- lists (absent classes cleared so a stale tab never sends to old members).
+    local managed = {}
+    for _, v in ipairs(memberList:GetSelectedValues()) do
+        local m = byValue[v]
+        if m then managed[#managed + 1] = m end
+    end
+
+    NS.groupSlot.members = managed
+
+    -- Per-class slots filtered to the managed subset (absent classes cleared so a
+    -- stale tab never sends to old members).
     local classes, seen = {}, {}
     for _, cs in pairs(NS.groupClassSlots) do cs.members = {} end
-    for _, m in ipairs(members) do
+    for _, m in ipairs(managed) do
         if not seen[m.class] then
             seen[m.class] = true
             classes[#classes + 1] = m.class
@@ -547,6 +571,19 @@ local function CB_OnGroupSelected(value)
         local cs = CB_GroupClassSlot(m.class)
         cs.members[#cs.members + 1] = m
     end
+
+    if #managed == 0 then
+        -- Nothing managed: hide the strategy controls, show the prompt.
+        managingLabel:Hide()
+        groupContainer:Hide()
+        emptyStratLabel:Show()
+        return
+    end
+
+    emptyStratLabel:Hide()
+    managingLabel:SetText(CB_ManagingText(managed))
+    managingLabel:Show()
+    groupContainer:Show()
 
     CB_LayoutGroupInnerTabs(classes)
 
@@ -556,6 +593,31 @@ local function CB_OnGroupSelected(value)
     end
 
     CB_SyncGroupViews()
+end
+
+-- Applies a group selection: resolves the members, sets the member list, picks
+-- the managed selection (all by default; preserved across an internal refresh of
+-- the same group), then applies it. Kicks a silent bridge-path state re-read.
+-- (The whisper path deliberately relies on the per-toggle ",?" self-heal instead
+-- of mass co?/nc? probes per selection.)
+---@param value         string   "class:CLASS" | "role:..." | "custom:Name".
+---@param fromUserClick boolean?  True when the user clicked the group row (→ reselect all).
+local function CB_OnGroupSelected(value, fromUserClick)
+    local newGroup = (value ~= lastAppliedGroupValue)
+    selectedGroupValue = value
+
+    -- Preserve the current selection only when an internal refresh re-applies the
+    -- SAME group (so a state packet can't reset a narrowed selection); a user
+    -- click, a new group, or the first show all (re)select every row.
+    local prev = (not fromUserClick and not newGroup) and memberList:GetSelectedValues() or nil
+
+    local members, items = CB_ResolveMembers(value)
+    currentMembers = members
+    memberList:SetItems(items)
+    if prev then memberList:SetSelectedValues(prev) else memberList:SelectAllValues() end
+
+    lastAppliedGroupValue = value
+    CB_ApplyMemberSelection()
     NS.CB_RequestStates()
 end
 
@@ -735,11 +797,14 @@ NS.CleanBot_BuildGroupTab = function()
         "Remove Bot", removeW, 24)
 
     -- ── Lists ─────────────────────────────────────────────────
+    -- Group list: single-select; a user click reselects all members of that group.
     groupList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupList", listW, listH,
-        function(value) CB_OnGroupSelected(value) end)
+        function(value) CB_OnGroupSelected(value, true) end)
     NS.CB_AnchorBelow(groupList, removeGroupBtn)
 
-    memberList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupMemberList", listW, listH)
+    -- Member list: Windows-style multi-select; the selection is the managed set.
+    memberList = NS.CB_CreateSelectList(listsRegion, "CleanBotGroupMemberList", listW, listH,
+        function() CB_ApplyMemberSelection() end, true)
     memberList.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(memberList, groupList)
 
@@ -756,8 +821,22 @@ NS.CleanBot_BuildGroupTab = function()
     groupStratPanel:SetPoint("TOPLEFT",     listsRegion, "TOPRIGHT",    LIST_STRAT_GAP, 0)
     groupStratPanel:SetPoint("BOTTOMRIGHT", content,     "BOTTOMRIGHT", 0,            0)
 
+    -- "Managing: <bots>" header — which bots the controls below are driving.
+    local HEADER_H = 18
+    managingLabel = groupStratPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    managingLabel:SetPoint("TOPLEFT",  groupStratPanel, "TOPLEFT",  0, 0)
+    managingLabel:SetPoint("TOPRIGHT", groupStratPanel, "TOPRIGHT", 0, 0)
+    managingLabel:SetJustifyH("LEFT")
+    managingLabel:SetHeight(HEADER_H)
+
+    -- Empty state shown when nothing is selected (replaces the controls).
+    emptyStratLabel = groupStratPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    emptyStratLabel:SetPoint("CENTER", groupStratPanel, "CENTER", 0, 0)
+    emptyStratLabel:SetText("Select a Bot to Begin")
+    emptyStratLabel:Hide()
+
     groupCtrl = NS.CB_CreatePanel(groupStratPanel, "CleanBotGroupCtrl", 3, "panel")
-    groupCtrl:SetPoint("TOPLEFT",     groupStratPanel, "TOPLEFT",     0, 0)
+    groupCtrl:SetPoint("TOPLEFT",     groupStratPanel, "TOPLEFT",     0, -HEADER_H)
     groupCtrl:SetPoint("BOTTOMRIGHT", groupStratPanel, "BOTTOMRIGHT", 0, 0)
 
     groupContainer = CreateFrame("Frame", nil, groupCtrl)
@@ -926,16 +1005,16 @@ NS.CleanBot_BuildGroupTab = function()
             CB_AddBotToCustomGroup(data, self.editBox and self.editBox:GetText())
         end)
 
-    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_BOT_FROM_GROUP",
-        "Remove '%s' from the '%s' group?",
+    NS.CB_RegisterConfirmPopup("CLEANBOT_REMOVE_BOTS_FROM_GROUP",
+        "Remove %d bot(s) from the '%s' group?",
         function(self, data)
             local group = data and CleanBot_SavedVars.botGroups[data.group]
             if not group then return end
-            for i, existing in ipairs(group) do
-                if strlower(existing) == strlower(data.bot) then
-                    table.remove(group, i)
-                    break
-                end
+            -- Build a lowercase set of the names to drop, then filter the list.
+            local drop = {}
+            for _, name in ipairs(data.bots) do drop[strlower(name)] = true end
+            for i = #group, 1, -1 do
+                if drop[strlower(group[i])] then table.remove(group, i) end
             end
             NS.CB_RefreshGroupTab()
         end)
@@ -1019,14 +1098,14 @@ NS.CleanBot_BuildGroupTab = function()
             NS.CB_Print("Class and role groups are managed automatically and cannot be edited.")
             return
         end
-        local sel = memberList:GetSelected()
-        if not sel then
-            NS.CB_Print("No bot selected.")
+        -- Remove every selected bot (values are the stored names for custom groups).
+        local bots = memberList:GetSelectedValues()
+        if #bots == 0 then
+            NS.CB_Print("No bots selected.")
             return
         end
-        local botName = type(sel) == "table" and (sel.value or sel.text) or sel
-        local popup = StaticPopup_Show("CLEANBOT_REMOVE_BOT_FROM_GROUP",
-            botName, name, { group = name, bot = botName })
+        local popup = StaticPopup_Show("CLEANBOT_REMOVE_BOTS_FROM_GROUP",
+            #bots, name, { group = name, bots = bots })
         if popup then
             popup:SetWidth(420)
             popup.text:SetWidth(380)
