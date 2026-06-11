@@ -269,10 +269,12 @@ end
 -- A bordered, scrollable list of selectable rows.
 --
 -- Items are plain strings, or tables for decorated rows:
---   { text = "Label", value = "key", class = "WARRIOR"|nil, grey = boolean|nil }
--- class colors the label (RAID_CLASS_COLORS) and shows the class icon;
+--   { text = "Label", value = "key", class = "WARRIOR"|nil, grey = boolean|nil,
+--     rightIcon = { texture = path, coords = {l,r,t,b} }|nil }
+-- class colors the label (RAID_CLASS_COLORS) and shows the class icon (left);
 -- grey renders the label 50% grey with no icon (e.g. a bot missing from the
--- party/raid). String rows keep the template's default look.
+-- party/raid); rightIcon shows a texture right-aligned in the row (e.g. a role
+-- icon). String rows keep the template's default look.
 --
 -- Returns a container frame with the following API:
 --   container:SetItems(items)           — populates rows; clears any previous selection.
@@ -372,12 +374,24 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
                 else
                     row.icon:Hide()
                 end
+                -- Right-aligned icon (e.g. a role icon); bounds the label so a
+                -- long name can't slide under it.
+                local rIcon = isTable and item.rightIcon
+                if rIcon then
+                    row.roleIcon:SetTexture(rIcon.texture)
+                    if rIcon.coords then row.roleIcon:SetTexCoord(unpack(rIcon.coords)) else row.roleIcon:SetTexCoord(0, 1, 0, 1) end
+                    row.roleIcon:Show()
+                else
+                    row.roleIcon:Hide()
+                end
+
                 row.label:ClearAllPoints()
                 if showIcon then
                     row.label:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
                 else
                     row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
                 end
+                if rIcon then row.label:SetPoint("RIGHT", row.roleIcon, "LEFT", -4, 0) end
 
                 local classColor = isTable and item.class and RAID_CLASS_COLORS
                                    and RAID_CLASS_COLORS[item.class]
@@ -425,6 +439,13 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         icn:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
         icn:Hide()
         row.icon = icn
+
+        -- Optional right-aligned icon (item.rightIcon), e.g. a role icon.
+        local rIcn = row:CreateTexture(nil, "ARTWORK")
+        rIcn:SetSize(14, 14)
+        rIcn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+        rIcn:Hide()
+        row.roleIcon = rIcn
 
         -- Highlight texture shown at reduced alpha when the row is selected.
         local hl = row:CreateTexture(nil, "BACKGROUND")
@@ -559,6 +580,13 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         selectedSet = {}
         for _, item in ipairs(items) do selectedSet[itemValue(item)] = true end
         anchorIndex = nil
+        refresh()
+    end
+
+    -- Re-renders the visible rows from the current items WITHOUT changing items or
+    -- selection — for callers that mutate item fields in place (e.g. a role icon
+    -- that should update live).
+    container.RefreshDisplay = function(self)
         refresh()
     end
 

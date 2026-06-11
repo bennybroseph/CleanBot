@@ -60,6 +60,7 @@ end
 local selectedGroupValue = nil   ---@type string?  "class:WARRIOR" | "custom:Name"; survives refreshes
 local lastAppliedGroupValue = nil ---@type string?  the value CB_OnGroupSelected last applied (detects group change vs refresh)
 local currentMembers     = {}    ---@type table    live members ({key,name,class,value}) of the selected group
+local currentItems       = {}    ---@type table    the member list's current item tables (mutated in place for live role icons)
 local groupList, memberList      -- the two select lists
 local listsRegion                -- container for buttons + both lists (hidden in the empty state)
 local groupStratPanel            -- right-hand mirrored strategy panel
@@ -82,12 +83,16 @@ local activeInnerKey = 1         ---@type number|string  1 | 2 | "class"
 -- (entry.combat role fields), shown only when populated.
 -- ============================================================
 -- LFG role icons (Interface\LFGFrame\UI-LFG-ICON-PORTRAITROLES, 64x64; texel
--- coords lifted from FrameXML LFGFrame.lua, expressed as 0-1 fractions for
--- NS.CB_InlineIcon with texDim 64).
-local ROLE_TEX = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
-local TANK_I   = NS.CB_InlineIcon(ROLE_TEX, 14, { 0,     19 / 64, 22 / 64, 41 / 64 }, 64)
-local HEAL_I   = NS.CB_InlineIcon(ROLE_TEX, 14, { 20/64, 39 / 64,  1 / 64, 20 / 64 }, 64)
-local DMG_I    = NS.CB_InlineIcon(ROLE_TEX, 14, { 20/64, 39 / 64, 22 / 64, 41 / 64 }, 64)
+-- coords lifted from FrameXML LFGFrame.lua, expressed as 0-1 fractions — shared by
+-- the inline group-list markup (NS.CB_InlineIcon, texDim 64) and the member-list
+-- right-icon textures (SetTexCoord).
+local ROLE_TEX  = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLE_TANK = { 0,     19 / 64, 22 / 64, 41 / 64 }
+local ROLE_HEAL = { 20/64, 39 / 64,  1 / 64, 20 / 64 }
+local ROLE_DMG  = { 20/64, 39 / 64, 22 / 64, 41 / 64 }
+local TANK_I    = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_TANK, 64)
+local HEAL_I    = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_HEAL, 64)
+local DMG_I     = NS.CB_InlineIcon(ROLE_TEX, 14, ROLE_DMG,  64)
 
 -- A bot belongs to a role group if ANY of the listed combat fields is set.
 local ROLE_GROUPS = {
@@ -110,6 +115,40 @@ local function CB_BotInRole(entry, fields)
         if entry.combat[f] == true then return true end
     end
     return false
+end
+
+-- The role-icon descriptor for a bot's CURRENT role (priority tank > heal > dps),
+-- as a member-list `rightIcon`, or nil when no role is set / no combat data.
+---@param key string  Bot name-key.
+---@return table?     { texture, coords } for CB_CreateSelectList's rightIcon.
+local function CB_RoleIconForKey(key)
+    local cd = CleanBot_PartyBots[key] and CleanBot_PartyBots[key].combat
+    if not cd then return nil end
+    local coords
+    if cd.isTank then coords = ROLE_TANK
+    elseif cd.isHealer then coords = ROLE_HEAL
+    elseif cd.isDPS or cd.isDPSAoe then coords = ROLE_DMG end
+    if not coords then return nil end
+    return { texture = ROLE_TEX, coords = coords }
+end
+
+-- Class display name (sort key), and a role rank for sorting (tank < heal < dps <
+-- none) from a bot's current combat state.
+---@param class string?  Class token.
+---@return string
+local function classDisplay(class)
+    return (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class or ""
+end
+---@param key string  Bot name-key.
+---@return number     1 tank, 2 heal, 3 dps, 9 none.
+local function roleRank(key)
+    local cd = CleanBot_PartyBots[key] and CleanBot_PartyBots[key].combat
+    if cd then
+        if cd.isTank then return 1
+        elseif cd.isHealer then return 2
+        elseif cd.isDPS or cd.isDPSAoe then return 3 end
+    end
+    return 9
 end
 
 -- ============================================================
@@ -137,6 +176,7 @@ end
 ---@return boolean
 local function CB_IsReservedGroupName(name)
     local lower = strlower(name)
+    if lower == "all" then return true end
     for _, display in pairs(NS.CLASS_DISPLAY or {}) do
         if strlower(display) == lower then return true end
     end
@@ -146,22 +186,23 @@ local function CB_IsReservedGroupName(name)
     return false
 end
 
--- Items for the groups list: class groups first (order of first appearance in
--- the roster, class-colored + icon), then custom groups sorted by name. A
--- custom group greys when ANY stored member is missing from the party/raid.
+-- Items for the groups list: the managed "All" group, then class groups
+-- (alphabetical, class-colored + icon), then role groups, then custom groups
+-- sorted by name. A custom group greys when ANY stored member is missing from
+-- the party/raid.
 ---@return table  Array of select-list item tables.
 local function CB_GroupItems()
     local items = {}
-    local seen  = {}
+    -- "All" — every party/raid member bot; managed, never editable/removable.
+    items[#items + 1] = { text = "All", value = "all:all" }
+    -- Class groups, alphabetical by class display name.
+    local seen, classes = {}, {}
     for _, d in ipairs(NS.desiredBots or {}) do
-        if not seen[d.class] then
-            seen[d.class] = true
-            items[#items + 1] = {
-                text  = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[d.class]) or d.class,
-                value = "class:" .. d.class,
-                class = d.class,
-            }
-        end
+        if not seen[d.class] then seen[d.class] = true; classes[#classes + 1] = d.class end
+    end
+    table.sort(classes, function(a, b) return classDisplay(a) < classDisplay(b) end)
+    for _, c in ipairs(classes) do
+        items[#items + 1] = { text = classDisplay(c), value = "class:" .. c, class = c }
     end
 
     -- Role groups (dynamic; only when ≥1 live bot currently fills the role).
@@ -203,11 +244,18 @@ end
 local function CB_ResolveMembers(value)
     local members, items = {}, {}
     local kind, rest = value:match("^(%a+):(.+)$")
-    if kind == "class" then
+    if kind == "all" then
+        for _, d in ipairs(NS.desiredBots or {}) do
+            members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
+            items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
+                                      botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
+        end
+    elseif kind == "class" then
         for _, d in ipairs(NS.desiredBots or {}) do
             if d.class == rest then
                 members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
-                items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
+                items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
+                                          botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
             end
         end
     elseif kind == "role" then
@@ -219,7 +267,8 @@ local function CB_ResolveMembers(value)
             for _, d in ipairs(NS.desiredBots or {}) do
                 if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then
                     members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = d.key }
-                    items[#items + 1]     = { text = d.name, value = d.key, class = d.class }
+                    items[#items + 1]     = { text = d.name, value = d.key, class = d.class,
+                                              botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
                 end
             end
         end
@@ -230,12 +279,39 @@ local function CB_ResolveMembers(value)
             local d = live[strlower(botName)]
             if d then
                 members[#members + 1] = { key = d.key, name = d.name, class = d.class, value = botName }
-                items[#items + 1]     = { text = d.name, value = botName, class = d.class }
+                items[#items + 1]     = { text = d.name, value = botName, class = d.class,
+                                          botKey = d.key, rightIcon = CB_RoleIconForKey(d.key) }
             else
                 items[#items + 1]     = { text = botName, value = botName, grey = true }
             end
         end
     end
+
+    -- Sort key depends on the group kind: "all" → Class → Role → Name; a single
+    -- class group → Role → Name (class is constant); role/custom → Class → Name.
+    -- Members follow the same order so the class tabs appear sorted; greyed items
+    -- sort last. Compares (class, key, name) tuples shared by members and items.
+    local function cmp(aClass, aKey, aName, bClass, bKey, bName)
+        if kind ~= "class" then
+            local ac, bc = classDisplay(aClass), classDisplay(bClass)
+            if ac ~= bc then return ac < bc end
+        end
+        if kind == "all" or kind == "class" then
+            local ar, br = roleRank(aKey), roleRank(bKey)
+            if ar ~= br then return ar < br end
+        end
+        return aName < bName
+    end
+    table.sort(members, function(a, b)
+        return cmp(a.class, a.key, a.name or "", b.class, b.key, b.name or "")
+    end)
+    table.sort(items, function(a, b)
+        local ag, bg = a.grey and 1 or 0, b.grey and 1 or 0
+        if ag ~= bg then return ag < bg end
+        if a.grey then return (a.text or "") < (b.text or "") end
+        return cmp(a.class, a.botKey, a.text or "", b.class, b.botKey, b.text or "")
+    end)
+
     return members, items
 end
 
@@ -613,6 +689,7 @@ local function CB_OnGroupSelected(value, fromUserClick)
 
     local members, items = CB_ResolveMembers(value)
     currentMembers = members
+    currentItems   = items
     memberList:SetItems(items)
     if prev then memberList:SetSelectedValues(prev) else memberList:SelectAllValues() end
 
@@ -670,6 +747,21 @@ NS.CB_RefreshGroupTab = function()
     end
 end
 
+-- Updates the member list's right-aligned role icon for a bot whose role just
+-- changed, in place (no membership/selection change), so icons track live state.
+---@param key string  Bot name-key whose entry just changed.
+local function CB_UpdateMemberRoleIcons(key)
+    if not memberList then return end
+    local dirty = false
+    for _, item in ipairs(currentItems) do
+        if item.botKey == key then
+            item.rightIcon = CB_RoleIconForKey(key)
+            dirty = true
+        end
+    end
+    if dirty then memberList:RefreshDisplay() end
+end
+
 -- Hooked from CB_UpdateTabData (Individual.lua): when a member of the
 -- selected group gets fresh data (STATE~ packet, whisper reconcile), the
 -- aggregate view refreshes too — even for members not bound to a slot.
@@ -680,6 +772,8 @@ NS.CB_OnMemberDataChanged = function(key)
     -- Role-group presence depends on every bot's role state, not just the
     -- selected group's members — refresh the list whenever any bot changes.
     CB_RebuildGroupListOnly()
+    -- The member's role icon tracks live state too.
+    CB_UpdateMemberRoleIcons(key)
 
     local isMember = false
     for _, m in ipairs(NS.groupSlot.members) do
