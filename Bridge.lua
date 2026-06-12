@@ -104,12 +104,13 @@ NS.debugVerify         = false ---@type boolean
 -- its readiness whisper (see NS.joinCandidates).
 NS.loginPhaseActive = false  -- true only on fresh login, cleared when detection resolves
 
--- Discovery candidates: members CB_ProbePartyForBots has probed but not yet confirmed as bots.
--- A bot that wasn't in-world during the probe sends an (any-text) greeting once it loads; that
--- unsolicited whisper is the readiness signal that re-probes it. Bounded to one entry per member
--- per join (set when first probed, cleared on the re-probe / on confirmation / on leaving), so an
--- established member who later whispers isn't re-probed. Replaces the old exact-"Hello!" match.
-NS.joinCandidates   = {}     -- name-key -> display-name: probed, awaiting a readiness whisper
+-- Re-probe candidates: members CB_ProbePartyForBots has probed but not yet confirmed. If that
+-- probe goes unanswered because the bot was still loading, its later readiness whisper re-probes
+-- it (the greeting branch in CHAT_MSG_WHISPER). The fast path there uses a LIVE group check plus
+-- "not probed", so the first greeting from a freshly-joined member triggers immediately without
+-- any pre-set flag; this set only covers the re-probe-after-unanswered case. Cleared on the
+-- re-probe / on confirmation / on leaving, so a chatty human gets at most one stray probe.
+NS.joinCandidates   = {}     -- name-key -> display-name: probed, awaiting a re-probe if unanswered
 
 -- ============================================================
 -- Linked accounts  (populated by .playerbots account linkedAccounts)
@@ -133,9 +134,9 @@ NS.syncPending = false
 -- No-bridge discovery: whisper "co ?" to each group member (party or raid)
 -- exactly once. Only members that reply with a "Strategies: " line are treated
 -- as bots (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so
--- they are probed a single time and then ignored. Each newly-probed member is also
--- recorded in NS.joinCandidates so a bot that wasn't ready for this probe is re-probed
--- when it later sends a readiness whisper.
+-- they are probed a single time and then ignored. Each probed member is flagged as a
+-- joinCandidate so that, if this probe goes unanswered because the bot was still loading,
+-- its later readiness whisper re-probes it (see the CHAT_MSG_WHISPER greeting branch).
 -- Skipped during loginPhaseActive — bots may not be online yet on fresh
 -- login; probing waits until detection resolves, then this sweep runs.
 local function CB_ProbePartyForBots()
@@ -158,7 +159,7 @@ local function CB_ProbePartyForBots()
             if not CleanBot_PartyBots[key] and not NS.probed[key] then
                 NS.probed[key]         = true
                 NS.awaitingProbe[key]  = true
-                NS.joinCandidates[key] = nm   -- await a readiness whisper if this probe goes unanswered
+                NS.joinCandidates[key] = nm   -- re-probe target if this probe goes unanswered
                 NS.CB_SendBotCommand(nm, "co ?")
             end
         end
@@ -759,9 +760,9 @@ local function CB_StartBridgeDetection()
             if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
 
             -- Detection done with no bridge: run the probe sweep now that login gating is
-            -- lifted. It probes every current member (and records joinCandidates), so a bot
-            -- that greeted during detection is caught here, and a not-yet-ready one is caught
-            -- later by its readiness whisper.
+            -- lifted. It probes every current member (flagging each as a joinCandidate), so a
+            -- bot ready during detection is caught here; a not-yet-ready one is caught later by
+            -- its readiness whisper.
             NS.CB_RequestSync()
         end
     end)
@@ -791,22 +792,28 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         local key   = strlower(sender)
         local entry = CleanBot_PartyBots[key]
 
-        -- Readiness detection (no-bridge): a bot that wasn't in-world for its initial probe
-        -- announces itself once loaded by whispering the player. The greeting text varies
-        -- across playerbots versions ("Hi", "Hi!", "Hello", "Hello!", …), so we trigger on the
-        -- whisper itself, not its content: an unsolicited whisper from a joinCandidate (a member
-        -- we probed but haven't confirmed) re-sends "co ?", and the "Strategies:" reply confirms
-        -- bot-hood below. A human just won't reply. Bounded to one re-probe per join by clearing
-        -- the candidate here. Excludes a "Strategies:" line (that's the reply, handled below) and
-        -- known bots (entry ~= nil).
-        if not entry and NS.joinCandidates[key]
+        -- Readiness detection (no-bridge): a bot announces itself once loaded by whispering the
+        -- player. The greeting text varies across playerbots versions ("Hi", "Hi!", "Hello", …),
+        -- so we trigger on the whisper itself, not its content. Group membership is checked LIVE
+        -- here (not via a pre-set flag) so a greeting that arrives before our roster-change
+        -- handler runs still triggers immediately — that ordering race is what made detection lag.
+        -- We probe on the FIRST unsolicited whisper from a current group member (not yet probed),
+        -- OR re-probe a joinCandidate whose earlier sweep probe went unanswered while it loaded.
+        -- Clearing the candidate bounds a chatty human to a single stray probe. Excludes a
+        -- "Strategies:" line (the reply, handled below), known bots, and the fresh-login window.
+        if not entry and not NS.loginPhaseActive
            and strsub(msg, 1, 12) ~= "Strategies: "
-           and CB_EffectiveBridgeState() ~= "present" then
-            NS.probed[key]         = true
-            NS.awaitingProbe[key]  = true
-            NS.joinCandidates[key] = nil
-            NS.CB_SendBotCommand(sender, "co ?")
-            return
+           and CB_EffectiveBridgeState() ~= "present"
+           and (not NS.probed[key] or NS.joinCandidates[key]) then
+            local inGroup = false
+            NS.CB_ForEachGroupMember(function(unit, nm) if nm == sender then inGroup = true end end)
+            if inGroup then
+                NS.probed[key]         = true
+                NS.awaitingProbe[key]  = true
+                NS.joinCandidates[key] = nil
+                NS.CB_SendBotCommand(sender, "co ?")
+                return
+            end
         end
 
         -- Spec-list collection: reply lines from "talents spec list", one premade
