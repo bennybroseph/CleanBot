@@ -1222,8 +1222,15 @@ SelectBot = function(key, silent)
     -- Fetch the bot's "stats" so the XP bar populates on both bridge and whisper
     -- paths (the bridge's INV_SUMMARY carries no XP). The reply repaints the bar
     -- via CB_RefreshXPBarForKey. Refresh now too so the level label shows instantly.
+    -- Only fetch when the selection actually changes. At this point NS.selectedBotKey
+    -- still holds the PREVIOUS selection (CleanBot_SelectTab updates it below), so a
+    -- re-click of the active tab — and the post-login RefreshTabs burst that keeps
+    -- re-selecting the same first bot — skip the whisper entirely. CB_FetchStats's
+    -- in-flight + TTL guards make this an optimization rather than the sole protection.
     local entry = CleanBot_PartyBots[slot.key]
-    if entry and NS.CB_FetchStats then NS.CB_FetchStats(entry) end
+    if entry and NS.CB_FetchStats and slot.key ~= NS.selectedBotKey then
+        NS.CB_FetchStats(entry)
+    end
     if NS.CB_RefreshXPBar then NS.CB_RefreshXPBar(slot) end
 
     NS.lruClock = NS.lruClock + 1
