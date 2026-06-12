@@ -204,6 +204,7 @@ NS.THEME_DEFAULTS = {
 -- Feature flags and theme values — mutated at login from SavedVars, and by the Settings Apply button.
 NS.botEmotes    = true
 NS.itemGlow     = true   -- Blizz-path rarity overlay on items/equipment (uncommon+); see ItemVisuals
+NS.hideBotChatter = true -- hide CleanBot's own whisper/command spam from chat; see ChatFilter.lua
 NS.manageSelf   = false  -- preference: auto-enable self-bot on fresh login; see Bridge self-bot section
 NS.selfBotActive = false -- live state: is the player currently a self-bot (driven by server botAI messages)
 NS.scale        = NS.THEME_DEFAULTS.scale
@@ -432,6 +433,9 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
         if type(CleanBot_SavedVars.itemGlow) == "boolean" then
             NS.itemGlow = CleanBot_SavedVars.itemGlow
+        end
+        if type(CleanBot_SavedVars.hideBotChatter) == "boolean" then
+            NS.hideBotChatter = CleanBot_SavedVars.hideBotChatter
         end
         if type(CleanBot_SavedVars.manageSelf) == "boolean" then
             NS.manageSelf = CleanBot_SavedVars.manageSelf

@@ -13,6 +13,7 @@ Skinning\Widgets.lua
 Skinning\QuestWidgets.lua
 Skinning\ItemVisuals.lua
 Bridge.lua
+ChatFilter.lua
 Individual\Strategies.lua
 Individual\ClassData.lua
 Individual\EquipData.lua

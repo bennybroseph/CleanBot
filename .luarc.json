@@ -27,6 +27,7 @@
       "ElvUI",
       "Talented",
       "ChatEdit_InsertLink",
+      "ChatFrame_AddMessageEventFilter",
       "CloseDropDownMenus",
       "ColorPickerFrame",
       "FauxScrollFrame_GetOffset",

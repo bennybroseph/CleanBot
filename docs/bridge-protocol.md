@@ -51,8 +51,11 @@ but with no whisper log spam.
    `PLAYER_LOGOUT` clears the session flag so the next login is treated as fresh.
 
 On a **fresh login** (not `/reload`), `loginPhaseActive` blocks whisper probing until
-detection resolves — bots may not be in-world yet. Bots announce readiness by whispering
-`Hello!`; those are buffered and probed once the bridge is declared absent.
+detection resolves — bots may not be in-world yet. Once detection resolves absent, the probe
+sweep runs and records each probed-but-unconfirmed member as a `joinCandidate`. A bot that
+wasn't in-world for its probe announces itself once loaded by whispering the player; that
+unsolicited whisper (any text — greetings vary by playerbots version) re-sends `co ?`, and the
+`Strategies:` reply confirms it. This replaces the old exact-`Hello!` match.
 
 ---
 

@@ -794,6 +794,10 @@ NS.CleanBot_BuildSettingsTab = function()
     -- Exposed so the first-time popup can tick the box when it enables the preference.
     NS.CB_RefreshSelfBotCheckbox = function() selfBotCB:SetChecked(NS.manageSelf == true) end
 
+    -- Tracks the last Behaviour checkbox so the next one anchors below it regardless of
+    -- whether the ElvUI-gated Item Glow box exists. Reassigned as more boxes are added.
+    local lastBehaviourCB = selfBotCB
+
     local selfBotCBLbl = NS.CB_CreateLabel(otherPanel, "Auto-Enable Self as Bot")
     selfBotCBLbl:SetPoint("LEFT", selfBotCB, "RIGHT", 2, 0)
 
@@ -844,6 +848,7 @@ NS.CleanBot_BuildSettingsTab = function()
         local itemGlowCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotItemGlowCB")
         itemGlowCB:SetChecked(NS.itemGlow ~= false)
         NS.CB_AnchorBelow(itemGlowCB, selfBotCB)
+        lastBehaviourCB = itemGlowCB
 
         local itemGlowCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Item Glow")
         itemGlowCBLbl:SetPoint("LEFT", itemGlowCB, "RIGHT", 2, 0)
@@ -873,6 +878,41 @@ NS.CleanBot_BuildSettingsTab = function()
             if NS.CB_RefreshRarityOverlays then NS.CB_RefreshRarityOverlays() end
         end)
     end
+
+    -- ── Hide Bot Chatter (not ElvUI-gated) ─────────────────────
+    -- Filters CleanBot's own whisper commands, the expected bot replies, and the
+    -- server command output it triggers out of the chat window (see ChatFilter.lua).
+    -- The filters read NS.hideBotChatter live, so toggling here applies immediately.
+    local hideChatterCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotHideChatterCB")
+    hideChatterCB:SetChecked(NS.hideBotChatter ~= false)
+    NS.CB_AnchorBelow(hideChatterCB, lastBehaviourCB)
+
+    local hideChatterCBLbl = NS.CB_CreateLabel(otherPanel, "Hide Bot Chatter")
+    hideChatterCBLbl:SetPoint("LEFT", hideChatterCB, "RIGHT", 2, 0)
+
+    local hideChatterCBLblHit = CreateFrame("Frame", nil, otherPanel)
+    hideChatterCBLblHit:SetPoint("LEFT",  hideChatterCBLbl, "LEFT",  0, 0)
+    hideChatterCBLblHit:SetPoint("RIGHT", hideChatterCBLbl, "RIGHT", 0, 0)
+    hideChatterCBLblHit:SetHeight(20)
+    hideChatterCBLblHit:EnableMouse(true)
+
+    local HIDE_CHATTER_TOOLTIP = "When enabled, CleanBot hides its own whispered commands, the bot replies it requests (stats, strategies, inventory, quests), and the server output it triggers from your chat window. Turn off to see the raw traffic for testing."
+    local function showHideChatterTooltip(anchor)
+        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+        GameTooltip:SetText(HIDE_CHATTER_TOOLTIP, nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end
+    hideChatterCB:SetScript("OnEnter",       function(self) showHideChatterTooltip(self) end)
+    hideChatterCB:SetScript("OnLeave",       function()     GameTooltip:Hide()           end)
+    hideChatterCBLblHit:SetScript("OnEnter", function(self) showHideChatterTooltip(self) end)
+    hideChatterCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()           end)
+
+    hideChatterCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        self:SetChecked(checked)
+        NS.hideBotChatter = checked
+        CleanBot_SavedVars.hideBotChatter = checked
+    end)
 
     -- ── Debug tab ──────────────────────────────────────────────
     -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:

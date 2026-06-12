@@ -99,11 +99,17 @@ NS.debugSimulate       = false ---@type boolean
 NS.debugVerify         = false ---@type boolean
 
 -- No-bridge login gating: on a fresh login (not a /reload) bots may not be
--- online yet, so we block CB_ProbePartyForBots until bridge detection
--- resolves. "Hello!" whispers from bots are buffered here and flushed once
--- the bridge is declared absent.
+-- online yet, so we block CB_ProbePartyForBots until bridge detection resolves.
+-- Once it does, the probe sweep runs and a not-yet-ready bot is caught later via
+-- its readiness whisper (see NS.joinCandidates).
 NS.loginPhaseActive = false  -- true only on fresh login, cleared when detection resolves
-NS.pendingHello     = {}     -- name-key -> display-name: buffered "Hello!" senders
+
+-- Discovery candidates: members CB_ProbePartyForBots has probed but not yet confirmed as bots.
+-- A bot that wasn't in-world during the probe sends an (any-text) greeting once it loads; that
+-- unsolicited whisper is the readiness signal that re-probes it. Bounded to one entry per member
+-- per join (set when first probed, cleared on the re-probe / on confirmation / on leaving), so an
+-- established member who later whispers isn't re-probed. Replaces the old exact-"Hello!" match.
+NS.joinCandidates   = {}     -- name-key -> display-name: probed, awaiting a readiness whisper
 
 -- ============================================================
 -- Linked accounts  (populated by .playerbots account linkedAccounts)
@@ -127,9 +133,11 @@ NS.syncPending = false
 -- No-bridge discovery: whisper "co ?" to each group member (party or raid)
 -- exactly once. Only members that reply with a "Strategies: " line are treated
 -- as bots (handled in the CHAT_MSG_WHISPER branch). Humans never respond, so
--- they are probed a single time and then ignored.
+-- they are probed a single time and then ignored. Each newly-probed member is also
+-- recorded in NS.joinCandidates so a bot that wasn't ready for this probe is re-probed
+-- when it later sends a readiness whisper.
 -- Skipped during loginPhaseActive — bots may not be online yet on fresh
--- login; the "Hello!" path gates probing until each bot announces itself.
+-- login; probing waits until detection resolves, then this sweep runs.
 local function CB_ProbePartyForBots()
     if NS.loginPhaseActive then return end
 
@@ -139,15 +147,18 @@ local function CB_ProbePartyForBots()
         if nm then present[strlower(nm)] = true end
     end)
     for k in pairs(NS.probed) do
-        if not present[k] then NS.probed[k] = nil; NS.awaitingProbe[k] = nil end
+        if not present[k] then
+            NS.probed[k] = nil; NS.awaitingProbe[k] = nil; NS.joinCandidates[k] = nil
+        end
     end
 
     NS.CB_ForEachGroupMember(function(unit, nm)
         if nm and UnitIsPlayer(unit) then
             local key = strlower(nm)
             if not CleanBot_PartyBots[key] and not NS.probed[key] then
-                NS.probed[key]        = true
-                NS.awaitingProbe[key] = true
+                NS.probed[key]         = true
+                NS.awaitingProbe[key]  = true
+                NS.joinCandidates[key] = nm   -- await a readiness whisper if this probe goes unanswered
                 NS.CB_SendBotCommand(nm, "co ?")
             end
         end
@@ -329,6 +340,40 @@ local function CB_SendBridge(msg)
     end
 end
 
+-- Command-reply window: bots confirm nearly every command with a whisper — a one-line ack
+-- ("Picking ...", "Wait for attack time set to ...") or a multi-line dump (items/quests/spec).
+-- Rather than enumerate every reply string, we open a per-bot window the instant we whisper a
+-- command; ChatFilter.lua suppresses that bot's whispers while the window is open and slides it
+-- forward as each reply line arrives, so the window brackets the whole burst and closes after
+-- WHISPER_SILENCE of quiet (the same silence basis the collection flags use). Keyed by
+-- lowercased name so it also covers discovery probes to not-yet-cached members.
+NS.botReplyWindow = NS.botReplyWindow or {}   -- [lowername] = GetTime() deadline
+
+---@param botName string  The bot we just whispered a command/query to.
+local function CB_MarkExpectReply(botName)
+    if botName and botName ~= "" then
+        NS.botReplyWindow[strlower(botName)] = GetTime() + NS.WHISPER_SILENCE
+    end
+end
+
+-- Outgoing whisper provenance: CHAT_MSG_WHISPER_INFORM can't tell an addon-sent command from
+-- one the user typed by hand, so we tag each command whisper we send. ChatFilter.lua hides only
+-- the tagged ones, leaving manually typed whispers to a bot visible. Keyed by recipient+text,
+-- holding a short list of send timestamps (a list, not a flag, so two identical commands in a
+-- row each get their own tag); ChatFilter consumes one per matching INFORM and expires stale
+-- tags (a failed send fires no INFORM, so its tag must not linger and hide a later manual one).
+NS.selfWhispers = NS.selfWhispers or {}   -- ["lowerRecipient\0text"] = { GetTime(), ... }
+
+---@param recipient string  Whisper target (bot name).
+---@param text      string  Exact whisper text the addon is sending.
+local function CB_TagSelfWhisper(recipient, text)
+    if not recipient or recipient == "" then return end
+    local k    = strlower(recipient) .. "\0" .. (text or "")
+    local list = NS.selfWhispers[k]
+    if not list then list = {}; NS.selfWhispers[k] = list end
+    list[#list + 1] = GetTime()
+end
+
 -- Sends a command to a bot. Routes through the bridge (silent, no whisper
 -- spam) when the bridge is present and the command is allowlisted; falls back
 -- to a whisper for everything else or when bridge is absent. Safe to use for
@@ -352,6 +397,8 @@ NS.CB_SendBotCommand = function(botName, command)
             return
         end
     end
+    CB_MarkExpectReply(botName)
+    CB_TagSelfWhisper(botName, command)
     SendChatMessage(command, "WHISPER", nil, botName)
 end
 
@@ -633,6 +680,8 @@ NS.CB_FetchStats = function(entry, force)
     end
     entry.awaitingMoney = true
     entry.moneyTimeout  = 0
+    CB_MarkExpectReply(entry.name)
+    CB_TagSelfWhisper(entry.name, "stats")
     SendChatMessage("stats", "WHISPER", nil, entry.name)
 end
 
@@ -709,17 +758,10 @@ local function CB_StartBridgeDetection()
             -- Keep the Debug tab's "Auto (<state>)" label current.
             if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
 
-            -- Flush bots that said "Hello!" during detection (fresh login path).
-            -- CB_ProbePartyForBots is now unblocked for mid-session joins.
-            for key, displayName in pairs(NS.pendingHello) do
-                if not CleanBot_PartyBots[key] and not NS.probed[key] then
-                    NS.probed[key]        = true
-                    NS.awaitingProbe[key] = true
-                    NS.CB_SendBotCommand(displayName, "co ?")
-                end
-            end
-            NS.pendingHello = {}
-
+            -- Detection done with no bridge: run the probe sweep now that login gating is
+            -- lifted. It probes every current member (and records joinCandidates), so a bot
+            -- that greeted during detection is caught here, and a not-yet-ready one is caught
+            -- later by its readiness whisper.
             NS.CB_RequestSync()
         end
     end)
@@ -749,31 +791,21 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         local key   = strlower(sender)
         local entry = CleanBot_PartyBots[key]
 
-        -- "Hello!" detection: a bot has just come online (no-bridge, fresh-login path).
-        -- We verify the sender is actually in our group to avoid acting on a real player.
-        -- "Hello!" is not a Strategies reply, so we return early after handling it.
-        if msg == "Hello!" and CB_EffectiveBridgeState() ~= "present" then
-            local inParty = false
-            NS.CB_ForEachGroupMember(function(unit, nm)
-                if nm == sender then inParty = true end
-            end)
-            if inParty then
-                if NS.loginPhaseActive then
-                    -- Detection still running: buffer for processing when it resolves.
-                    NS.pendingHello[key] = sender
-                elseif not CleanBot_PartyBots[key] then
-                    -- A bot whispers "Hello!" once it has finished loading into the
-                    -- world. Re-probe even if we already probed it: the initial
-                    -- discovery probe is often whispered before the bot has spawned,
-                    -- so it never replies (leaving probed=true, awaiting=true, but no
-                    -- cache entry — exactly what /cbdebug showed). "Hello!" is the
-                    -- bot's readiness signal and only bots send it, so re-probing
-                    -- here never spams real players.
-                    NS.probed[key]        = true
-                    NS.awaitingProbe[key] = true
-                    NS.CB_SendBotCommand(sender, "co ?")
-                end
-            end
+        -- Readiness detection (no-bridge): a bot that wasn't in-world for its initial probe
+        -- announces itself once loaded by whispering the player. The greeting text varies
+        -- across playerbots versions ("Hi", "Hi!", "Hello", "Hello!", …), so we trigger on the
+        -- whisper itself, not its content: an unsolicited whisper from a joinCandidate (a member
+        -- we probed but haven't confirmed) re-sends "co ?", and the "Strategies:" reply confirms
+        -- bot-hood below. A human just won't reply. Bounded to one re-probe per join by clearing
+        -- the candidate here. Excludes a "Strategies:" line (that's the reply, handled below) and
+        -- known bots (entry ~= nil).
+        if not entry and NS.joinCandidates[key]
+           and strsub(msg, 1, 12) ~= "Strategies: "
+           and CB_EffectiveBridgeState() ~= "present" then
+            NS.probed[key]         = true
+            NS.awaitingProbe[key]  = true
+            NS.joinCandidates[key] = nil
+            NS.CB_SendBotCommand(sender, "co ?")
             return
         end
 
@@ -913,7 +945,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
         elseif NS.awaitingProbe[key] then
             -- No-bridge discovery: a probed party member replied, so it IS a bot.
-            NS.awaitingProbe[key] = nil
+            NS.awaitingProbe[key]  = nil
+            NS.joinCandidates[key] = nil   -- confirmed; no longer awaiting a readiness whisper
             local class = NS.CB_ResolveClass(sender, "WARRIOR")
             entry = {
                 name       = sender,
@@ -943,8 +976,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.bridgeReady      = true
                 NS.bridgeState      = "present"
                 NS.bridgeDetecting  = false
-                NS.loginPhaseActive = false  -- bridge handles discovery; no Hello! gating needed
-                NS.pendingHello     = {}
+                NS.loginPhaseActive = false  -- bridge handles discovery; no whisper-probe gating needed
+                NS.joinCandidates   = {}
                 -- Keep the Debug tab's "Auto (<state>)" label current.
                 if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
                 CB_BridgeRequest()
@@ -1229,7 +1262,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         CleanBot_SavedVars.sessionActive = true
 
         NS.loginPhaseActive = not isReload  -- gate bot probing on fresh login only
-        NS.pendingHello     = {}
+        NS.joinCandidates   = {}
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
         NS.bridgeDetecting  = false
