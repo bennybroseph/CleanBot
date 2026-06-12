@@ -94,6 +94,34 @@ and the dynamic `help` command (live command + strategy lists).
 
 ---
 
+## Account / alt-account commands (`.playerbots account ...`)
+
+These are **server chat dot-commands** (sent via `SendChatMessage(..., "SAY")`), not bot
+action commands — they're registered in `src/Script/PlayerbotCommandScript.cpp` and handled
+in `src/Bot/PlayerbotMgr.cpp`. CleanBot uses them for the Manage tab's Altbots section.
+
+| Command | Notes |
+|---|---|
+| `.playerbots account setKey <key>` | Sets a security key **for the account you're logged into** (`HandleSetSecurityKeyCommand` — `accountId = session account`). Stored SHA-256-hashed in `playerbots_account_keys`. |
+| `.playerbots account link <accountName> <key>` | Links another account to yours. **The key is mandatory** and is validated against the *target* account's stored key. |
+| `.playerbots account linkedAccounts` | Lists linked accounts (reply header `Linked accounts:` then `- NAME` lines). |
+| `.playerbots account unlink <accountName>` | Removes the link (both directions). |
+
+**Linking requires a key — there is no keyless path** (`HandleLinkAccountCommand`):
+1. The command parser rejects a missing key token → prints the `Usage:` line and aborts
+   (`PlayerbotCommandScript.cpp`: `if (!accountName || !key)`).
+2. The handler looks up the **target** account's row in `playerbots_account_keys`; if none
+   exists (the account never ran `setKey`) it replies `Invalid security key.` and aborts.
+   Otherwise it SHA-256-hashes the supplied key and compares to the stored hash.
+
+So an alt with no security key **cannot be linked** until you log into that alt and run
+`setKey`. Because `setKey` only targets the logged-in account, this is inherently a
+cross-login workflow — CleanBot's link flow surfaces this as guidance when the user says they
+have not set a key, showing the `setKey` command in a copyable popup (`ManageTab.lua`,
+`NS.CB_ShowCopyPopup`).
+
+---
+
 ## Source map
 - Command → action registration: `src/Ai/Base/ActionContext.h`
 - Strategy parsing: `src/Ai/Base/Actions/ChangeStrategyAction.cpp`
@@ -104,4 +132,7 @@ and the dynamic `help` command (live command + strategy lists).
 - `outfit`: `src/Ai/Base/Actions/OutfitAction.cpp`
 - `reward`: `src/Ai/Base/Actions/RewardAction.cpp`
 - `quests`: `src/Ai/Base/Actions/ListQuestsActions.cpp`
+- `account` dot-commands: `src/Script/PlayerbotCommandScript.cpp` (parsing) +
+  `src/Bot/PlayerbotMgr.cpp` (`HandleSetSecurityKeyCommand` / `HandleLinkAccountCommand` /
+  `HandleViewLinkedAccountsCommand` / `HandleUnlinkAccountCommand`)
 - Bridge allowlists / opcodes: `Bridge.lua` (mirrors `MultiBotBridge.cpp`)

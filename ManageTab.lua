@@ -23,7 +23,8 @@ end
 ---@param key      string  Unique popup key (StaticPopupDialogs entry name).
 ---@param text      string  Confirmation prompt text.
 ---@param onAccept  fun()   Called when the user confirms.
-NS.CB_RegisterConfirmPopup = function(key, text, onAccept)
+---@param onCancel fun(self:table, data:any, reason:string)?  Called when the user clicks No.
+NS.CB_RegisterConfirmPopup = function(key, text, onAccept, onCancel)
     StaticPopupDialogs[key] = {
         text         = text,
         button1      = "Yes",
@@ -31,8 +32,14 @@ NS.CB_RegisterConfirmPopup = function(key, text, onAccept)
         timeout      = 0,
         whileDead    = true,
         hideOnEscape = true,
+        -- Escape must NOT run onCancel. In 3.3.5a StaticPopup_EscapePressed calls
+        -- OnCancel(frame, data, "clicked"), which is indistinguishable from a real No
+        -- click — so an onCancel that performs an action (e.g. linking with no key) would
+        -- fire on Escape. noCancelOnEscape makes Escape hide-only (a clean abort).
+        noCancelOnEscape = true,
         OnShow       = CB_PositionPopup,
         OnAccept     = onAccept,
+        OnCancel     = onCancel,
     }
 end
 
@@ -61,6 +68,101 @@ end
 -- tabs (GroupTab) can reuse the same edit-popup boilerplate.
 local CB_RegisterEditPopup = NS.CB_RegisterEditPopup
 
+-- ── Reusable "copy this text" popup ──────────────────────────────────────────
+-- Default Blizzard StaticPopup styling with a wide, pre-selected edit box so the text
+-- copies with a single Ctrl+C, plus an optional caption/body. Made draggable without
+-- restyling; re-centres on each open (StaticPopups don't persist a dragged position).
+-- hasWideEditBox gives the 420px dialog + wide box — the widening is applied in
+-- StaticPopup_Resize (which runs AFTER OnShow), so the flag, not a manual SetWidth, must
+-- do it. The caption width is bumped in OnShow before Resize recomputes the height.
+StaticPopupDialogs["CLEANBOT_COPY"] = {
+    text           = "%s",
+    button1        = "Close",
+    -- hasWideEditBox only takes effect when hasEditBox is also set: the framework gates the
+    -- whole edit-box show block on hasEditBox, then picks the wide box inside it.
+    hasEditBox     = 1,
+    hasWideEditBox = 1,
+    timeout        = 0,
+    whileDead      = true,
+    hideOnEscape   = true,
+    EditBoxOnEnterPressed  = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    OnShow = function(self, data)
+        CB_PositionPopup(self)
+        -- Make it draggable. Cleared in OnHide because StaticPopup frames are pooled and
+        -- would otherwise stay draggable when reused by other dialogs.
+        self:SetMovable(true)
+        self:RegisterForDrag("LeftButton")
+        self:SetScript("OnDragStart", self.StartMoving)
+        self:SetScript("OnDragStop",  self.StopMovingOrSizing)
+        -- Widen the caption past the template's 290px so it wraps less awkwardly.
+        local text = _G[self:GetName() .. "Text"]
+        if text then text:SetWidth(380) end
+        local eb = _G[self:GetName() .. "WideEditBox"]
+        if eb then
+            -- Read-only: the wide edit box (unlike the narrow one) does NOT route
+            -- OnTextChanged through StaticPopup's per-dialog hook, so set a revert handler
+            -- directly here and restore the original in OnHide (pooled frame, shared with
+            -- Blizzard autocomplete dialogs). Reverting keeps focus/selection/Ctrl+C; only
+            -- edits are undone. The re-SetText fires this again but GetText == text, so it stops.
+            eb.cbCopyText = data
+            eb.cbOrigOTC  = eb:GetScript("OnTextChanged")
+            eb:SetScript("OnTextChanged", function(box)
+                if box.cbCopyText and box:GetText() ~= box.cbCopyText then
+                    box:SetText(box.cbCopyText)
+                    box:HighlightText()
+                end
+            end)
+            -- Fill + select the copy text (Ctrl+C copies it all even if it scrolls).
+            eb:SetText(data or "")
+            eb:SetFocus()
+            eb:HighlightText()
+            -- The wide box is CENTER-anchored by default, which a multi-line caption
+            -- overlaps. Centre it between the caption and the button instead. Deferred a
+            -- frame because StaticPopup_Resize finalizes the caption height and button
+            -- position right AFTER OnShow; anchored to the dialog so it tracks dragging.
+            if NS.CB_After then
+                NS.CB_After(0, function()
+                    if not self:IsShown() then return end
+                    local btn1 = _G[self:GetName() .. "Button1"]
+                    local tb, bt, db = text and text:GetBottom(), btn1 and btn1:GetTop(), self:GetBottom()
+                    if tb and bt and db then
+                        eb:ClearAllPoints()
+                        eb:SetPoint("CENTER", self, "BOTTOM", 0, (tb + bt) / 2 - db)
+                    end
+                end)
+            end
+        end
+    end,
+    OnHide = function(self)
+        self:SetScript("OnDragStart", nil)
+        self:SetScript("OnDragStop",  nil)
+        self:SetMovable(false)
+        self:RegisterForDrag()
+        -- Restore the template's default edit-box anchor + OnTextChanged handler
+        -- (frames are pooled/reused by other dialogs, incl. autocomplete ones).
+        local eb = _G[self:GetName() .. "WideEditBox"]
+        if eb then
+            eb:SetScript("OnTextChanged", eb.cbOrigOTC)
+            eb.cbOrigOTC  = nil
+            eb.cbCopyText = nil
+            eb:ClearAllPoints()
+            eb:SetPoint("CENTER")
+        end
+    end,
+}
+
+-- Shows the reusable copy popup with `copyText` pre-selected in the edit box.
+---@param opts table  { copyText:string (required), title:string?, body:string? }
+NS.CB_ShowCopyPopup = function(opts)
+    if not opts or not opts.copyText then return end
+    local display = opts.title or ""
+    if opts.body and opts.body ~= "" then
+        display = (display ~= "" and (display .. "\n\n") or "") .. opts.body
+    end
+    StaticPopup_Show("CLEANBOT_COPY", display, nil, opts.copyText)
+end
+
 -- ── Popup: invite one or more bots by character name ─────────────────────────
 CB_RegisterEditPopup("CLEANBOT_INVITE_BY_NAME",
     "Enter the character name(s) below separated by a comma:",
@@ -88,6 +190,25 @@ CB_RegisterEditPopup("CLEANBOT_INVITE_BY_NAME",
         SendChatMessage(".playerbots bot add " .. table.concat(names, ","), "SAY")
     end)
 
+-- Sends the account-link command and records the account in the in-memory linked list.
+-- mod-playerbots requires a security key — the target account must have run
+-- `.playerbots account setKey <key>` and the same key must be supplied here — so there is
+-- no keyless link path (see CB_RegisterConfirmPopup "CLEANBOT_LINK_ACCOUNT_HASKEY" below).
+---@param accountName string  The account to link.
+---@param key string         The security key set on that account.
+local function CB_FinishAccountLink(accountName, key)
+    SendChatMessage(".playerbots account link " .. accountName .. " " .. key, "SAY")
+    -- Add to the in-memory linked accounts list if not already present
+    local found = false
+    for _, v in ipairs(NS.linkedAccounts) do
+        if strlower(v) == strlower(accountName) then found = true; break end
+    end
+    if not found then
+        NS.linkedAccounts[#NS.linkedAccounts + 1] = accountName
+    end
+    NS.CB_Print("Linking account '" .. accountName .. "'...")
+end
+
 -- ── Popup: link account — step 1, account name ───────────────────────────────
 CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_NAME",
     "Enter the name of the account to link:",
@@ -98,10 +219,34 @@ CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_NAME",
             NS.CB_Print("Account name cannot be empty.")
             return
         end
-        StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_KEY", name, nil, name)
+        StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_HASKEY", nil, nil, name)
     end)
 
--- ── Popup: link account — step 2, security key ───────────────────────────────
+-- ── Popup: link account — step 2, did the account set a security key? ─────────
+-- mod-playerbots only links accounts that have a security key, and the key is set on the
+-- account itself (`.playerbots account setKey <key>`, which targets the logged-in account).
+-- Yes → ask for the key (step 3). No → guidance: the alt must set a key first (we can't do
+-- it from here). Escape aborts (noCancelOnEscape); the reason guard ignores non-click cancels.
+NS.CB_RegisterConfirmPopup("CLEANBOT_LINK_ACCOUNT_HASKEY",
+    "Did you set a security key for the account?",
+    function(self, data)
+        StaticPopup_Show("CLEANBOT_LINK_ACCOUNT_KEY", data, nil, data)
+    end,
+    function(self, data, reason)
+        -- No → the alt has no key yet. It must set one while logged into that account
+        -- (setKey targets the logged-in account), so show the command in a copyable box.
+        if reason == "clicked" then
+            NS.CB_ShowCopyPopup({
+                title    = "Security key required",
+                body     = "Account |cffffd200" .. tostring(data) .. "|r needs a security key before it can be linked.\n"
+                        .. "Copy the following command (Ctrl + C), log into the account, "
+                        .. "paste the command into the chat (Ctrl + V), then come back here and use the key you entered.",
+                copyText = ".playerbots account setKey <key>",
+            })
+        end
+    end)
+
+-- ── Popup: link account — step 3, security key ───────────────────────────────
 CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
     "Enter the security key for account |cffffd200%s|r:",
     function(self, data)
@@ -111,17 +256,7 @@ CB_RegisterEditPopup("CLEANBOT_LINK_ACCOUNT_KEY",
             NS.CB_Print("Security key cannot be empty.")
             return
         end
-        local accountName = data
-        SendChatMessage(".playerbots account link " .. accountName .. " " .. key, "SAY")
-        -- Add to the in-memory linked accounts list if not already present
-        local found = false
-        for _, v in ipairs(NS.linkedAccounts) do
-            if strlower(v) == strlower(accountName) then found = true; break end
-        end
-        if not found then
-            NS.linkedAccounts[#NS.linkedAccounts + 1] = accountName
-        end
-        NS.CB_Print("Linking account '" .. accountName .. "'...")
+        CB_FinishAccountLink(data, key)
     end)
 
 --- Builds the Manage tab panel: scroll frame, sections, and bot management controls.

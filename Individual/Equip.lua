@@ -20,9 +20,9 @@
 -- ============================================================
 local NS = CleanBotNS
 
--- ── Shared Wowhead URL popup ──────────────────────────────────────────────
--- Plain-text URL in a selectable EditBox — Ctrl+C works fine on regular text.
--- Populates `info` with the Wowhead menu entry for `itemLink` and adds it.
+-- ── Wowhead URL menu entry ──────────────────────────────────────────────────
+-- Populates `info` with the Wowhead menu entry for `itemLink` and adds it. The URL is
+-- shown in the shared copy popup (NS.CB_ShowCopyPopup) for a one-Ctrl+C copy.
 -- Reusable across any UIDropDownMenu that has an item link in scope.
 ---@param info     table   UIDropDownMenu button info table to populate and add.
 ---@param itemLink string  The item link the Wowhead entry should point to.
@@ -32,46 +32,12 @@ NS.CB_AddWowheadMenuButton = function(info, itemLink)
     info.func         = function()
         local itemId = strmatch(itemLink, "item:(%d+)")
         if not itemId then return end
-        local url   = "https://www.wowhead.com/wotlk/item=" .. itemId
-        local popup = NS.CB_GetWowheadPopup()
-        popup.box:SetText(url)
-        popup:Show()
-        popup.box:SetFocus()
-        popup.box:HighlightText()
+        NS.CB_ShowCopyPopup({
+            title    = "Wowhead  (Ctrl+C to copy, then open in your browser)",
+            copyText = "https://www.wowhead.com/wotlk/item=" .. itemId,
+        })
     end
     UIDropDownMenu_AddButton(info)
-end
-
-NS.CB_GetWowheadPopup = function()
-    if NS.wowheadPopup then return NS.wowheadPopup end
-
-    local popup = CreateFrame("Frame", "CleanBotWowheadPopup", UIParent)
-    popup:SetSize(380, 110)
-    popup:SetPoint("CENTER")
-    popup:SetFrameStrata("DIALOG")
-    popup:SetMovable(true)
-    popup:EnableMouse(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop",  popup.StopMovingOrSizing)
-    NS.CB_ApplyFrameSkin(popup, 1)
-    popup:Hide()
-
-    local label = NS.CB_CreateLabel(popup, "Wowhead  (Ctrl+C to copy, then open in browser)")
-    label:SetPoint("TOPLEFT", popup, "TOPLEFT", 18, -16)
-
-    local box = NS.CB_CreateEditBox(popup, nil, 344, 20)
-    NS.CB_AnchorBelow(box, label)
-    box:SetAutoFocus(true)
-    box:SetScript("OnEscapePressed", function(self) self:GetParent():Hide() end)
-    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    popup.box = box
-
-    local closeBtn = NS.CB_CreateButton(popup, nil, "Close", 80, 22, function() popup:Hide() end)
-    closeBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 12)
-
-    NS.wowheadPopup = popup
-    return popup
 end
 
 -- ── Shared right-click context menu ──────────────────────────────────────

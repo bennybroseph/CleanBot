@@ -803,7 +803,7 @@ NS.CleanBot_BuildSettingsTab = function()
     selfBotCBLblHit:SetHeight(20)
     selfBotCBLblHit:EnableMouse(true)
 
-    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in, so you can manage yourself like any other bot. To toggle it right now, just type .playerbot bot self in chat."
+    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
     local function showSelfBotTooltip(anchor)
         GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
         GameTooltip:SetText(SELF_BOT_TOOLTIP, nil, nil, nil, nil, true)
