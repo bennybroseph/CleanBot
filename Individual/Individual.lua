@@ -1285,6 +1285,16 @@ NS.CleanBot_RefreshTabs = function()
             table.insert(desired, { unit = unit, name = name, class = class or "WARRIOR", key = strlower(name) })
         end
     end)
+    -- Include the player themselves when they are a live self-bot (driven by the server's
+    -- "Enable/Disable player botAI" messages, applied via CB_SetSelfBotActive). The player
+    -- is never yielded by CB_ForEachGroupMember, so this can't double-add. Works solo too.
+    if NS.selfBotActive then
+        local selfName = UnitName("player")
+        if selfName and NS.CleanBot_IsBot("player") then
+            local _, selfClass = UnitClass("player")
+            table.insert(desired, { unit = "player", name = selfName, class = selfClass or "WARRIOR", key = strlower(selfName) })
+        end
+    end
     NS.desiredBots = desired
 
     local desiredByKey = {}
