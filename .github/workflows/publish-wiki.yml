@@ -1,0 +1,83 @@
+name: Publish Wiki
+
+# Mirrors the repo's docs/ folder into the GitHub wiki on every push that touches
+# docs/. The wiki is a separate git repo (CleanBot.wiki.git); this treats docs/ as the
+# single source of truth and the wiki as a generated mirror — never hand-edit the wiki.
+#
+# Each docs/<name>.md becomes a wiki page titled from the filename
+# (playerbot-commands.md -> "Playerbot Commands"). Intra-doc relative links like
+# (playerbot-strategies.md) are rewritten to the matching wiki page, and a _Sidebar.md
+# nav is generated. The hand-made Home page (and anything else in the wiki) is left alone.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/publish-wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # GITHUB_TOKEN needs write to push to the repo's wiki
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build wiki pages from docs/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # "playerbot-commands" -> "Playerbot-Commands" (page slug; hyphens render as
+          # spaces in the wiki title). Non-alphanumerics collapse to hyphens first.
+          slugify() {
+            echo "$1" | sed -E 's/[^A-Za-z0-9]+/-/g' \
+              | awk -F- 'BEGIN{OFS="-"} { for (i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2) }1'
+          }
+
+          # Map each docs basename -> wiki slug (used for link rewriting).
+          declare -A MAP
+          for f in docs/*.md; do
+            base="$(basename "$f" .md)"
+            MAP["$base"]="$(slugify "$base")"
+          done
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+
+          sidebar="wiki/_Sidebar.md"
+          printf '### CleanBot\n\n' > "$sidebar"
+
+          for f in docs/*.md; do
+            base="$(basename "$f" .md)"
+            slug="${MAP[$base]}"
+            out="wiki/${slug}.md"
+            cp "$f" "$out"
+
+            # Rewrite intra-doc links: ](other.md) and ](other.md#anchor) -> ](Other-Slug)
+            # The ]( anchor prevents partial matches between similarly-named pages.
+            for src in "${!MAP[@]}"; do
+              dst="${MAP[$src]}"
+              sed -i -E "s@\]\(${src}\.md(#[^)]*)?\)@](${dst}\1)@g" "$out"
+            done
+
+            title="$(echo "$slug" | tr '-' ' ')"
+            printf -- '- [[%s|%s]]\n' "$title" "$slug" >> "$sidebar"
+          done
+
+      - name: Commit + push to wiki
+        run: |
+          set -euo pipefail
+          cd wiki
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "Sync wiki from docs/ (${GITHUB_SHA::7})"
+            git push
+          else
+            echo "No wiki changes to publish."
+          fi
