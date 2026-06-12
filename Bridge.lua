@@ -537,7 +537,9 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                         entry.inventory.items = entry.invStaging or {}
                     end
                     entry.invStaging     = nil
-                    NS.CB_FetchStats(entry)
+                    -- Inventory just changed (e.g. Sell Trash) — force past the TTL so the
+                    -- bag/money totals reflect the new state (in-flight dedup still applies).
+                    NS.CB_FetchStats(entry, true)
                 end
 
                 local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
@@ -601,15 +603,34 @@ NS.CB_FetchInventory = function(key, botName)
     end
 end
 
+-- How long a fetched "stats" reply is considered fresh. Re-selecting a bot within this
+-- window reuses the cached money/XP/durability instead of re-whispering; older revisits
+-- refetch so the values stay reasonably current.
+NS.STATS_TTL = 30  -- seconds
+
 -- Fetches a bot's "stats" reply (money, bag totals, durability, XP). The reply is
 -- parsed in the awaitingMoney branch of CHAT_MSG_WHISPER (below). "stats" is a query,
 -- so it always whispers (never allowlisted) and the reply returns via CHAT_MSG_WHISPER
 -- regardless of CB_EffectiveBridgeState() — no override gating needed. This is the
 -- single source of truth for the "stats" whisper: the inventory-finalize tick and the
 -- on-demand XP-bar fetch both route through here.
----@param entry table  The CleanBot_PartyBots entry to refresh.
-NS.CB_FetchStats = function(entry)
+--
+-- Two guards keep this from spamming a bot (mirrors CB_FetchSpecList's guard pattern):
+--   • in-flight dedup — never stack a second "stats" while one is awaiting a reply. This
+--     collapses the post-login RefreshTabs→SelectBot burst that previously hammered the
+--     first bot once per frame.
+--   • TTL freshness — skip the refetch when the cached reply is younger than STATS_TTL,
+--     so re-selecting a recently-viewed bot reuses the cache. Pass force=true to bypass
+--     the TTL (e.g. after an inventory change that may have altered bag/money); the
+--     in-flight dedup still applies.
+---@param entry table   The CleanBot_PartyBots entry to refresh.
+---@param force boolean? Bypass the TTL freshness check (still respects in-flight dedup).
+NS.CB_FetchStats = function(entry, force)
     if not entry or not entry.name then return end
+    if entry.awaitingMoney then return end
+    if not force and entry.statsAt and (GetTime() - entry.statsAt) < NS.STATS_TTL then
+        return
+    end
     entry.awaitingMoney = true
     entry.moneyTimeout  = 0
     SendChatMessage("stats", "WHISPER", nil, entry.name)
@@ -814,6 +835,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             if clean:match("%d+/%d+%s*Bag") then
                 entry.moneyTimeout  = 0
                 entry.awaitingMoney = false
+                entry.statsAt       = GetTime()   -- mark fresh for the CB_FetchStats TTL
 
                 local gold   = tonumber(clean:match("(%d+)g")) or 0
                 local silver = tonumber(clean:match("(%d+)s")) or 0
@@ -1126,6 +1148,22 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
             return
         end
+
+        -- Workaround: ".playerbots bot add/addaccount/login <name>" fails with
+        -- "<cmd>: <Name> - player already logged in" when the character is already online —
+        -- the server won't pull an online character into the group. Fall back to a normal
+        -- party invite. The per-name system line carries the name, so this one handler covers
+        -- every bot-add path (Invite by Name / Preset / Login Target / Invite Account, or a
+        -- hand-typed command). Match the raw msg to keep the name's casing.
+        if msg then
+            local onlineName = msg:match("(%S+)%s*%-%s*[Pp]layer already logged in")
+            if onlineName then
+                InviteUnit(onlineName)
+                NS.CB_Print(onlineName .. " was already online \226\128\148 sent a party invite instead.")
+                return
+            end
+        end
+
         if NS.awaitingLinkedAccounts and msg and strlower(msg):find("linked accounts") then
             -- Header line received — start collecting account entries
             NS.awaitingLinkedAccounts   = false
