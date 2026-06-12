@@ -204,6 +204,8 @@ NS.THEME_DEFAULTS = {
 -- Feature flags and theme values — mutated at login from SavedVars, and by the Settings Apply button.
 NS.botEmotes    = true
 NS.itemGlow     = true   -- Blizz-path rarity overlay on items/equipment (uncommon+); see ItemVisuals
+NS.manageSelf   = false  -- preference: auto-enable self-bot on fresh login; see Bridge self-bot section
+NS.selfBotActive = false -- live state: is the player currently a self-bot (driven by server botAI messages)
 NS.scale        = NS.THEME_DEFAULTS.scale
 NS.transparency = NS.THEME_DEFAULTS.transparency
 NS.accentColor  = { r = NS.THEME_DEFAULTS.accentColor.r, g = NS.THEME_DEFAULTS.accentColor.g, b = NS.THEME_DEFAULTS.accentColor.b, a = NS.THEME_DEFAULTS.accentColor.a }
@@ -430,6 +432,14 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
         if type(CleanBot_SavedVars.itemGlow) == "boolean" then
             NS.itemGlow = CleanBot_SavedVars.itemGlow
+        end
+        if type(CleanBot_SavedVars.manageSelf) == "boolean" then
+            NS.manageSelf = CleanBot_SavedVars.manageSelf
+        end
+        -- Live self-bot state is only trusted on a /reload; PLAYER_ENTERING_WORLD forces
+        -- it false on a fresh login (the character always spawns with self-bot off).
+        if type(CleanBot_SavedVars.selfBotActive) == "boolean" then
+            NS.selfBotActive = CleanBot_SavedVars.selfBotActive
         end
         NS.individualExpanded = CleanBot_SavedVars.individualExpanded == true
 

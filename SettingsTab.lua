@@ -782,13 +782,62 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.botEmotes = checked
     end)
 
+    -- ── Auto-Enable Self as Bot ────────────────────────────────
+    -- Preference only: when on, the addon runs `.playerbot bot self` once on a fresh
+    -- login so the player spawns managed. It does NOT toggle self-bot in the current
+    -- session (the command is a server toggle and the character spawns off, so re-sending
+    -- mid-session / on reload would flip it the wrong way). Live state is tracked from the
+    -- server's "Enable/Disable player botAI" messages instead. Not ElvUI-gated.
+    local selfBotCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotSelfBotCB")
+    selfBotCB:SetChecked(NS.manageSelf == true)
+    NS.CB_AnchorBelow(selfBotCB, botEmotesCB)
+    -- Exposed so the first-time popup can tick the box when it enables the preference.
+    NS.CB_RefreshSelfBotCheckbox = function() selfBotCB:SetChecked(NS.manageSelf == true) end
+
+    local selfBotCBLbl = NS.CB_CreateLabel(otherPanel, "Auto-Enable Self as Bot")
+    selfBotCBLbl:SetPoint("LEFT", selfBotCB, "RIGHT", 2, 0)
+
+    local selfBotCBLblHit = CreateFrame("Frame", nil, otherPanel)
+    selfBotCBLblHit:SetPoint("LEFT",  selfBotCBLbl, "LEFT",  0, 0)
+    selfBotCBLblHit:SetPoint("RIGHT", selfBotCBLbl, "RIGHT", 0, 0)
+    selfBotCBLblHit:SetHeight(20)
+    selfBotCBLblHit:EnableMouse(true)
+
+    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in, so you can manage yourself like any other bot. To toggle it right now, just type .playerbot bot self in chat."
+    local function showSelfBotTooltip(anchor)
+        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+        GameTooltip:SetText(SELF_BOT_TOOLTIP, nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end
+    selfBotCB:SetScript("OnEnter",       function(self) showSelfBotTooltip(self) end)
+    selfBotCB:SetScript("OnLeave",       function()     GameTooltip:Hide()       end)
+    selfBotCBLblHit:SetScript("OnEnter", function(self) showSelfBotTooltip(self) end)
+    selfBotCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()       end)
+
+    selfBotCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        self:SetChecked(checked)
+        NS.manageSelf = checked
+        CleanBot_SavedVars.manageSelf = checked
+    end)
+
+    -- First-time popup (offered when the server first reports "Enable player botAI"):
+    -- a convenience to switch the auto-enable preference on.
+    NS.CB_RegisterConfirmPopup("CLEANBOT_SELFBOT_AUTO",
+        "You enabled self-bot management. Automatically enable it each time you log in?",
+        function()
+            NS.manageSelf = true
+            if CleanBot_SavedVars then CleanBot_SavedVars.manageSelf = true end
+            if NS.CB_RefreshSelfBotCheckbox then NS.CB_RefreshSelfBotCheckbox() end
+        end)
+
     -- ── Enable Item Glow (Blizz UI path only) ──────────────────
     -- The rarity overlay only exists on the Blizz path, so the toggle is created only
     -- there; ElvUI shows item quality through its own button border.
     if not NS.ElvUI_S then
         local itemGlowCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotItemGlowCB")
         itemGlowCB:SetChecked(NS.itemGlow ~= false)
-        NS.CB_AnchorBelow(itemGlowCB, botEmotesCB)
+        NS.CB_AnchorBelow(itemGlowCB, selfBotCB)
 
         local itemGlowCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Item Glow")
         itemGlowCBLbl:SetPoint("LEFT", itemGlowCB, "RIGHT", 2, 0)

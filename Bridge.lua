@@ -155,6 +155,69 @@ local function CB_ProbePartyForBots()
 end
 
 -- ============================================================
+-- Self-bot management
+-- ============================================================
+-- mod-playerbots can register the player's own character as a bot. The authoritative
+-- live signal is the server's "Enable/Disable player botAI" system message (parsed in
+-- the CHAT_MSG_SYSTEM handler), which fires however the toggle happens — addon, login
+-- auto-enable, or a manually typed `.playerbot bot self`. CB_SetSelfBotActive applies
+-- that live state on the addon side; it never sends the toggle command itself (that is
+-- a pure server toggle, sent only once on a fresh login — see PLAYER_ENTERING_WORLD).
+--
+-- NS.selfBotActive  = live state (driven by the messages; persisted only for reload).
+-- NS.manageSelf     = auto-enable-on-login preference (Settings checkbox / first-time popup).
+
+--- Applies the player's live self-bot state on the addon side (no command is sent).
+--- active=true seeds the player as a known bot, reads real strategies, and surfaces them
+--- in the lists; active=false drops them. Persists the state for /reload recovery.
+---@param active boolean  Whether the player is currently a self-bot.
+NS.CB_SetSelfBotActive = function(active)
+    active = active and true or false
+    NS.selfBotActive = active
+    if CleanBot_SavedVars then CleanBot_SavedVars.selfBotActive = active end
+
+    local name = UnitName("player")
+    local key  = name and strlower(name)
+
+    if active and key then
+        -- Seed a known-bot entry (same shape as the ROSTER~ handler) so the player counts
+        -- as a bot regardless of bridge state. Class comes from the client (always known).
+        if not CleanBot_PartyBots[key] then
+            local _, class = UnitClass("player")
+            class = class or "WARRIOR"
+            CleanBot_PartyBots[key] = {
+                name      = name,
+                class     = class,
+                combat    = NS.CB_DefaultCombat(),
+                nonCombat = NS.CB_DefaultNonCombat(),
+                classData = NS.CB_DefaultClassData(class),
+            }
+        end
+
+        -- Now that we're a live self-bot, resolve the bridge if it hasn't yet (the gate
+        -- keys off NS.selfBotActive, so a self-whisper handshake can run solo).
+        if NS.bridgeState == "unknown" and NS.CB_StartBridgeDetection then
+            NS.CB_StartBridgeDetection()
+        end
+
+        -- Read the player's actual strategies. A bare "co ?" (awaitingCo, NOT coVerifyOnly)
+        -- stores the combat reply then chains "nc ?" — a full read, same as the probe path.
+        -- Always whispers (queries are never bridged), and self-whisper works here.
+        local entry = CleanBot_PartyBots[key]
+        if entry then
+            entry.awaitingCo = true
+            NS.CB_SendBotCommand(name, "co ?")
+        end
+    elseif key then
+        CleanBot_PartyBots[key] = nil
+    end
+
+    if CleanBotFrame:IsShown() and NS.CleanBot_RefreshTabs then
+        NS.CleanBot_RefreshTabs()
+    end
+end
+
+-- ============================================================
 -- Bridge allowlists — mirror of MultiBotBridge.cpp IsAllowed*()
 -- Source: https://github.com/Wishmaster117/mod-multibot-bridge/blob/main/src/MultiBotBridge.cpp
 -- Keep in sync with the server when the bridge is updated.
@@ -248,10 +311,22 @@ local function CB_EffectiveBridgeState()
     return NS.debugBridgeOverride or NS.bridgeState
 end
 
--- Addon-message distribution channel for the player's current group. Bridge
--- packets must go to "RAID" when in a raid — "PARTY" does not reach raid members.
-local function CB_GroupChannel()
-    return GetNumRaidMembers() > 0 and "RAID" or "PARTY"
+-- Sends a bridge addon packet on the correct channel:
+--   • In a raid  → "RAID"   ("PARTY" does not reach raid members)
+--   • In a party → "PARTY"
+--   • Solo + self-management on → "WHISPER" to self. The server bridge replies directly
+--     to the sender (player->SendDirectMessage in MultiBotBridge.cpp) and its chat hook
+--     fires on the whisper overload regardless of recipient, so a self-whisper completes
+--     the handshake and carries all GET~/RUN~ traffic with no group present.
+--   • Solo without self-management → no bots to talk to, so this no-ops.
+local function CB_SendBridge(msg)
+    if GetNumRaidMembers() > 0 then
+        SendAddonMessage("MBOT", msg, "RAID")
+    elseif GetNumPartyMembers() > 0 then
+        SendAddonMessage("MBOT", msg, "PARTY")
+    elseif NS.selfBotActive then
+        SendAddonMessage("MBOT", msg, "WHISPER", UnitName("player"))
+    end
 end
 
 -- Sends a command to a bot. Routes through the bridge (silent, no whisper
@@ -273,7 +348,7 @@ NS.CB_SendBotCommand = function(botName, command)
     if CB_EffectiveBridgeState() == "present" then
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
-            SendAddonMessage("MBOT", "RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command, CB_GroupChannel())
+            CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command)
             return
         end
     end
@@ -286,10 +361,9 @@ NS.CB_RequestSync = function()
     NS.CB_After(0.5, function()
         NS.syncPending = false
         if CB_EffectiveBridgeState() == "present" then
-            local ch = CB_GroupChannel()
-            SendAddonMessage("MBOT", "GET~ROSTER",  ch)
-            SendAddonMessage("MBOT", "GET~DETAILS", ch)
-            SendAddonMessage("MBOT", "GET~STATES",  ch)
+            CB_SendBridge("GET~ROSTER")
+            CB_SendBridge("GET~DETAILS")
+            CB_SendBridge("GET~STATES")
         elseif CB_EffectiveBridgeState() == "absent" then
             CB_ProbePartyForBots()
         end
@@ -316,7 +390,7 @@ NS.CB_RequestStates = function()
     NS.CB_After(0.4, function()
         NS.statesPending = false
         if CB_EffectiveBridgeState() == "present" then
-            SendAddonMessage("MBOT", "GET~STATES", CB_GroupChannel())
+            CB_SendBridge("GET~STATES")
         end
     end)
 end
@@ -513,7 +587,7 @@ NS.CB_FetchInventory = function(key, botName)
     end
 
     if CB_EffectiveBridgeState() == "present" then
-        SendAddonMessage("MBOT", "GET~INVENTORY~" .. botName .. "~inv", CB_GroupChannel())
+        CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
     else
         -- invStaging is the whisper-path marker: its presence tells the tick
         -- below to run the whisper finalize (swap + stats fetch) rather than
@@ -563,7 +637,7 @@ NS.CB_FetchQuests = function(key, botName)
     if not entry then return end
 
     if CB_EffectiveBridgeState() == "present" then
-        SendAddonMessage("MBOT", "GET~QUESTS~ALL~" .. botName .. "~quests", CB_GroupChannel())
+        CB_SendBridge("GET~QUESTS~ALL~" .. botName .. "~quests")
     else
         -- Whisper path: collect the "quests" reply lines into staging, keyed by
         -- section header (Incompleted/Completed). Swapped in on the summary line
@@ -587,8 +661,10 @@ local function CB_BridgeRequest()
 end
 
 local function CB_SendHello()
-    if NS.CB_InGroup() then
-        SendAddonMessage("MBOT", "HELLO~1", CB_GroupChannel())
+    -- CB_SendBridge picks the channel (group broadcast, or self-whisper when solo +
+    -- selfBotActive), and no-ops when there is nothing to detect against.
+    if NS.CB_InGroup() or NS.selfBotActive then
+        CB_SendBridge("HELLO~1")
     end
 end
 
@@ -598,7 +674,9 @@ end
 local function CB_StartBridgeDetection()
     if NS.bridgeState ~= "unknown" then return end
     if NS.bridgeDetecting then return end           -- a detection timer is already running
-    if not NS.CB_InGroup() then return end          -- nothing to detect against yet
+    -- Need either a group to detect against, or an active self-bot (which talks to the
+    -- bridge over a self-whisper). Solo with no self-bot has nothing to detect.
+    if not NS.CB_InGroup() and not NS.selfBotActive then return end
     NS.bridgeDetecting = true
     CB_SendHello()
 
@@ -625,6 +703,10 @@ local function CB_StartBridgeDetection()
         end
     end)
 end
+
+-- Exposed so the self-bot toggle can kick off detection the moment it's enabled
+-- (the function is idempotent — guards on state / in-progress / nothing-to-detect).
+NS.CB_StartBridgeDetection = CB_StartBridgeDetection
 
 -- ============================================================
 -- Bridge: listen for MBOT messages and party changes
@@ -1027,6 +1109,23 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "CHAT_MSG_SYSTEM" then
         local msg = ...
+        -- Self-bot live state: the server prints "Enable/Disable player botAI" on every
+        -- toggle (addon, login auto-enable, or a manually typed command). This is the
+        -- authoritative source of truth — drive tracking off it rather than assuming.
+        local lower = msg and strlower(msg)
+        if lower and lower:find("player botai", 1, true) then
+            if lower:find("enable", 1, true) then
+                -- First-ever detection: offer to set the auto-enable preference (once).
+                if CleanBot_SavedVars and not CleanBot_SavedVars.selfBotPromptShown then
+                    CleanBot_SavedVars.selfBotPromptShown = true
+                    if not NS.manageSelf then StaticPopup_Show("CLEANBOT_SELFBOT_AUTO") end
+                end
+                NS.CB_SetSelfBotActive(true)
+            elseif lower:find("disable", 1, true) then
+                NS.CB_SetSelfBotActive(false)
+            end
+            return
+        end
         if NS.awaitingLinkedAccounts and msg and strlower(msg):find("linked accounts") then
             -- Header line received — start collecting account entries
             NS.awaitingLinkedAccounts   = false
@@ -1101,6 +1200,17 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.probed           = {}
         NS.awaitingProbe    = {}
         CleanBot_PartyBots  = {}
+
+        -- Self-bot live state across the world entry:
+        --   Fresh login — the character always spawns with self-bot OFF, so force it off
+        --     (overriding any stale persisted value); auto-enable below re-toggles it.
+        --   Reload — server state is preserved and no message re-fires, so keep the
+        --     persisted NS.selfBotActive (restored at PLAYER_LOGIN) and re-apply it below.
+        if not isReload then
+            NS.selfBotActive = false
+            if CleanBot_SavedVars then CleanBot_SavedVars.selfBotActive = false end
+        end
+
         CB_StartBridgeDetection()
         -- The party/raid roster may not be query-able yet at login, so the call
         -- above can no-op (GetNum*Members == 0) and the roster event may have
@@ -1111,6 +1221,19 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.CB_After(1, CB_StartBridgeDetection)
         NS.CB_After(3, CB_StartBridgeDetection)
         NS.CB_After(6, CB_StartBridgeDetection)
+
+        -- Self-bot enable/restore (delayed so the player is in-world and detection has had
+        -- a chance to start). `.playerbot bot self` is a pure toggle and the character
+        -- spawns OFF, so it is sent ONLY on a fresh login — never on reload (which would
+        -- turn it off). The "Enable player botAI" reply drives CB_SetSelfBotActive.
+        if not isReload then
+            if NS.manageSelf then
+                NS.CB_After(2, function() SendChatMessage(".playerbot bot self", "SAY") end)
+            end
+        elseif NS.selfBotActive then
+            -- Reload while active: re-seed the wiped cache without re-toggling the server.
+            NS.CB_After(2, function() NS.CB_SetSelfBotActive(true) end)
+        end
 
     elseif event == "PLAYER_LOGOUT" then
         -- Clear the flag so the next session is treated as a fresh login.
