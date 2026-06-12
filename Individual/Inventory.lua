@@ -458,23 +458,19 @@ NS.CB_GetInventoryFrame = function(key, botName)
     end
     closeBtn:SetScript("OnClick", function() f:Hide() end)
 
-    -- ── Action buttons (above the frame, top-right) ──────────────────────────
-    -- Small icon buttons mirroring the paperdoll bag-button pattern. Placed outside the
-    -- top edge for now (first pass; easy to reposition). Right-anchored, laid out leftward.
-    local ACTION_SIZE = 20
-    --- Creates one icon action button above the inventory frame, reusing CB_CreateButton
-    --- (which handles naming + the ElvUI button skin) and layering an icon + tooltip on top.
+    -- ── Action buttons (just above the frame, top-right) ─────────────────────
+    -- Small icon buttons mirroring the paperdoll bag-button pattern, sitting above the frame
+    -- with their bottoms flush to its top edge, left of the close button. Laid out leftward.
+    local ACTION_SIZE = 24
+    --- Creates one icon action button above the inventory frame via CB_CreateIconButton
+    --- (plain icon button — no panel background — handling naming, skin, icon + tooltip).
     ---@param name    string  Global frame name.
     ---@param iconTex string  Texture path for the button icon.
     ---@param tip     string  Tooltip line.
     ---@param onClick fun()   Click handler.
     ---@return table          The created Button.
     local function makeActionButton(name, iconTex, tip, onClick)
-        local b = NS.CB_CreateButton(f, name, nil, ACTION_SIZE, ACTION_SIZE, onClick)
-        local icon = b:CreateTexture(nil, "ARTWORK")
-        icon:SetTexture(iconTex)
-        icon:SetAllPoints()
-        NS.CB_ApplyElvCoords(icon)
+        local b = NS.CB_CreateIconButton(f, name, iconTex, ACTION_SIZE, onClick)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine(tip, 1, 1, 1)
@@ -492,13 +488,17 @@ NS.CB_GetInventoryFrame = function(key, botName)
             NS.CB_SendBotCommand(botName, "sell gray")
             NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
         end)
-    sellBtn:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", -2, 2)
+    -- Right edge flush to the close button's left edge; the button sits just ABOVE the frame
+    -- with its bottom edge flush to the frame's top edge (no padding). The Y nudge cancels the
+    -- close button's own offset from the frame top so the bottom lands exactly on the edge.
+    local closeYoff = NS.ElvUI_S and 2 or BLIZZ_CLOSE_Y
+    sellBtn:SetPoint("BOTTOMRIGHT", closeBtn, "TOPLEFT", 0, -closeYoff)
 
-    -- Sort (to its left): re-sorts the displayed grid via a forced full render.
+    -- Sort (immediately to its left, no gap): re-sorts the displayed grid via a forced full render.
     local sortBtn = makeActionButton("CleanBotInvSortBtn_" .. key, "Interface\\Icons\\Ability_Hunter_Readiness", "Sort", function()
         NS.CB_RenderInventory(key, true)
     end)
-    sortBtn:SetPoint("RIGHT", sellBtn, "LEFT", -4, 0)
+    sortBtn:SetPoint("RIGHT", sellBtn, "LEFT", 0, 0)
 
     local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
     local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X

@@ -660,6 +660,47 @@ NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
     return btn
 end
 
+-- Plain icon button (no panel background) — the bag / quest / inventory-action button style.
+-- Unlike CB_CreateButton (UIPanelButtonTemplate, which carries Blizzard's reddish 3-slice
+-- panel art), this is a bare Button so there is no background texture to bleed around the
+-- icon on the Blizz path. ElvUI skins it via HandleButton + StyleButton; the Blizz path gets a
+-- square highlight and a quickslot-depress pushed texture. The icon fills the button and is
+-- Elv-cropped (CB_ApplyElvCoords no-ops off ElvUI). Callers add any extra art (e.g. a slot
+-- border) themselves. The icon texture is exposed as btn.icon.
+---@param parent  table    Parent frame.
+---@param name    string?  Optional global frame name.
+---@param iconTex string?  Icon texture path (or nil to set later via btn.icon).
+---@param size    number?  Square button size in px.
+---@param onClick fun()?   Click handler.
+---@return table           The created Button (with .icon and margins stamped).
+NS.CB_CreateIconButton = function(parent, name, iconTex, size, onClick)
+    local btn = CreateFrame("Button", name, parent)
+    if size then btn:SetSize(size, size) end
+
+    if NS.ElvUI_S then
+        NS.ElvUI_S:HandleButton(btn)
+        btn:StyleButton()
+    else
+        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+    end
+
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    if iconTex then icon:SetTexture(iconTex) end
+    icon:SetAllPoints()
+    NS.CB_ApplyElvCoords(icon)
+    icon:Show()
+    btn.icon = icon
+
+    if onClick then btn:SetScript("OnClick", onClick) end
+
+    btn.marginTop    = NS.MARGIN.button.top
+    btn.marginBottom = NS.MARGIN.button.bottom
+    btn.marginLeft   = NS.MARGIN.button.left
+    btn.marginRight  = NS.MARGIN.button.right
+    return btn
+end
+
 -- UIDropDownMenuTemplate dropdown. When width is given the dropdown
 -- is sized and the ElvUI skin is sized to match.
 ---@param parent table    Parent frame.

@@ -302,28 +302,13 @@ NS.CB_CreateEquipSlots = function(slot, model)
     end
 
     -- ── Bag icon — opens the inventory frame ──────────────────
-    -- Plain Button (no ItemButtonTemplate) so it stays out of all the equip
-    -- slot / normTex / quality border infrastructure entirely.
-    local bagBtnName = "CleanBotBagBtn_" .. slot.index
-    local bagBtn = CreateFrame("Button", bagBtnName, model)
-    bagBtn:SetSize(slotSize, slotSize)
+    -- Plain icon button (no ItemButtonTemplate / panel background) so it stays out of all
+    -- the equip slot / normTex / quality border infrastructure entirely. The backpack art
+    -- carries its own border, so no extra slot frame is needed.
+    local bagBtn = NS.CB_CreateIconButton(model, "CleanBotBagBtn_" .. slot.index,
+        "Interface\\Buttons\\Button-Backpack-Up", slotSize)
     bagBtn:SetPoint("LEFT", slot.equipSlots[9],  "LEFT", 0, 0)
     bagBtn:SetPoint("TOP",  slot.equipSlots[16], "TOP",  0, 0)
-    bagBtn:RegisterForClicks("LeftButtonUp")
-
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleButton(bagBtn)
-        bagBtn:StyleButton()
-    else
-        bagBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        bagBtn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
-    end
-
-    local bagIcon = bagBtn:CreateTexture(nil, "ARTWORK")
-    bagIcon:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
-    bagIcon:SetAllPoints()
-    NS.CB_ApplyElvCoords(bagIcon)
-    bagIcon:Show()
 
     bagBtn:SetScript("OnClick", function()
         local key     = slot.key

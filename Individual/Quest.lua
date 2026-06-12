@@ -896,33 +896,22 @@ end
 ---@param model    table   The model frame the button anchors against.
 ---@param slotSize number  Equip-slot size (matches the bag button's size).
 NS.CB_CreateQuestButton = function(slot, model, slotSize)
-    local btnName = "CleanBotQuestBtn_" .. slot.index
-    local btn = CreateFrame("Button", btnName, model)
-    btn:SetSize(slotSize, slotSize)
+    local btn = NS.CB_CreateIconButton(model, "CleanBotQuestBtn_" .. slot.index,
+        "Interface\\QUESTFRAME\\UI-QuestLog-BookIcon", slotSize)
     btn:SetPoint("RIGHT", slot.equipSlots[14], "RIGHT", 0, 0)
     btn:SetPoint("TOP",   slot.equipSlots[16], "TOP",   0, 0)
-    btn:RegisterForClicks("LeftButtonUp")
 
-    if NS.ElvUI_S then
-        NS.ElvUI_S:HandleButton(btn)
-        btn:StyleButton()
-    else
-        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        btn:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
-        -- Blizzard-style slot border. The book icon has no border baked in (unlike
-        -- the bag's backpack art), so add the standard UI-Quickslot2 border on top,
-        -- sized like ItemButtonTemplate's normal texture (64px art over a 37px button,
-        -- centred with a -1 y offset) so it overhangs the icon as a beveled frame.
+    -- Blizzard-style slot border. The book icon has no border baked in (unlike the bag's
+    -- backpack art), so add the standard UI-Quickslot2 border on top, sized like
+    -- ItemButtonTemplate's normal texture (64px art over a 37px button, centred with a -1 y
+    -- offset) so it overhangs the icon as a beveled frame. Blizz path only — ElvUI's skin
+    -- already frames the button.
+    if not NS.ElvUI_S then
         local border = btn:CreateTexture(nil, "OVERLAY")
         border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
         border:SetPoint("CENTER", btn, "CENTER", 0, -1)
         border:SetSize(slotSize * (64 / 37), slotSize * (64 / 37))
     end
-
-    local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetTexture("Interface\\QUESTFRAME\\UI-QuestLog-BookIcon")
-    icon:SetAllPoints()
-    icon:Show()
 
     btn:SetScript("OnClick", function()
         local key = slot.key
