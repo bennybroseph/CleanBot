@@ -36,6 +36,7 @@
       "GetNumPartyMembers",
       "GetNumQuestLogEntries",
       "GetNumRaidMembers",
+      "GetMinimapShape",
       "GetNumTalents",
       "GetNumTalentTabs",
       "GetQuestLogSelection",
