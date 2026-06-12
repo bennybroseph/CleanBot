@@ -1148,6 +1148,22 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
             return
         end
+
+        -- Workaround: ".playerbots bot add/addaccount/login <name>" fails with
+        -- "<cmd>: <Name> - player already logged in" when the character is already online —
+        -- the server won't pull an online character into the group. Fall back to a normal
+        -- party invite. The per-name system line carries the name, so this one handler covers
+        -- every bot-add path (Invite by Name / Preset / Login Target / Invite Account, or a
+        -- hand-typed command). Match the raw msg to keep the name's casing.
+        if msg then
+            local onlineName = msg:match("(%S+)%s*%-%s*[Pp]layer already logged in")
+            if onlineName then
+                InviteUnit(onlineName)
+                NS.CB_Print(onlineName .. " was already online \226\128\148 sent a party invite instead.")
+                return
+            end
+        end
+
         if NS.awaitingLinkedAccounts and msg and strlower(msg):find("linked accounts") then
             -- Header line received — start collecting account entries
             NS.awaitingLinkedAccounts   = false
