@@ -819,6 +819,12 @@ NS.CleanBot_BuildSettingsTab = function()
         self:SetChecked(checked)
         NS.manageSelf = checked
         CleanBot_SavedVars.manageSelf = checked
+        -- Convenience: enabling the preference while not currently a self-bot turns it on
+        -- right now too (instead of waiting for next login). Guarded on the live state so
+        -- the pure-toggle command never flips an already-active self-bot off.
+        if checked and not NS.selfBotActive then
+            SendChatMessage(".playerbot bot self", "SAY")
+        end
     end)
 
     -- First-time popup (offered when the server first reports "Enable player botAI"):
