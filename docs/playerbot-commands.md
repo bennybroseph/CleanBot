@@ -1,6 +1,7 @@
 # Playerbot Command Survey
 
-Human-readable companion to the bridge allowlists in `Bridge.lua`. The official
+Human-readable companion to the bridge allowlists in `Bridge.lua` (the addon-message
+protocol itself is documented in [bridge-protocol.md](bridge-protocol.md)). The official
 [Playerbot Commands wiki](https://github.com/mod-playerbots/mod-playerbots/wiki/Playerbot-Commands)
 is sparse, so this captures what was learned by reading the mod-playerbots action
 source directly (`src/Ai/Base/Actions/*.cpp` and `src/Ai/Base/ActionContext.h`).
@@ -20,6 +21,8 @@ an opcode.
 | `co +x` / `co -x` / `co ?` | ⚠️ | See "co/nc operators" below — `~` and `!` unused. |
 | `nc +x` / `nc -x` / `nc ?` | ⚠️ | Same operator set as `co`. |
 | `talents spec <name>` | ⚠️ | One of five `talents` sub-forms — see "talents" below. |
+| `talents spec list` | ✅ | Populates the premade-spec dropdown; reply is one premade per line, `"1. arms pve (51-0-20)"` (parsed in `Bridge.lua`). |
+| `sell gray` | ✅ | Inventory "Sell Trash" button. Whisper-only (not bridge-allowlisted); server only sells when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Aliases: `sell *`, short form `s`. |
 | `e <link>` (equip) | ⚠️ | Resolves via `parseItems` — accepts far more than links. |
 | `ue <link>` (unequip) | ✅ | |
 | `u <link>` (use item) | ✅ | |
@@ -28,7 +31,7 @@ an opcode.
 | `quests all` | ✅ | Whisper path sends `quests all` (bridge: `GET~QUESTS~ALL`); lists per-quest links under Incomplete/Complete headers. |
 | `stats` | ⚠️ | Also carries repair cost and rest-XP we don't surface. |
 | `drop <questname>` | ✅ | Abandon quest. |
-| `emote <name>` | ✅ | |
+| `emote <name>` | ✅ | Takes any emote token; CleanBot sends `emote wave` on bot selection (Settings-gated). |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)
 Prefix operators on each strategy token:
@@ -49,7 +52,7 @@ Usage string from source:
 - `talents` (no args) — reports current spec — *unused*
 - `talents switch 1` / `2` — dual-spec switch — *unused*
 - `talents autopick` — auto-assign talents — *unused*
-- `talents spec list` — query available spec names — *unused*
+- `talents spec list` — query available spec names — ✅ used (premade-spec dropdown; fetched once per class per session, finalized on reply silence)
 - `talents spec <name>` — set a named spec — ✅ used
 - `talents apply <link>` — apply a full build from a talent-calculator link — *unused*
 
@@ -80,7 +83,8 @@ repair cost and rest-XP are present but unused.
    item (one link per call; no `reward all`). Pairs with the quest panel's reward display.
 4. **`repair` / `repair all`** (`RepairAllAction`) — send a bot to repair. Companion to the
    durability `stats` already reports.
-5. **`sell`** (`SellAction`) / **`buy`** (`BuyAction`) — vendor interactions; `sell` offloads greys.
+5. **`sell`** (`SellAction`) / **`buy`** (`BuyAction`) — vendor interactions. `sell gray` is
+   now used (Sell Trash button); other `sell` forms and `buy` remain unused.
 6. **`release` / `revive`** (`ReleaseSpiritAction` / `ReviveFromCorpseAction`) — death-state control.
 7. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
 8. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`.

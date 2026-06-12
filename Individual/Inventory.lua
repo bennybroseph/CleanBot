@@ -207,7 +207,7 @@ end
 --- Ends an inventory item drag, clearing slot tints and releasing the capture frame.
 local function CB_StopDrag()
     if not NS.dragging then return end
-if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
+    if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
     if NS.dragging.hoverInvCell   then NS.dragging.hoverInvCell:UnlockHighlight() end
     if NS.dragging.hoverTradeSlot and NS.tradeSlotOverlays then
         local ov = NS.tradeSlotOverlays[NS.dragging.hoverTradeSlot]
@@ -458,6 +458,48 @@ NS.CB_GetInventoryFrame = function(key, botName)
     end
     closeBtn:SetScript("OnClick", function() f:Hide() end)
 
+    -- ── Action buttons (above the frame, top-right) ──────────────────────────
+    -- Small icon buttons mirroring the paperdoll bag-button pattern. Placed outside the
+    -- top edge for now (first pass; easy to reposition). Right-anchored, laid out leftward.
+    local ACTION_SIZE = 20
+    --- Creates one icon action button above the inventory frame, reusing CB_CreateButton
+    --- (which handles naming + the ElvUI button skin) and layering an icon + tooltip on top.
+    ---@param name    string  Global frame name.
+    ---@param iconTex string  Texture path for the button icon.
+    ---@param tip     string  Tooltip line.
+    ---@param onClick fun()   Click handler.
+    ---@return table          The created Button.
+    local function makeActionButton(name, iconTex, tip, onClick)
+        local b = NS.CB_CreateButton(f, name, nil, ACTION_SIZE, ACTION_SIZE, onClick)
+        local icon = b:CreateTexture(nil, "ARTWORK")
+        icon:SetTexture(iconTex)
+        icon:SetAllPoints()
+        NS.CB_ApplyElvCoords(icon)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(tip, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return b
+    end
+
+    -- Sell Trash (rightmost): tells the bot to vendor all grey items, then re-fetches.
+    local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
+        "Sell All Grey Items (Requires a Nearby Vendor)", function()
+            local e       = CleanBot_PartyBots[key]
+            local botName = (e and e.name) or key
+            NS.CB_SendBotCommand(botName, "sell gray")
+            NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
+        end)
+    sellBtn:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", -2, 2)
+
+    -- Sort (to its left): re-sorts the displayed grid via a forced full render.
+    local sortBtn = makeActionButton("CleanBotInvSortBtn_" .. key, "Interface\\Icons\\Ability_Hunter_Readiness", "Sort", function()
+        NS.CB_RenderInventory(key, true)
+    end)
+    sortBtn:SetPoint("RIGHT", sellBtn, "LEFT", -4, 0)
+
     local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
     local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X
     local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_LABEL_X
@@ -695,8 +737,10 @@ NS.CB_SetInventoryLoading = function(f, on)
 end
 
 -- ── Render / re-render the grid from entry.inventory ─────────────────────
----@param key string  Bot name-key whose inventory frame should be (re)rendered.
-NS.CB_RenderInventory = function(key)
+---@param key       string   Bot name-key whose inventory frame should be (re)rendered.
+---@param forceFull  boolean? Force a full re-sort + redraw (e.g. the Sort button) instead of
+---                           the order-preserving patch path.
+NS.CB_RenderInventory = function(key, forceFull)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
@@ -712,7 +756,7 @@ NS.CB_RenderInventory = function(key)
             (entry.awaitingInventory and entry.invOverlay) and true or false)
     end
 
-    local forceFullRender = false
+    local forceFullRender = forceFull or false
     local validation = entry.pendingValidation
     if validation then
         entry.pendingValidation = nil
