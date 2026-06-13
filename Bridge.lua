@@ -664,9 +664,8 @@ NS.STATS_TTL = 30  -- seconds
 -- on-demand XP-bar fetch both route through here.
 --
 -- Two guards keep this from spamming a bot (mirrors CB_FetchSpecList's guard pattern):
---   • in-flight dedup — never stack a second "stats" while one is awaiting a reply. This
---     collapses the post-login RefreshTabs→SelectBot burst that previously hammered the
---     first bot once per frame.
+--   • in-flight dedup — never stack a second "stats" while one is awaiting a reply, so the
+--     post-login RefreshTabs→SelectBot burst can't hammer the first bot once per frame.
 --   • TTL freshness — skip the refetch when the cached reply is younger than STATS_TTL,
 --     so re-selecting a recently-viewed bot reuses the cache. Pass force=true to bypass
 --     the TTL (e.g. after an inventory change that may have altered bag/money); the
@@ -796,7 +795,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- player. The greeting text varies across playerbots versions ("Hi", "Hi!", "Hello", …),
         -- so we trigger on the whisper itself, not its content. Group membership is checked LIVE
         -- here (not via a pre-set flag) so a greeting that arrives before our roster-change
-        -- handler runs still triggers immediately — that ordering race is what made detection lag.
+        -- handler runs still triggers immediately, independent of event ordering.
         -- We probe on the FIRST unsolicited whisper from a current group member (not yet probed),
         -- OR re-probe a joinCandidate whose earlier sweep probe went unanswered while it loaded.
         -- Clearing the candidate bounds a chatty human to a single stray probe. Excludes a

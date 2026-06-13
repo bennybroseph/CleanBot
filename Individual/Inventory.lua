@@ -292,9 +292,7 @@ local function CB_StopDrag()
         src.icon:SetDesaturated(false)
     elseif dropTradeSlot then
         -- ── Drop onto trade slot → tell bot to offer the item ─────────────
-        -- "t <link>" is the real trade command (TriggerNode("t") → TradeAction); it toggles
-        -- the item in the bot's trade window. (Not "give", which is not a registered command —
-        -- see docs/playerbot-commands.md "Chat commands are TRIGGERS, not action names".)
+        -- "t" is the trade command; it toggles the item in the bot's trade window.
         local entry = CleanBot_PartyBots[NS.dragging.key]
         if entry then
             NS.CB_SendBotCommand(entry.name, "t " .. NS.CB_CleanItemLink(NS.dragging.link))
@@ -483,12 +481,9 @@ NS.CB_GetInventoryFrame = function(key, botName)
         return b
     end
 
-    -- Sell Trash (rightmost): tells the bot to vendor all grey items, then re-fetches.
-    -- NOTE: the command is "s gray", NOT "sell gray". The bot's sell trigger is registered as
-    -- "s" (ChatCommandHandlerStrategy: TriggerNode("s") -> SellAction); there is no "sell"
-    -- trigger. Whispering "sell gray" matches no command, so with the server's
-    -- enableAutoTradeOnItemMention on, the "gray" keyword is treated as an item mention and the
-    -- bot opens a TRADE instead of vendor-selling. "s gray" routes to SellAction correctly.
+    -- Sell Trash (rightmost): vendor-sell the bot's grey items, then re-fetch. The command is
+    -- "s gray" — the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands
+    -- are TRIGGERS, not action names").
     local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
         "Sell All Grey Items (Requires a Nearby Vendor)", function()
             local e       = CleanBot_PartyBots[key]

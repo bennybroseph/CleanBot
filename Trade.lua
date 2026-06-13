@@ -96,9 +96,7 @@ local function CB_CreateTradeSlotOverlays()
                 local link = GetTradeTargetItemLink(slotIndex)
                 if not link then return end
 
-                -- "t <link>" is the real trade command (TradeAction); it toggles the item, so
-                -- re-sending it for an already-offered item removes it. ("give" is not a real
-                -- command — see docs/playerbot-commands.md.)
+                -- "t" toggles the item in the bot's trade window, so re-sending removes it.
                 local botEntry = CleanBot_PartyBots and CleanBot_PartyBots[activeTradeKey]
                 if botEntry then
                     NS.CB_SendBotCommand(botEntry.name, "t " .. NS.CB_CleanItemLink(link))
