@@ -316,3 +316,25 @@ describe("Stats reply parsing", function()
         assert.is_false(e.awaitingMoney)
     end)
 end)
+
+describe("Formation reply parsing", function()
+    before_each(function() Mock.reset() end)
+
+    it("caches the formation token from a colour-coded 'Formation:' whisper", function()
+        local e = { name = "Bot" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Formation: |cff00ff00arrow", "Bot")
+
+        assert.equals("arrow", e.formation)   -- colour codes stripped, lowercased
+    end)
+
+    it("leaves formation unset for an unrelated whisper", function()
+        local e = { name = "Bot" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "just chatting", "Bot")
+
+        assert.is_nil(e.formation)
+    end)
+end)

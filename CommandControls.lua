@@ -47,43 +47,49 @@ NS.CB_SendGroupCommand = function(cmd)
     end
 end
 
+-- Refreshes every formation dropdown's displayed value from its host's getter.
+-- Called when a "Formation:" reply lands, on bot selection, and on group-selection
+-- changes (mirrors how the bot-frame registries are repainted on data updates).
+NS.formationRefreshers = NS.formationRefreshers or {}
+NS.CB_RefreshFormations = function()
+    for _, fn in ipairs(NS.formationRefreshers) do fn() end
+end
+
 -- Builds the command buttons + Formation dropdown into `parent`, anchored to its
 -- top-left. Every control composes its command and calls send(cmd); the caller
 -- decides delivery (broadcast / open bot / selected members). The collapsible
 -- section box (if any) is owned by the caller, not here — so this lays out cleanly
 -- inside both a Manage section bg and a bare inner-tab content frame.
----@param parent table             Container the controls anchor into.
----@param tag    string            Disambiguates this instance's global frame names.
----@param send   fun(cmd:string)   Delivers a composed command to the host's target scope.
----@return table                   The deepest widget built (for section Finalize / anchor chains).
-NS.CB_BuildPartyRaidCommands = function(parent, tag, send)
+--
+-- describeTarget() returns a possessive phrase naming the host's target ("Thrall's",
+-- "the selected bots'", "your party/raid bots'") for the Auto Equip confirmation.
+-- formationGet/Set make the dropdown reflect the host's CURRENT formation:
+--   formationGet() → a token | NS.MIXED (→ "Mixed") | nil (→ "Select…"). nil getter
+--     means "action-only" (Manage): the dropdown just shows the last picked value.
+--   formationSet(token) → optimistically cache the pick on the host's bot(s) so the
+--     display stays stable until the (suppressed) confirming reply arrives.
+---@param parent         table              Container the controls anchor into.
+---@param tag            string             Disambiguates this instance's global frame names.
+---@param send           fun(cmd:string)    Delivers a composed command to the host's target scope.
+---@param describeTarget fun():string       Possessive phrase naming the target (Auto Equip confirm).
+---@param formationGet   fun():any|nil      Returns the current formation token / NS.MIXED / nil.
+---@param formationSet   fun(token:string)? Optimistically caches a picked formation.
+---@return table                            The deepest widget built (for section Finalize / anchor chains).
+NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, formationGet, formationSet)
+    -- Register the Auto Equip confirmation popup once (lazily — CB_RegisterConfirmPopup
+    -- is defined in a file that loads after this one, but the builder only runs at
+    -- event time, by which point it exists). Context (which bots to gear) is passed
+    -- per-click via StaticPopup_Show's data arg and read back in OnAccept.
+    if not StaticPopupDialogs["CLEANBOT_AUTO_GEAR"] and NS.CB_RegisterConfirmPopup then
+        NS.CB_RegisterConfirmPopup("CLEANBOT_AUTO_GEAR",
+            "Replace all of %s equipment with auto-selected gear?",
+            function(_, data) if data and data.onConfirm then data.onConfirm() end end)
+    end
+
     local function mkBtn(suffix, label, cmd)
         return NS.CB_CreateButton(parent, "CleanBotCmd" .. suffix .. "Btn_" .. tag,
             label, 120, 24, function() send(cmd) end)
     end
-
-    -- Column 1: Summon / Maintenance / Eat-Drink.
-    local summonBtn = mkBtn("Summon", "Summon", "summon")
-    summonBtn:SetPoint("TOPLEFT", parent, "TOPLEFT",
-        (parent.paddingLeft or 0) + (summonBtn.marginLeft or 0),
-      -((parent.paddingTop  or 0) + (summonBtn.marginTop  or 0)))
-
-    local maintenanceBtn = mkBtn("Maintenance", "Maintenance", "maintenance")
-    NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
-
-    local eatDrinkBtn = mkBtn("EatDrink", "Eat/Drink", "drink")
-    NS.CB_AnchorBelow(eatDrinkBtn, maintenanceBtn)
-
-    -- Column 2: Revive / Release.
-    local reviveBtn = mkBtn("Revive", "Revive", "revive")
-    NS.CB_AnchorAhead(reviveBtn, summonBtn)
-
-    local releaseBtn = mkBtn("Release", "Release", "release")
-    NS.CB_AnchorAhead(releaseBtn, maintenanceBtn)
-
-    -- Formation: pick a formation → send "formation <name>".
-    local formationLabel = NS.CB_CreateLabel(parent, "Formation")
-    NS.CB_AnchorBelow(formationLabel, eatDrinkBtn)
 
     -- Title-cases a formation token for display ("arrow" → "Arrow"); the lowercase
     -- token is what gets sent.
@@ -91,7 +97,13 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send)
     local ICON_PATH = "Interface\\AddOns\\CleanBot\\icons\\formation_"
     local ICON_SIZE = 48   -- inline tooltip icon size (px); independent of the text font
 
-    local formationDD = NS.CB_CreateDropdown(parent, "CleanBotCmdFormation_" .. tag, 120)
+    -- Formation (top of the section): pick a formation → send "formation <name>".
+    local formationLabel = NS.CB_CreateLabel(parent, "Formation")
+    formationLabel:SetPoint("TOPLEFT", parent, "TOPLEFT",
+        (parent.paddingLeft or 0) + (formationLabel.marginLeft or 0),
+      -((parent.paddingTop  or 0) + (formationLabel.marginTop  or 0)))
+
+    local formationDD = NS.CB_CreateDropdown(parent, "CleanBotCmdFormation_" .. tag, 140)
     NS.CB_AnchorBelow(formationDD, formationLabel)
     UIDropDownMenu_SetText(formationDD, "Select\226\128\166")  -- "Select…"
     UIDropDownMenu_Initialize(formationDD, function()
@@ -108,12 +120,58 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send)
                 and ("|T" .. ICON_PATH .. f.token .. ":" .. ICON_SIZE .. "|t " .. label) or label
             info.tooltipText     = f.desc
             info.func            = function()
-                UIDropDownMenu_SetText(formationDD, label)
-                send("formation " .. f.token)  -- server expects the lowercase token
+                UIDropDownMenu_SetText(formationDD, label)       -- immediate feedback
+                if formationSet then formationSet(f.token) end   -- optimistic cache
+                send("formation " .. f.token)                    -- server expects the lowercase token
+                NS.CB_RefreshFormations()
             end
             UIDropDownMenu_AddButton(info)
         end
     end)
 
-    return formationDD
+    -- Reflect the host's current formation. No-op when there's no getter (Manage is
+    -- action-only), so a pick's label survives.
+    local function refresh()
+        if not formationGet then return end
+        local cur = formationGet()
+        if cur == NS.MIXED then
+            UIDropDownMenu_SetText(formationDD, "Mixed")
+        elseif cur then
+            UIDropDownMenu_SetText(formationDD, titleCase(cur))
+        else
+            UIDropDownMenu_SetText(formationDD, "Select\226\128\166")  -- "Select…"
+        end
+    end
+    refresh()
+    NS.formationRefreshers[#NS.formationRefreshers + 1] = refresh
+
+    -- Command grid below the formation row.
+    -- Column 1: Summon / Maintenance / Auto Gear.
+    local summonBtn = mkBtn("Summon", "Summon", "summon")
+    NS.CB_AnchorBelow(summonBtn, formationDD)
+
+    local maintenanceBtn = mkBtn("Maintenance", "Maintenance", "maintenance")
+    NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
+
+    -- Auto Gear (col 1, row 3): auto-equip a fresh gear set ("autogear"). Destructive
+    -- (replaces all equipment), so it's gated behind a Yes/No confirmation naming the target.
+    local autoGearBtn = NS.CB_CreateButton(parent, "CleanBotCmdAutoGearBtn_" .. tag,
+        "Auto Gear", 120, 24, function()
+            StaticPopup_Show("CLEANBOT_AUTO_GEAR",
+                (describeTarget and describeTarget()) or "this bot's", nil,
+                { onConfirm = function() send("autogear") end })
+        end)
+    NS.CB_AnchorBelow(autoGearBtn, maintenanceBtn)
+
+    -- Column 2: Revive / Release / Eat-Drink.
+    local reviveBtn = mkBtn("Revive", "Revive", "revive")
+    NS.CB_AnchorAhead(reviveBtn, summonBtn)
+
+    local releaseBtn = mkBtn("Release", "Release", "release")
+    NS.CB_AnchorAhead(releaseBtn, maintenanceBtn)
+
+    local eatDrinkBtn = mkBtn("EatDrink", "Eat/Drink", "drink")
+    NS.CB_AnchorAhead(eatDrinkBtn, autoGearBtn)
+
+    return autoGearBtn
 end

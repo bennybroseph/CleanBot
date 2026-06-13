@@ -702,6 +702,14 @@ local function CB_ApplyMemberSelection()
     end
 
     CB_SyncGroupViews()
+
+    -- Surface the selected members' current formation in the Commands tab: query any
+    -- unknown ones (replies repaint via CB_RefreshFormations) and repaint now.
+    for _, m in ipairs(managed) do
+        local e = CleanBot_PartyBots[m.key]
+        if e and NS.CB_FetchFormation then NS.CB_FetchFormation(e) end
+    end
+    if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
 end
 
 -- Applies the group list's current selection: resolves the union of the selected
@@ -1061,10 +1069,29 @@ NS.CleanBot_BuildGroupTab = function()
         NS.groupFrames, function(e) return e and e.nonCombat end)
 
     -- Commands tab: shared command set, scoped to the selected group's members
-    -- (fan-out whisper to each, like strategy toggles).
-    NS.CB_BuildPartyRaidCommands(commandsContent, "G", function(cmd)
-        for _, m in ipairs(NS.groupSlot.members) do NS.CB_SendBotCommand(m.name, cmd) end
-    end)
+    -- (fan-out whisper to each, like strategy toggles). The Formation dropdown shows
+    -- the members' aggregate formation (all agree → that; differ → "Mixed").
+    NS.CB_BuildPartyRaidCommands(commandsContent, "G",
+        function(cmd)
+            for _, m in ipairs(NS.groupSlot.members) do NS.CB_SendBotCommand(m.name, cmd) end
+        end,
+        function() return "the selected bots'" end,
+        function()  -- aggregate: all known & equal → token; differ → MIXED; any unknown → nil
+            local result
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]
+                local f = e and e.formation
+                if not f then return nil end
+                if result == nil then result = f
+                elseif result ~= f then return NS.MIXED end
+            end
+            return result
+        end,
+        function(t)
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]; if e then e.formation = t end
+            end
+        end)
 
     CB_SelectGroupInnerTab("commands")
 

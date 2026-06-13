@@ -983,11 +983,20 @@ local function CB_BuildBotContent(container, slot, class, tag)
     local allFrames = {}
 
     -- Commands tab: the shared command set, scoped to THIS bot (whisper the open bot).
-    NS.CB_BuildPartyRaidCommands(commandsContent, tag, function(cmd)
-        local e  = CleanBot_PartyBots[slot.key]
-        local bn = (e and e.name) or slot.name
-        if bn then NS.CB_SendBotCommand(bn, cmd) end
-    end)
+    -- The Formation dropdown reflects/optimistically caches this bot's formation.
+    NS.CB_BuildPartyRaidCommands(commandsContent, tag,
+        function(cmd)
+            local e  = CleanBot_PartyBots[slot.key]
+            local bn = (e and e.name) or slot.name
+            if bn then NS.CB_SendBotCommand(bn, cmd) end
+        end,
+        function()
+            local e  = CleanBot_PartyBots[slot.key]
+            local bn = (e and e.name) or slot.name
+            return (bn or "this bot") .. "'s"
+        end,
+        function() local e = CleanBot_PartyBots[slot.key]; return e and e.formation end,
+        function(t) local e = CleanBot_PartyBots[slot.key]; if e then e.formation = t end end)
 
     CB_BuildTwoColumnContent(combatContent,    NS.STRATEGIES,    "co", slot, tag, allFrames, function(e) return e and e.combat    end)
     CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", slot, tag, allFrames, function(e) return e and e.nonCombat end)
@@ -1251,6 +1260,12 @@ SelectBot = function(key, silent)
         NS.CB_FetchStats(entry)
     end
     if NS.CB_RefreshXPBar then NS.CB_RefreshXPBar(slot) end
+
+    -- Surface this bot's current formation in the Commands tab: query it if unknown
+    -- (reply repaints via CB_RefreshFormations) and repaint now so the cached value
+    -- shows immediately on selection.
+    if entry and NS.CB_FetchFormation then NS.CB_FetchFormation(entry) end
+    if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
 
     NS.lruClock = NS.lruClock + 1
     slot.lru = NS.lruClock

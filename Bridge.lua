@@ -813,6 +813,18 @@ NS.CB_FetchStats = function(entry, force)
     end)
 end
 
+-- Queries a bot's current movement formation ("formation ?"). The reply
+-- ("Formation: <name>") is parsed in the CHAT_MSG_WHISPER handler into entry.formation.
+-- Cached: skips when entry.formation is already known unless `force` is set. Routes
+-- through CB_SendBotCommand so it serializes and the reply is hidden.
+---@param entry table   The CleanBot_PartyBots entry to query.
+---@param force boolean? Re-query even when a formation is already cached.
+NS.CB_FetchFormation = function(entry, force)
+    if not entry or not entry.name then return end
+    if entry.formation and not force then return end
+    NS.CB_SendBotCommand(entry.name, "formation ?")
+end
+
 -- Fetches a bot's bank contents. Whisper-only — bank has no bridge packet, and the
 -- reply (header "=== Bank ===" then item lines) is collected via the header-routed
 -- staging branch in CHAT_MSG_WHISPER and finalized by the silence tick. The reply
@@ -1162,6 +1174,19 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 entry.questStatus = "I"
             elseif msg:find("Complet", 1, true) then
                 entry.questStatus = "C"
+            end
+            return
+        end
+
+        -- Current-formation reply: "formation ?" / no-arg answers "Formation: |cff00ff00<name>"
+        -- (SetFormationAction → TellMaster). Strip colour codes, cache the token, refresh the
+        -- Commands-tab dropdowns that display it.
+        if entry and strsub(msg, 1, 11) == "Formation: " then
+            local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
+            local name  = clean:match("Formation:%s*(%a+)")
+            if name then
+                entry.formation = strlower(name)
+                if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
             end
             return
         end

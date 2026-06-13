@@ -58,6 +58,7 @@ action name in `ChatActionContext.h`.**
 | `t <link>` (drag-to-trade) | `t` | `TriggerNode("t")` → trade | ✅ (was `give <link>` — relied on the auto-trade fallback; now the real `t` command) |
 | `bank` / `bank <link>` / `bank -<link>` | `bank` | `ChatTriggerContext` `creators["bank"]` | ✅ (list / deposit / withdraw — see Bank below) |
 | `formation <name>` | `formation` | `supported` | ✅ (Commands tab + Manage Party/Raid — see "Commands already sends") |
+| `autogear` | `autogear` | `supported` | ✅ ("Auto Gear" button — see "Commands already sends") |
 
 ---
 
@@ -80,6 +81,7 @@ action name in `ChatActionContext.h`.**
 | `stats` | ⚠️ | Also carries repair cost and rest-XP we don't surface. |
 | `drop <questname>` | ✅ | Abandon quest. |
 | `emote <name>` | ✅ | Takes any emote token; CleanBot sends `emote wave` on bot selection (Settings-gated). |
+| `autogear` | ✅ | "Auto Gear" button in the "Commands" inner tab (Individual + Group) and Manage → Party/Raid, **gated behind a Yes/No confirmation popup** (destructive: replaces all equipment). Auto-equips a fresh gear set for the bot. **Arguments — the `supported` vector registers exactly two forms** (each a distinct action class), so these are the *only* recognized forms: `autogear` (no args → `AutoGearAction`, what the button sends) and `autogear bis` (→ `BisGearAction`, best-in-slot). `autogear` takes no further arguments. (Related but separate: `equip upgrade` equips inventory upgrades only.) Whisper-only (not bridge-allowlisted); reply hidden by the reply window. Per-host scope matches the rest of the set: Individual → open bot; Group → selected members (fan-out); Manage → whole party/raid broadcast. NOTE: `AutoGearAction`/`BisGearAction` are bundled in an unpinned header, so the precise gear source/level of plain `autogear` vs `bis` is unverified from source — confirm in-game. |
 | `formation <name>` | ✅ | "Commands" inner tab (Individual + Group) and Manage → Party/Raid. Sets the bot's movement formation (`SetFormationAction`, `src/Ai/Base/Value/Formations.cpp`; trigger `formation` in the `supported` vector). Whisper-only (not bridge-allowlisted). Per-host scope mirrors the rest of that command set: Individual → the open bot; Group → the selected group's members (fan-out); Manage → broadcast to the whole party/raid. Valid tokens (lowercase): `chaos` (default), `near`, `queue`, `circle`, `line`, `shield`, `arrow`, `melee`, `far` — the dropdown shows them title-cased and sends the lowercase token. **Query:** `formation ?` (or no arg) whispers back `Formation: <name>` (the current formation) — queryable, not yet surfaced in the UI. Replies go via `TellMaster` (whisper), so they're hidden by the reply-window filter on the per-bot paths; the Manage broadcast opens a reply window per bot to hide them too. |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)

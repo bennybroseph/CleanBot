@@ -416,7 +416,8 @@ NS.CleanBot_BuildManageTab = function()
     -- the whole party/raid (no single selection here).
     local partyRaidSection = NS.CB_CreateSection(panel, "partyRaid", "Party/Raid", 3)
     local partyRaidDeepest = NS.CB_BuildPartyRaidCommands(partyRaidSection.bg, "Manage",
-        function(cmd) NS.CB_SendGroupCommand(cmd) end)
+        function(cmd) NS.CB_SendGroupCommand(cmd) end,
+        function() return "your party/raid bots'" end)
     partyRaidSection:Finalize(partyRaidDeepest)
 
     -- ── Favorites/Presets section ─────────────────────────
