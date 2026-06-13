@@ -4,13 +4,58 @@ Human-readable companion to the bridge allowlists in `Bridge.lua` (the addon-mes
 protocol itself is documented in [bridge-protocol.md](bridge-protocol.md)). The official
 [Playerbot Commands wiki](https://github.com/mod-playerbots/mod-playerbots/wiki/Playerbot-Commands)
 is sparse, so this captures what was learned by reading the mod-playerbots action
-source directly (`src/Ai/Base/Actions/*.cpp` and `src/Ai/Base/ActionContext.h`).
+source directly (`src/Ai/Base/Actions/*.cpp`, `src/Ai/Base/ChatActionContext.h`, and
+`src/Ai/Base/Strategy/ChatCommandHandlerStrategy.cpp`).
 
 **Status legend:** ✅ used by CleanBot · ⚠️ used but only partially · ⬜ available, unused.
 
 This is a reference, not a roadmap — nothing here is committed work. When a command
 is implemented, also update the relevant `Bridge.lua` allowlist if it routes through
 an opcode.
+
+---
+
+## ⚠️ Chat commands are TRIGGERS, not action names (read this first)
+
+A bot command you whisper is matched by **trigger name**, which is NOT always the same as
+the **action name** in the source. Getting this wrong silently misfires (see the `sell` story
+below). There are two registries:
+
+- **Action name** — `ChatActionContext.h`: `creators["sell"] = … SellAction`. This only *names*
+  the action `sell` internally. It does **not** make `sell` a thing you can type.
+- **Chat trigger** — `ChatCommandHandlerStrategy.cpp`, two sources:
+  1. `InitTriggers()` `TriggerNode("<trigger>", { NextAction("<action>") })` — trigger ≠ action
+     (e.g. `s`→sell, `e`→equip, `ue`→unequip, `u`→use, `t`→trade, `b`→buy, `r`→reward,
+     `c`/`items`/`inv`→item count, `q`→query quest).
+  2. The `supported` vector — entries where **trigger name == action name** (e.g. `co`, `nc`,
+     `talents`, `quests`, `stats`, `drop`, `emote`, `wait for attack time`, `ll`, `repair`, …).
+
+A whisper that matches **no** trigger falls through to an item-mention auto-trade
+(`AiPlayerbot.EnableAutoTradeOnItemMention`, default **1**): the text is fed to the `c` and `t`
+(trade) actions, so any item link or quality keyword in it makes the bot **open a trade**. That
+is exactly why `sell gray` (no `sell` trigger) opened a trade on the `gray` keyword instead of
+vendor-selling — and it's also the *only* reason our `give <link>` works (there is no `give`
+command; the item link triggers the auto-trade).
+
+**Rule: before using/adding a bot command, confirm the exact TRIGGER in
+`ChatCommandHandlerStrategy.cpp` (a `TriggerNode` name or a `supported` entry) — not just the
+action name in `ChatActionContext.h`.**
+
+### Audit — every command CleanBot sends, verified against the trigger registry
+
+| What CleanBot sends | Trigger | Where registered | OK? |
+|---|---|---|---|
+| `co …` / `nc …` | `co` / `nc` | `supported` | ✅ |
+| `talents spec list` / `talents spec <name>` | `talents` | `supported` | ✅ |
+| `items` | `items` | `TriggerNode("items")` → item count | ✅ |
+| `quests all` | `quests` | `supported` | ✅ |
+| `stats` | `stats` | `supported` | ✅ |
+| `drop <quest>` | `drop` | `supported` | ✅ |
+| `emote wave` | `emote` | `supported` | ✅ |
+| `wait for attack time <N>` | `wait for attack time` | `supported` | ✅ |
+| `e <link>` / `ue <link>` / `u <link>` | `e` / `ue` / `u` | `TriggerNode(...)` | ✅ |
+| `s gray` | `s` | `TriggerNode("s")` → sell | ✅ (was `sell gray` — wrong, fixed) |
+| `t <link>` (drag-to-trade) | `t` | `TriggerNode("t")` → trade | ✅ (was `give <link>` — relied on the auto-trade fallback; now the real `t` command) |
 
 ---
 
@@ -22,11 +67,11 @@ an opcode.
 | `nc +x` / `nc -x` / `nc ?` | ⚠️ | Same operator set as `co`. |
 | `talents spec <name>` | ⚠️ | One of five `talents` sub-forms — see "talents" below. |
 | `talents spec list` | ✅ | Populates the premade-spec dropdown; reply is one premade per line, `"1. arms pve (51-0-20)"` (parsed in `Bridge.lua`). |
-| `sell gray` | ✅ | Inventory "Sell Trash" button. Whisper-only (not bridge-allowlisted); server only sells when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Aliases: `sell *`, short form `s`. |
+| `s gray` | ✅ | Inventory "Sell Trash" button. **The trigger is `s`, not `sell`** — `ChatCommandHandlerStrategy` registers `TriggerNode("s") → SellAction`; there is NO `sell` trigger. Whispering `sell gray` matches no command and (with `enableAutoTradeOnItemMention`) makes the bot open a *trade* on the "gray" keyword instead of vendor-selling. Whisper-only (not bridge-allowlisted); sells only when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Params: `s gray` / `s *` / `s vendor` / `s <itemlink>`. |
 | `e <link>` (equip) | ⚠️ | Resolves via `parseItems` — accepts far more than links. |
 | `ue <link>` (unequip) | ✅ | |
 | `u <link>` (use item) | ✅ | |
-| `give <link>` | ⚠️ | `parseItems`; `give food`/`give water` are dedicated commands. |
+| `t <link>` | ✅ | Trade command (`TriggerNode("t")` → `TradeAction`); toggles the item in the bot's trade window. Used by the drag-to-trade / right-click-remove flow. (We previously sent `give <link>`, which is **not** a real command and only worked via the item-mention auto-trade fallback — switched to `t` for robustness.) |
 | `items` | ⚠️ | Accepts filters (`items quest`, `items food`, by quality/name/slot). |
 | `quests all` | ✅ | Whisper path sends `quests all` (bridge: `GET~QUESTS~ALL`); lists per-quest links under Incomplete/Complete headers. |
 | `stats` | ⚠️ | Also carries repair cost and rest-XP we don't surface. |
@@ -83,8 +128,9 @@ repair cost and rest-XP are present but unused.
    item (one link per call; no `reward all`). Pairs with the quest panel's reward display.
 4. **`repair` / `repair all`** (`RepairAllAction`) — send a bot to repair. Companion to the
    durability `stats` already reports.
-5. **`sell`** (`SellAction`) / **`buy`** (`BuyAction`) — vendor interactions. `sell gray` is
-   now used (Sell Trash button); other `sell` forms and `buy` remain unused.
+5. **`s`** (`SellAction`) / **`b`** (`BuyAction`) — vendor interactions (triggers are the short
+   forms `s`/`b`, not `sell`/`buy`). `s gray` is used (Sell Trash button); other `s` forms and
+   `b` remain unused.
 6. **`release` / `revive`** (`ReleaseSpiritAction` / `ReviveFromCorpseAction`) — death-state control.
 7. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
 8. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`.
@@ -95,6 +141,31 @@ repair cost and rest-XP are present but unused.
 `reputation` / `emblems`, loot control `roll` + loot strategy, pet management
 (`pet attack`, `set pet stance`, `toggle pet spell`), `summon` / teleport (`TeleportAction`),
 and the dynamic `help` command (live command + strategy lists).
+
+---
+
+## Item transfer between bots / to the player
+
+How items actually move out of a bot, and the constraints — relevant if a bot-to-bot
+inventory-trading feature is ever added.
+
+| Mechanism | Source | Direction | Immediate? | Notes |
+|---|---|---|---|---|
+| **Trade** — `t <link>` / `nt <link>` | `TradeAction.cpp` | bot ↔ player, bot ↔ bot | No (UI + accept) | Trigger is `t` (`nt` = non-traded slot). `TradeAction` opens a trade with the master/group member if one isn't open, then toggles the item in the bot's trade slots (re-send removes). This is what CleanBot's drag-to-trade uses. |
+| **Auto-accept** | `TradeStatusAction.cpp` | — | — | When the *other* side clicks Accept, the bot runs `CheckTrade()` and auto-accepts (`HandleAcceptTradeOpcode`). **Your own bots give for free** (the non-random-account path returns `true` regardless of money); **random/server bots want money or a discount** (`CheckTrade` cost logic). So a player receiving from their own bot is effectively a single Accept click. |
+| **Direct give** — `GiveItemAction` | `GiveItemAction.cpp` | **bot → bot only** | **Yes** (no trade window) | `MoveItemFromInventory` → `MoveItemToInventory`, instant. **Hard constraint:** the receiver must be a playerbot (`GET_PLAYERBOT_AI(receiver)` must be non-null) — a real player can never receive this way. **Not whisper-invokable:** it's an autonomous action whose target is the AI value `"party member without item"` (also `GiveFoodAction` / `GiveWaterAction` for `"party member without food/water"`). It fires from RPG/idle triggers, not a chat command. |
+| **Mail** — `mail` / `sendmail` | mail actions | bot → anyone | No (mailbox + delay) | Goes through the mail system; not immediate. |
+
+**Takeaways for a future bot-to-bot trade feature:**
+- There is **no command to instantly give an item to the *player*** — player-bound transfers go
+  through trade (auto-accepted by your own bots) or mail. An instant move into a real player's
+  bags would be a GM-level action the module only does bot→bot.
+- The instant bot→bot path (`GiveItemAction`) exists but is **autonomous and not commandable**,
+  and only targets a bot lacking the item. To drive bot→bot transfers on demand you'd most
+  likely orchestrate the **trade** flow between two bots (both sides are playerbots, so
+  `TradeStatusAction` auto-accepts), rather than rely on `GiveItemAction`.
+- As always, the command word is the **trigger** (`t`), not the action name — see the triggers
+  vs. actions note above.
 
 ---
 
