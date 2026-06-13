@@ -6,14 +6,23 @@
 -- No external dependencies — runs under a bare Lua 5.1 / LuaJIT interpreter.
 -- ============================================================
 
-local results   = { passed = 0, failed = 0, failures = {} }
-local nameStack = {}
+local results      = { passed = 0, failed = 0, failures = {} }
+local nameStack    = {}
+local beforeScopes = {}   -- stack of before_each lists, one per active describe
 
 --- Groups related tests; nesting is allowed and reflected in failure names.
 function describe(name, fn)
-    nameStack[#nameStack + 1] = name
+    nameStack[#nameStack + 1]       = name
+    beforeScopes[#beforeScopes + 1] = {}
     fn()
-    nameStack[#nameStack] = nil
+    beforeScopes[#beforeScopes] = nil
+    nameStack[#nameStack]       = nil
+end
+
+--- Registers a setup fn run before each `it` in the enclosing describe (and nested ones).
+function before_each(fn)
+    local top = beforeScopes[#beforeScopes]
+    if top then top[#top + 1] = fn end
 end
 
 local function fullName(name)
@@ -25,6 +34,9 @@ end
 
 --- Runs one test case, recording pass/fail (a thrown error = fail).
 function it(name, fn)
+    for _, scope in ipairs(beforeScopes) do
+        for _, bfn in ipairs(scope) do bfn() end
+    end
     local ok, err = pcall(fn)
     if ok then
         results.passed = results.passed + 1
