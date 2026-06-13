@@ -126,8 +126,8 @@ throw/gun/bow/crossbow from the equipped ranged weapon.)
 | `loot` | ✅ | Loot nearby corpses after combat. |
 | `gather` | ✅ | Gather nearby herb/ore/etc. nodes. |
 | `mark rti` | ✅ | Auto-mark unmarked attackers with raid target icons. |
-| `potions` | ⬜ | Use healing/mana potions. |
-| `racials` | ⬜ | Use racial abilities. |
+| `potions` | ✅ | Use healing/mana potions. "Use Potions" checkbox in the Combat tab's Combat Control group (default-on, universal). |
+| `racials` | ✅ | Use racial abilities. "Use Racials" checkbox in the Combat tab's Combat Control group (default-on, universal). |
 | `mount` | ⬜ | Mount/dismount to match the master (state checked on a timer). |
 | `collision` | ⬜ | `"collision"` → `"move out of collision"` @ 2 — stops bots standing inside each other. |
 | `sit` | ⬜ | Sit when idle. |
