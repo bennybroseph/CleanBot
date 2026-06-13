@@ -99,3 +99,10 @@ _G.strtrim  = function(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
 -- Bridge.lua's runtime paths don't nil-error; CB_After records its callback rather than firing.
 _G.CleanBotNS.CB_Print = _G.CleanBotNS.CB_Print or function() end
 _G.CleanBotNS.CB_After = _G.CleanBotNS.CB_After or function() end
+-- Faithful copy of CleanBot.lua's plain-separator splitter (used by Bridge.lua to parse
+-- "~"-delimited MBOT packets). Returns (before, after-or-"").
+_G.CleanBotNS.CB_SplitOnce = _G.CleanBotNS.CB_SplitOnce or function(str, sep)
+    local i = string.find(str, sep, 1, true)
+    if i then return string.sub(str, 1, i - 1), string.sub(str, i + 1) end
+    return str, ""
+end

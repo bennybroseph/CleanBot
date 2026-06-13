@@ -7,7 +7,11 @@
 -- the OnUpdate tick is driven via Mock.tick.
 -- ============================================================
 
--- Load once: re-dofile'ing would re-register the OnUpdate/OnEvent handlers with the mock.
+-- Load once (guarded): re-dofile'ing would re-register the OnUpdate/OnEvent handlers with the
+-- mock, and double-firing them would corrupt the queue/tick. Inventory.lua provides
+-- CB_ParseItemLine, which Bridge's INV_ITEM handler depends on — load it too so this spec is
+-- self-sufficient regardless of spec order.
+if not CleanBotNS.CB_ParseItemLine then dofile("Individual/Inventory.lua") end
 if not CleanBotNS.CB_EnqueueRequest then dofile("Bridge.lua") end
 local NS = CleanBotNS
 
@@ -100,6 +104,77 @@ describe("Serial whisper queue", function()
 
         Mock.tick(0.3); assert.are.same({ "a" }, order)        -- 0.3 < 0.5: still busy
         Mock.tick(0.3); assert.are.same({ "a", "b" }, order)   -- cumulative 0.6 ≥ 0.5: advances
+    end)
+
+    it("a streaming reply holds the queue open (each line resets the silence timer)", function()
+        local order = {}
+        NS.CB_EnqueueRequest("bot", recorder(order, "a"))
+        NS.CB_EnqueueRequest("bot", recorder(order, "b"))
+
+        Mock.tick(0.4)                                          -- 0.4 < 0.5
+        Mock.fireEvent("CHAT_MSG_WHISPER", "a reply line", "Bot")  -- resets the silence timer
+        Mock.tick(0.4)                                          -- only 0.4 since the reset
+        assert.are.same({ "a" }, order)                        -- held open past 0.8 real time
+
+        Mock.tick(0.4); assert.are.same({ "a", "b" }, order)   -- 0.8 since reset ≥ 0.5: advances
+    end)
+end)
+
+describe("Bridge addon packets (CHAT_MSG_ADDON)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots     = { bot = { name = "Bot", awaitingInventory = true } }
+        NS.bridgeState         = "present"
+        NS.debugBridgeOverride = nil
+    end)
+
+    it("populates inventory from an INV_BEGIN/ITEM/SUMMARY/END burst", function()
+        local e = CleanBot_PartyBots.bot
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_BEGIN~Bot~inv")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_ITEM~Bot~tok~|cffffffff|Hitem:6948|h[Hearthstone]|h|r")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_ITEM~Bot~tok~|cffffffff|Hitem:2589|h[Linen]|h|r x20")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_SUMMARY~Bot~tok~5~30~10~4~16")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_END~Bot")
+
+        assert.equals(2,  #e.inventory.items)
+        assert.equals(20, e.inventory.items[2].count)
+        assert.equals(5,  e.money.gold)
+        assert.equals(16, e.inventory.bagTotal)
+        assert.equals(4,  e.inventory.bagUsed)
+        assert.is_false(e.awaitingInventory)   -- INV_END landed
+    end)
+
+    it("ignores packets with a non-MBOT prefix", function()
+        local e = CleanBot_PartyBots.bot
+        Mock.fireEvent("CHAT_MSG_ADDON", "OTHER", "INV_BEGIN~Bot~inv")
+        assert.is_nil(e.inventory)
+    end)
+
+    it("ignores inbound data packets while the override forces 'absent'", function()
+        local e = CleanBot_PartyBots.bot
+        NS.debugBridgeOverride = "absent"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_BEGIN~Bot~inv")
+        assert.is_nil(e.inventory)   -- the no-bridge guard dropped it
+    end)
+
+    it("HELLO_ACK flips bridgeState to present and ends the login phase", function()
+        NS.bridgeReady      = false
+        NS.bridgeState      = "unknown"
+        NS.loginPhaseActive = true
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~1")
+
+        assert.is_true(NS.bridgeReady)
+        assert.equals("present", NS.bridgeState)
+        assert.is_false(NS.loginPhaseActive)
+        assert.equals("HELLO_ACK~1", NS.lastHelloAck)
+    end)
+
+    it("HELLO_ACK is processed even when the override forces 'absent'", function()
+        NS.bridgeReady         = false
+        NS.bridgeState         = "unknown"
+        NS.debugBridgeOverride = "absent"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~2")
+        assert.is_true(NS.bridgeReady)   -- lifecycle packet runs above the no-bridge guard
     end)
 end)
 
