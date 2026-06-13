@@ -135,7 +135,12 @@ repair cost and rest-XP are present but unused.
    `b` remain unused.
 6. **`release` / `revive`** (`ReleaseSpiritAction` / `ReviveFromCorpseAction`) — death-state control.
 7. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
-8. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`.
+8. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
+   Most relevant form: **`go <unit name>` walks the bot to a nearby matching NPC/player by
+   name** — e.g. stepping a bot onto a **banker** so the `bank` commands pass their proximity
+   check. (Bounded by the bot's search range — it's the last-leg positioner, not a long-haul
+   travel; pair with `summon`/`follow` to get the bot into the area first.)
+9. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`.
 
 ### Lower priority / situational
 `mail` / `send mail` / `check mail`, `bank` / `guild bank`, `trainer` / `train`, `taxi`,
@@ -143,6 +148,28 @@ repair cost and rest-XP are present but unused.
 `reputation` / `emblems`, loot control `roll` + loot strategy, pet management
 (`pet attack`, `set pet stance`, `toggle pet spell`), `summon` / teleport (`TeleportAction`),
 and the dynamic `help` command (live command + strategy lists).
+
+### go — move to a unit / object / coordinates (`GoAction.cpp`)
+Trigger `go` — confirmed in the `supported` vector (trigger == action; action name is `"Go"`).
+Whisper-only; **not** bridge-allowlisted. Forms parsed by `GoAction::Execute`:
+- **`go <unit name>`** — matches the **nearest NPC or friendly player** by case-insensitive
+  name substring (`strstri`) and walks to it. Bounded by the bot's search range (roughly its
+  visibility radius) — the unit must already be reasonably near, so this positions a bot the
+  *last leg*, not across a zone. **Bank use:** get the bot to the bank vicinity first
+  (`summon` / `follow`), then `go <bankerName>` to step it onto the banker so the `bank`
+  commands satisfy their "banker NPC in range" check.
+- `go x,y` — zone coordinates (validates terrain/water/height, then pathfinds).
+- `go x;y;z` — raw map coordinates.
+- `go [game object]` — move to a spawned game object (by link/GUID) within reaction distance.
+- `go position` — move to a saved named position from context.
+- `go travel <destination>` — hands off to the travel-target system (`ChooseTravelTargetAction`).
+- `go ?` — reply with the bot's current coordinates.
+- (no recognized arg) — help reply: *"Whisper 'go x,y', 'go [game object]', 'go unit' or 'go position' and I will go there"*.
+
+Other movement triggers seen in the registry, for reference: one-shots `follow` / `stay` /
+`flee` / `move from group` (TriggerNodes → `"<name> chat shortcut"`), and `supported` entries
+`summon`, `teleport`, `taxi`, `position`, `leave`, `formation`. None are verified beyond their
+presence in the trigger registry.
 
 ---
 
@@ -206,6 +233,7 @@ have not set a key, showing the `setKey` command in a copyable popup (`ManageTab
 - Item resolution / `items`: `src/Ai/Base/Actions/InventoryAction.cpp`
 - `stats`: `src/Ai/Base/Actions/StatsAction.cpp`
 - `rti`: `src/Ai/Base/Actions/RtiAction.cpp`
+- `go` / movement-to-target: `src/Ai/Base/Actions/GoAction.cpp`
 - `outfit`: `src/Ai/Base/Actions/OutfitAction.cpp`
 - `reward`: `src/Ai/Base/Actions/RewardAction.cpp`
 - `quests`: `src/Ai/Base/Actions/ListQuestsActions.cpp`
