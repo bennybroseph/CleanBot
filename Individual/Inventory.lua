@@ -34,27 +34,28 @@ local BANK_MIN_CELLS = 28
 local KINDS = {
     inventory = {
         frames = NS.botInventoryFrames, dataField = "inventory",
-        awaitField = "awaitingInventory", overlayField = "invOverlay", stagingField = "invStaging",
+        awaitField = "awaitingInventory", overlayField = "invOverlay",
         framePrefix = "CleanBotInventory_", cellPrefix = "CleanBotInvCell_",
         titleNoun = "Inventory", showFooter = true, minCells = 0,
     },
     bank = {
         frames = NS.botBankFrames, dataField = "bank",
-        awaitField = "awaitingBank", overlayField = "bankOverlay", stagingField = "bankStaging",
+        awaitField = "awaitingBank", overlayField = "bankOverlay",
         framePrefix = "CleanBotBank_", cellPrefix = "CleanBotBankCell_",
         titleNoun = "Bank", showFooter = false, minCells = BANK_MIN_CELLS,
     },
 }
 
--- A grid is "locked" while its whisper list-fetch is in flight — its staging table is set.
--- Cell drag/menu actions are blocked then so the user can't act on an in-flight list. The
--- bridge path never sets staging, so it is never locked (and the close button always works).
+-- A grid is "locked" while its list fetch is in flight (the bot is streaming the items/bank
+-- reply). Cell drag/menu/move actions are blocked then so the user can't act on a list
+-- that's mid-refresh — the serial whisper queue keeps requests from interleaving, and the
+-- lock keeps the user from piling new moves onto an in-flight reply.
 ---@param kind string  "inventory" or "bank".
 ---@param key  string  Bot name-key.
----@return boolean      Whether the grid is mid-refresh from a whisper.
+---@return boolean      Whether the grid's list fetch is in flight.
 local function CB_GridLocked(kind, key)
     local entry = CleanBot_PartyBots[key]
-    return entry ~= nil and entry[KINDS[kind].stagingField] ~= nil
+    return entry ~= nil and entry[KINDS[kind].awaitField] == true
 end
 
 -- These replace NS.PADDING.frame.* entirely on the Blizz path — the art has
@@ -290,9 +291,10 @@ end
 -- ── Deposit / withdraw between a bot's bags and bank ─────────────────────
 -- Both directions share the "bank" trigger ("bank <link>" deposits from bags,
 -- "bank -<link>" withdraws); both need a banker NPC near the bot (handled by the
--- no-banker popup in Bridge.lua). awaitingBankOp arms that popup for the op window.
--- The move is reflected eagerly (srcCell → other frame) and then both frames
--- re-fetch after a short delay so the optimistic state is confirmed/corrected.
+-- no-banker popup in Bridge.lua). The command is ENQUEUED on the bot's serial whisper
+-- queue (awaitingBankOp is its busy flag) so it can't interleave with a list reply;
+-- the move is reflected eagerly right away, and a debounced reconcile (also enqueued)
+-- confirms/corrects once the queue drains.
 ---@param key     string  Bot name-key.
 ---@param botName string  Bot's display name (command target).
 ---@param link    string  Item link to move.
@@ -300,20 +302,19 @@ end
 ---@param srcCell  table?  The cell the item is moving out of (for the eager update).
 ---@param destCell table?  The exact destination cell (a drag target), if any.
 NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
-    local entry = CleanBot_PartyBots[key]
-    if entry then entry.awaitingBankOp = true end
     local prefix = (dir == "withdraw") and "bank -" or "bank "
-    NS.CB_SendBotCommand(botName, prefix .. NS.CB_CleanItemLink(link))
+    local cmd    = prefix .. NS.CB_CleanItemLink(link)
+    NS.CB_EnqueueRequest(key, function()
+        local e = CleanBot_PartyBots[key]
+        if e then e.awaitingBankOp = true; e.bankOpTimeout = 0 end
+        NS.CB_SendBotCommandRaw(botName, cmd)  -- already running from the queue
+    end)
 
-    -- Eager move: withdraw lands in the inventory grid, deposit in the bank grid.
+    -- Eager move (immediate, regardless of queue position): withdraw lands in the
+    -- inventory grid, deposit in the bank grid.
     local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
     CB_OptimisticMove(srcCell, destFrame, destCell)
 
-    -- Keep the no-banker watch armed briefly to catch this op's reply, then reconcile
-    -- both grids on a debounce so a burst of moves collapses into a single refetch.
-    NS.CB_After(1.5, function()
-        if CleanBot_PartyBots[key] then CleanBot_PartyBots[key].awaitingBankOp = false end
-    end)
     NS.CB_ScheduleReconcile(key, botName)
 end
 

@@ -375,18 +375,14 @@ local function CB_TagSelfWhisper(recipient, text)
     list[#list + 1] = GetTime()
 end
 
--- Sends a command to a bot. Routes through the bridge (silent, no whisper
--- spam) when the bridge is present and the command is allowlisted; falls back
--- to a whisper for everything else or when bridge is absent. Safe to use for
--- all commands including queries — unlisted commands always whisper, so
--- replies still arrive normally via CHAT_MSG_WHISPER.
---
--- When NS.debugSimulate is true the command is printed to chat instead of
--- sent, and when NS.debugBridgeOverride is set it overrides the real bridge
--- state — both are toggled via /cbdebug.
+-- Raw dispatch: the actual bridge-or-whisper send. Routes through the bridge (silent) when
+-- present and the command is allowlisted; otherwise whispers. Honors the debugSimulate and
+-- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for
+-- bridge/simulated commands — NOT to be called directly for ad-hoc whispers; use
+-- CB_SendBotCommand so they serialize.
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
-NS.CB_SendBotCommand = function(botName, command)
+local function CB_SendBotCommandRaw(botName, command)
     if NS.debugSimulate then
         NS.CB_Print("|cff888888[simulate]|r → " .. botName .. ": " .. command)
         return
@@ -401,6 +397,21 @@ NS.CB_SendBotCommand = function(botName, command)
     CB_MarkExpectReply(botName)
     CB_TagSelfWhisper(botName, command)
     SendChatMessage(command, "WHISPER", nil, botName)
+end
+NS.CB_SendBotCommandRaw = CB_SendBotCommandRaw  -- for queued fetch/move sends (avoids re-enqueue)
+
+-- Sends a command to a bot. WHISPER commands are serialized through the bot's request queue
+-- so their (possibly multi-line, link-bearing) replies never interleave with another reply
+-- stream and corrupt our parsing. Bridge commands (structured addon messages, no whisper
+-- reply) and simulated commands bypass the queue so they stay snappy.
+NS.CB_SendBotCommand = function(botName, command)
+    -- Simulate prints, no reply; bridge is a fast addon message with no whisper stream.
+    if NS.debugSimulate
+        or (CB_EffectiveBridgeState() == "present" and CB_GetBridgeOpcode(command)) then
+        CB_SendBotCommandRaw(botName, command)
+        return
+    end
+    NS.CB_EnqueueRequest(strlower(botName), function() CB_SendBotCommandRaw(botName, command) end)
 end
 
 NS.CB_RequestSync = function()
@@ -517,10 +528,14 @@ NS.CB_FetchSpecList = function(key, entry)
     if not entry or not entry.class then return end
     if NS.premadeSpecs[entry.class] or NS.premadeSpecsFetching[entry.class] then return end
     NS.premadeSpecsFetching[entry.class] = true
-    entry.awaitingSpecList = true
-    entry.specListTimeout  = 0
-    entry.specListStaging  = {}
-    NS.CB_SendBotCommand(entry.name, "talents spec list")
+    -- Enqueue: the silence timer (specListTimeout) must start at SEND time, not now, or a
+    -- deferred send behind other requests would finalize before the reply arrives.
+    NS.CB_EnqueueRequest(key, function()
+        entry.awaitingSpecList = true
+        entry.specListTimeout  = 0
+        entry.specListStaging  = {}
+        NS.CB_SendBotCommandRaw(entry.name, "talents spec list")
+    end)
 end
 
 -- Publishes a collected spec list to the per-class cache and re-runs the
@@ -549,8 +564,43 @@ end
 -- 0.5 chosen from /cbtiming measurements on a healthy server (2026-06).
 NS.WHISPER_SILENCE = 0.5
 
+-- ── Per-bot serial whisper queue ─────────────────────────────────────────
+-- A bot's reply (items / bank / stats list, a "Strategies:" line, a "put X to bank"
+-- confirmation, …) is a whisper that can span many lines and may echo item links. Sending
+-- another whisper before it finishes interleaves the replies and corrupts our parsing
+-- (duplicate items, items snapping back). So EVERY whisper to a bot is queued and sent ONE
+-- AT A TIME. The queue owns a single generic busy flag (wqBusy): set when a request is sent,
+-- and cleared once the bot's reply has gone silent (each incoming whisper resets the timer in
+-- CHAT_MSG_WHISPER). Typed flags like awaitingInventory still drive parsing/finalize/lock, but
+-- the queue's advancement is governed solely by wqBusy, so it works uniformly for every kind
+-- of request. Bridge/simulated commands don't whisper and bypass the queue (see CB_SendBotCommand).
+
+---@param key string  Bot name-key.
+local function CB_PumpQueue(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry or not entry.reqQueue or entry.wqBusy then return end
+    local send = table.remove(entry.reqQueue, 1)
+    if send then
+        entry.wqBusy    = true   -- held until the reply goes silent (tick below)
+        entry.wqTimeout = 0
+        send()
+    end
+end
+
+-- Enqueues a whisper request (`send` performs the actual raw whisper). Runs immediately when
+-- the bot is idle, else after the in-flight request's reply completes.
+---@param key  string  Bot name-key.
+---@param send fun()   Performs the raw whisper send.
+NS.CB_EnqueueRequest = function(key, send)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    entry.reqQueue = entry.reqQueue or {}
+    entry.reqQueue[#entry.reqQueue + 1] = send
+    CB_PumpQueue(key)
+end
+
 -- Tick inventory, money, quest, and spec-list timeouts for the whisper path
--- (silence = collection done)
+-- (silence = collection done), then drain the serial request queue as bots go idle.
 local invTickFrame = CreateFrame("Frame")
 invTickFrame:SetScript("OnUpdate", function(self, dt)
     for key, entry in pairs(CleanBot_PartyBots) do
@@ -639,12 +689,40 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                 entry.moneyTimeout   = 0
             end
         end
+
+        -- Deposit/withdraw ("bank <link>") completion: arms the no-banker popup for the op
+        -- window; cleared after silence (timer reset on each whisper from this bot, below).
+        if entry.awaitingBankOp then
+            entry.bankOpTimeout = (entry.bankOpTimeout or 0) + dt
+            if entry.bankOpTimeout >= NS.WHISPER_SILENCE then
+                entry.awaitingBankOp = false
+                entry.bankOpTimeout  = 0
+            end
+        end
+
+        -- Serial-queue completion: the in-flight request is done once the bot's reply stream
+        -- goes silent. Runs AFTER the typed finalizes above (which parse/render this reply),
+        -- so the next request is sent only once the current one is fully handled.
+        if entry.wqBusy then
+            entry.wqTimeout = (entry.wqTimeout or 0) + dt
+            if entry.wqTimeout >= NS.WHISPER_SILENCE then
+                entry.wqBusy = false
+            end
+        end
+
+        -- Drain the serial whisper queue as the bot returns to idle.
+        if entry.reqQueue and #entry.reqQueue > 0 and not entry.wqBusy then
+            CB_PumpQueue(key)
+        end
     end
 end)
 
+-- Performs the actual inventory fetch (sets the busy flag + sends). Runs from the serial
+-- queue so it never overlaps another reply stream. Bridge path is instant; whisper path
+-- streams the "items" reply, collected via invStaging and finalized on silence.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
-NS.CB_FetchInventory = function(key, botName)
+local function CB_DoFetchInventory(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
@@ -652,9 +730,10 @@ NS.CB_FetchInventory = function(key, botName)
     -- frame can display stale-but-correct data instead of going blank.
     entry.inventory = entry.inventory or { items = {} }
 
-    -- In-flight flag drives the loading overlay; set on BOTH paths so the
-    -- indicator is path-agnostic. Cleared in CB_RenderInventory when data lands
-    -- (or by the silence-timeout tick below as a safety net).
+    local useBridge = CB_EffectiveBridgeState() == "present"
+
+    -- In-flight flag drives the loading overlay AND the interaction lock; cleared in
+    -- CB_RenderInventory when data lands (or by the silence-timeout tick as a safety net).
     entry.awaitingInventory = true
     entry.invTimeout        = 0
     entry.curItemSection    = nil    -- reset header-routed staging for the new collection
@@ -663,27 +742,29 @@ NS.CB_FetchInventory = function(key, botName)
     -- Overlay policy: always for a first (empty) load, but for a refresh of an
     -- already-rendered grid only on the whisper path — bridge refreshes are
     -- near-instant, so a "Refreshing..." flash there is distracting noise.
-    -- CB_RenderInventory consults this flag when reflecting the in-flight state.
     local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
-    entry.invOverlay = (not (invF and invF.rendered))
-        or CB_EffectiveBridgeState() ~= "present"
+    entry.invOverlay = (not (invF and invF.rendered)) or not useBridge
     if invF and invF:IsShown() and entry.invOverlay and NS.CB_SetInventoryLoading then
         NS.CB_SetInventoryLoading(invF, true)
     end
 
-    if CB_EffectiveBridgeState() == "present" then
+    if useBridge then
         CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
     else
-        -- invStaging is the whisper-path marker: its presence tells the tick
-        -- below to run the whisper finalize (swap + stats fetch) rather than
-        -- just clearing the flag.
-        -- Collect fresh item replies into a staging table rather than appending
-        -- to entry.inventory.items directly. The live items are preserved for
-        -- the stale-display-during-flight render and only replaced (atomically)
-        -- once collection completes, so a refresh updates instead of duplicating.
-        entry.invStaging        = {}
-        NS.CB_SendBotCommand(botName, "items")
+        -- invStaging is the whisper-path marker: its presence tells the tick to run the
+        -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
+        -- swapped into entry.inventory.items atomically once collection completes.
+        -- Raw send: this already runs from the queue (CB_FetchInventory enqueued it).
+        entry.invStaging = {}
+        CB_SendBotCommandRaw(botName, "items")
     end
+end
+
+-- Enqueues an inventory fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper/bridge target).
+NS.CB_FetchInventory = function(key, botName)
+    NS.CB_EnqueueRequest(key, function() CB_DoFetchInventory(key, botName) end)
 end
 
 -- How long a fetched "stats" reply is considered fresh. Re-selecting a bot within this
@@ -713,11 +794,14 @@ NS.CB_FetchStats = function(entry, force)
     if not force and entry.statsAt and (GetTime() - entry.statsAt) < NS.STATS_TTL then
         return
     end
-    entry.awaitingMoney = true
-    entry.moneyTimeout  = 0
-    CB_MarkExpectReply(entry.name)
-    CB_TagSelfWhisper(entry.name, "stats")
-    SendChatMessage("stats", "WHISPER", nil, entry.name)
+    -- Enqueue so the "stats" reply doesn't overlap an items/bank stream.
+    NS.CB_EnqueueRequest(strlower(entry.name), function()
+        entry.awaitingMoney = true
+        entry.moneyTimeout  = 0
+        CB_MarkExpectReply(entry.name)
+        CB_TagSelfWhisper(entry.name, "stats")
+        SendChatMessage("stats", "WHISPER", nil, entry.name)
+    end)
 end
 
 -- Fetches a bot's bank contents. Whisper-only — bank has no bridge packet, and the
@@ -725,9 +809,11 @@ end
 -- staging branch in CHAT_MSG_WHISPER and finalized by the silence tick. The reply
 -- carries no money/slot summary, so there is no stats fetch. Needs a banker NPC near
 -- the bot; otherwise the bot replies "Cannot find banker nearby" (handled as a popup).
+-- Performs the actual bank fetch (sets the busy flag + sends "bank"). Runs from the serial
+-- queue so the multi-line reply never overlaps another stream.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper target).
-NS.CB_FetchBank = function(key, botName)
+local function CB_DoFetchBank(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
@@ -747,38 +833,38 @@ NS.CB_FetchBank = function(key, botName)
     end
 
     -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
+    -- Raw send: this already runs from the queue (CB_FetchBank enqueued it).
     entry.bankStaging = {}
-    NS.CB_SendBotCommand(botName, "bank")
+    CB_SendBotCommandRaw(botName, "bank")
+end
+
+-- Enqueues a bank fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper target).
+NS.CB_FetchBank = function(key, botName)
+    NS.CB_EnqueueRequest(key, function() CB_DoFetchBank(key, botName) end)
 end
 
 -- Debounced post-action reconcile. A burst of optimistic item moves (deposit/withdraw,
 -- use, sell) bumps a per-entry token; the actual refetch fires once the user stops (token
--- still current) and only for the currently-open frames. This avoids a slow whisper
--- round-trip per move while the eager optimistic display carries the UI in the meantime.
--- The bridge path is fast/reliable so it reconciles quickly; the whisper path waits longer
--- to let a burst settle.
-NS.RECONCILE_DELAY_BRIDGE  = 0.3
-NS.RECONCILE_DELAY_WHISPER = 1.2
+-- still current) and only for the currently-open frames. The eager optimistic display
+-- carries the UI in the meantime, and the refetch is enqueued so it is serialized behind
+-- the move commands (no interleaving). Coalescing avoids one slow round-trip per move.
+NS.RECONCILE_DELAY = 1.0
 ---@param key     string  Bot name-key.
 ---@param botName string  Bot's display name (fetch target).
 NS.CB_ScheduleReconcile = function(key, botName)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
     entry.reconcileGen = (entry.reconcileGen or 0) + 1
-    local gen   = entry.reconcileGen
-    -- The bank has no bridge packet (CB_FetchBank always whispers), so any reconcile that
-    -- will refetch the bank must use the slower whisper delay even when the bridge is
-    -- present — otherwise the 0.3s bridge delay fires the slow bank whisper mid-burst,
-    -- locking the bank grid and desyncing the user's in-progress deposits.
-    local bankF        = NS.botBankFrames and NS.botBankFrames[key]
-    local bankInvolved = bankF and bankF:IsShown()
-    local delay = (CB_EffectiveBridgeState() == "present" and not bankInvolved)
-        and NS.RECONCILE_DELAY_BRIDGE or NS.RECONCILE_DELAY_WHISPER
-    NS.CB_After(delay, function()
+    local gen = entry.reconcileGen
+    NS.CB_After(NS.RECONCILE_DELAY, function()
         local e = CleanBot_PartyBots[key]
         if not e or e.reconcileGen ~= gen then return end  -- superseded by a newer action
         local invF  = NS.botInventoryFrames and NS.botInventoryFrames[key]
         local bankF = NS.botBankFrames and NS.botBankFrames[key]
+        -- Enqueued (not sent inline): the queue runs these after the move commands' replies
+        -- complete, so the list query reflects the finished moves and never interleaves.
         if invF  and invF:IsShown()  then NS.CB_FetchInventory(key, botName) end
         if bankF and bankF:IsShown() then NS.CB_FetchBank(key, botName) end
     end)
@@ -808,17 +894,20 @@ NS.CB_FetchQuests = function(key, botName)
     if CB_EffectiveBridgeState() == "present" then
         CB_SendBridge("GET~QUESTS~ALL~" .. botName .. "~quests")
     else
-        -- Whisper path: collect the "quests" reply lines into staging, keyed by
-        -- section header (Incompleted/Completed). Swapped in on the summary line
-        -- or after 3s of silence (invTickFrame).
-        entry.awaitingQuests = true
-        entry.questTimeout   = 0
-        entry.questStatus    = "I"   -- current section; flipped by reply headers
-        entry.questStaging   = {}
-        -- "quests all" (not bare "quests", which only prints the summary) makes the
-        -- bot stream the per-quest lines + section headers we parse — mirrors the
-        -- bridge's GET~QUESTS~ALL mode.
-        NS.CB_SendBotCommand(botName, "quests all")
+        -- Whisper path: enqueue so the multi-line "quests all" reply is serialized; the typed
+        -- flags are set at SEND time (the queued function) so the silence timer starts then.
+        -- Lines are collected into staging keyed by section header (Incompleted/Completed) and
+        -- swapped in on the summary line or after silence (invTickFrame).
+        NS.CB_EnqueueRequest(key, function()
+            entry.awaitingQuests = true
+            entry.questTimeout   = 0
+            entry.questStatus    = "I"   -- current section; flipped by reply headers
+            entry.questStaging   = {}
+            -- "quests all" (not bare "quests", which only prints the summary) makes the
+            -- bot stream the per-quest lines + section headers we parse — mirrors the
+            -- bridge's GET~QUESTS~ALL mode.
+            NS.CB_SendBotCommandRaw(botName, "quests all")
+        end)
     end
 end
 
@@ -914,6 +1003,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
+        -- Keep the serial queue's silence timer (and a deposit/withdraw's op timer) alive while
+        -- this bot's reply streams in, so the queue waits for the full reply before advancing.
+        if entry and entry.wqBusy then entry.wqTimeout = 0 end
+        if entry and entry.awaitingBankOp then entry.bankOpTimeout = 0 end
+
         -- No-banker error: a bank list/deposit/withdraw issued with no banker NPC near
         -- the bot. The chat filter hides this line from chat, but this handler still
         -- receives it (filters are display-only). Surface it as an explanatory popup.
@@ -923,6 +1017,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             entry.bankStaging    = nil
             entry.bankTimeout    = 0
             entry.awaitingBankOp = false
+            entry.bankOpTimeout  = 0
             entry.curItemSection = nil
             local bf = NS.botBankFrames and NS.botBankFrames[key]
             if bf and NS.CB_SetInventoryLoading then NS.CB_SetInventoryLoading(bf, false) end
