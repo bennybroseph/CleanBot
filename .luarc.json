@@ -53,6 +53,7 @@
       "InviteUnit",
       "IsAddOnLoaded",
       "MAX_PLAYER_LEVEL",
+      "OKAY",
       "OpacitySliderFrame",
       "RAID_CLASS_COLORS",
       "SelectQuestLogEntry",

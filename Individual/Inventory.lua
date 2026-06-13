@@ -4,11 +4,58 @@
 local NS = CleanBotNS
 
 NS.botInventoryFrames = NS.botInventoryFrames or {}
+NS.botBankFrames      = NS.botBankFrames or {}
 
 local CELL_SIZE = 37
 local COLS      = 10
 local CELL_PAD  = 3
 local FOOTER_H  = 24
+
+-- The bank reply has no slot-count, so the bank grid would collapse to the item
+-- count alone. Reserve a minimum grid (a standard character bank = 28 slots) so a
+-- sparse/empty bank still renders a proper grid and the loading overlay has room.
+local BANK_MIN_CELLS = 28
+
+-- Per-kind config for the shared item grid. The inventory and bank frames share
+-- their build/render/patch/cell code; this table is the single branch point.
+-- `dataField` selects the entry sub-table (entry.inventory / entry.bank); the
+-- await/overlay/staging field names address the matching in-flight flags;
+-- `menu` is filled in after the menu builders are defined below.
+---@class CB_GridKind
+---@field frames       table   The NS.botXFrames registry for this kind.
+---@field dataField    string  entry sub-table holding { items, ... }.
+---@field awaitField   string  entry boolean: a fetch is in flight.
+---@field overlayField string  entry boolean: show the loading overlay.
+---@field framePrefix  string  Global frame-name prefix.
+---@field cellPrefix   string  Cell global-name prefix.
+---@field titleNoun    string  Title-bar noun ("Inventory" / "Bank").
+---@field showFooter   boolean Slot/money footer (inventory only).
+---@field menu         fun(cell:table, key:string)  Right-click menu builder.
+local KINDS = {
+    inventory = {
+        frames = NS.botInventoryFrames, dataField = "inventory",
+        awaitField = "awaitingInventory", overlayField = "invOverlay", stagingField = "invStaging",
+        framePrefix = "CleanBotInventory_", cellPrefix = "CleanBotInvCell_",
+        titleNoun = "Inventory", showFooter = true, minCells = 0,
+    },
+    bank = {
+        frames = NS.botBankFrames, dataField = "bank",
+        awaitField = "awaitingBank", overlayField = "bankOverlay", stagingField = "bankStaging",
+        framePrefix = "CleanBotBank_", cellPrefix = "CleanBotBankCell_",
+        titleNoun = "Bank", showFooter = false, minCells = BANK_MIN_CELLS,
+    },
+}
+
+-- A grid is "locked" while its whisper list-fetch is in flight — its staging table is set.
+-- Cell drag/menu actions are blocked then so the user can't act on an in-flight list. The
+-- bridge path never sets staging, so it is never locked (and the close button always works).
+---@param kind string  "inventory" or "bank".
+---@param key  string  Bot name-key.
+---@return boolean      Whether the grid is mid-refresh from a whisper.
+local function CB_GridLocked(kind, key)
+    local entry = CleanBot_PartyBots[key]
+    return entry ~= nil and entry[KINDS[kind].stagingField] ~= nil
+end
 
 -- These replace NS.PADDING.frame.* entirely on the Blizz path — the art has
 -- its own fixed spacing that doesn't respond to the user-tunable padding values.
@@ -101,6 +148,7 @@ local function CB_ShowInvMenu(cell, key)
     equipLoc = equipLoc or ""
     local isEquipment  = equipLoc ~= ""
     local isConsumable = itemType == "Consumable"
+    local isQuest      = itemType == "Quest"
 
     UIDropDownMenu_Initialize(invMenu, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -133,10 +181,31 @@ local function CB_ShowInvMenu(cell, key)
                     NS.CB_ClearQualityBorder(cell)
                     NS.CB_SetRarityOverlay(cell, nil)
                 end
-                NS.CB_After(1.5, function() NS.CB_FetchInventory(key, entry.name) end)
+                NS.CB_ScheduleReconcile(key, entry.name)
             end
             UIDropDownMenu_AddButton(info)
         end
+
+        -- Trade / Sell apply to everything except quest items (which can't be traded
+        -- or vendored). Triggers are "t" and "s" — not "trade"/"sell" (see
+        -- docs/playerbot-commands.md, "Chat commands are TRIGGERS, not action names").
+        if not isQuest then
+            local function addItemCmd(label, trigger, refetch)
+                info.text = label
+                info.func = function()
+                    local entry = CleanBot_PartyBots[key]
+                    if not entry then return end
+                    NS.CB_SendBotCommand(entry.name, trigger .. " " .. NS.CB_CleanItemLink(cell.itemLink))
+                    if refetch then NS.CB_ScheduleReconcile(key, entry.name) end
+                end
+                UIDropDownMenu_AddButton(info)
+            end
+            addItemCmd("Trade", "t", false)
+            addItemCmd("Sell",  "s", true)
+        end
+
+        -- Deposit is on plain right-click while the bank is open (see the cell OnClick),
+        -- so it is intentionally not a menu entry here.
 
         NS.CB_AddWowheadMenuButton(info, cell.itemLink)
 
@@ -146,6 +215,117 @@ local function CB_ShowInvMenu(cell, key)
     end, "MENU")
     ToggleDropDownMenu(1, nil, invMenu, cell, 0, 0)
 end
+
+-- ── Bank cell context menu (shift+right-click; plain right-click withdraws) ──
+-- Bank items can't be equipped/used/traded/sold, and Withdraw is plain right-click,
+-- so the menu is just the Wowhead lookup and Cancel.
+local bankMenu = CreateFrame("Frame", "CleanBotBankMenu", UIParent, "UIDropDownMenuTemplate")
+
+---@param cell table   The bank cell button the context menu opens from.
+---@param key  string  Bot name-key the cell belongs to.
+local function CB_ShowBankMenu(cell, key)
+    if not cell.itemLink then return end
+    UIDropDownMenu_Initialize(bankMenu, function()
+        local info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+
+        local function addBtn(label, fn)
+            info.text = label
+            info.func = fn
+            UIDropDownMenu_AddButton(info)
+        end
+
+        -- Withdraw is on plain right-click (see the cell OnClick), so it is not a menu entry.
+        NS.CB_AddWowheadMenuButton(info, cell.itemLink)
+
+        addBtn("Cancel", function() CloseDropDownMenus() end)
+    end, "MENU")
+    ToggleDropDownMenu(1, nil, bankMenu, cell, 0, 0)
+end
+
+-- Resolve each kind's right-click menu now that both builders exist.
+KINDS.inventory.menu = CB_ShowInvMenu
+KINDS.bank.menu      = CB_ShowBankMenu
+
+-- Optimistically moves an item from a grid cell to the first empty cell of the
+-- destination frame, mirroring the server-side deposit/withdraw before the refetch
+-- confirms (same eager-update spirit as the right-click "Use"). srcCell is blanked
+-- and the item appears in destFrame immediately. No-op (no visual change) when the
+-- destination is full or hidden, so the refetch is left to reflect reality.
+---@param srcCell   table   The cell being moved out of.
+---@param destFrame table?  The grid frame to move the item into.
+---@param destCell  table?  The exact cell to drop into (a drag target); used when empty,
+---                         otherwise the first empty cell is chosen (e.g. menu commands).
+local function CB_OptimisticMove(srcCell, destFrame, destCell)
+    if not (srcCell and srcCell.itemLink and destFrame and destFrame.cells) then return end
+
+    local dest
+    if destCell and destCell:IsShown() and not destCell.itemLink then
+        dest = destCell  -- drop into the slot the user dragged to
+    else
+        for _, c in ipairs(destFrame.cells) do
+            if c:IsShown() and not c.itemLink then dest = c; break end
+        end
+    end
+    if not dest then return end  -- destination full/hidden; let the refetch reflect reality
+
+    local link  = srcCell.itemLink
+    local count = srcCell.countText:IsShown() and srcCell.countText:GetText() or nil
+
+    -- Blank the source cell in place.
+    srcCell.icon:Hide()
+    srcCell.itemLink = nil
+    srcCell.countText:Hide()
+    NS.CB_ApplyItemVisuals(srcCell, nil)
+
+    -- Fill the destination cell.
+    dest.icon:SetTexture(GetItemIcon(strmatch(link, "item:(%d+)") or 0))
+    dest.icon:Show()
+    dest.itemLink = link
+    NS.CB_ApplyItemVisuals(dest, link)
+    if count then dest.countText:SetText(count); dest.countText:Show()
+    else dest.countText:Hide() end
+end
+
+-- ── Deposit / withdraw between a bot's bags and bank ─────────────────────
+-- Both directions share the "bank" trigger ("bank <link>" deposits from bags,
+-- "bank -<link>" withdraws); both need a banker NPC near the bot (handled by the
+-- no-banker popup in Bridge.lua). awaitingBankOp arms that popup for the op window.
+-- The move is reflected eagerly (srcCell → other frame) and then both frames
+-- re-fetch after a short delay so the optimistic state is confirmed/corrected.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (command target).
+---@param link    string  Item link to move.
+---@param dir     string  "deposit" (bags→bank) or "withdraw" (bank→bags).
+---@param srcCell  table?  The cell the item is moving out of (for the eager update).
+---@param destCell table?  The exact destination cell (a drag target), if any.
+NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
+    local entry = CleanBot_PartyBots[key]
+    if entry then entry.awaitingBankOp = true end
+    local prefix = (dir == "withdraw") and "bank -" or "bank "
+    NS.CB_SendBotCommand(botName, prefix .. NS.CB_CleanItemLink(link))
+
+    -- Eager move: withdraw lands in the inventory grid, deposit in the bank grid.
+    local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
+    CB_OptimisticMove(srcCell, destFrame, destCell)
+
+    -- Keep the no-banker watch armed briefly to catch this op's reply, then reconcile
+    -- both grids on a debounce so a burst of moves collapses into a single refetch.
+    NS.CB_After(1.5, function()
+        if CleanBot_PartyBots[key] then CleanBot_PartyBots[key].awaitingBankOp = false end
+    end)
+    NS.CB_ScheduleReconcile(key, botName)
+end
+
+-- Shown when a bank list/deposit/withdraw runs without a banker NPC near the bot
+-- (raised from the no-banker whisper handler in Bridge.lua). %s = bot name.
+StaticPopupDialogs["CLEANBOT_NO_BANKER"] = {
+    text         = "%s has no banker nearby. Move the bot next to a banker NPC, then try again.",
+    button1      = OKAY,
+    timeout      = 0,
+    whileDead    = true,
+    hideOnEscape = true,
+}
 
 -- ── Equip slot compatibility ─────────────────────────────────────────────
 local EQUIP_LOC_SLOTS = {
@@ -207,8 +387,10 @@ end
 --- Ends an inventory item drag, clearing slot tints and releasing the capture frame.
 local function CB_StopDrag()
     if not NS.dragging then return end
-    if NS.dragging.hoverBtn       then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
-    if NS.dragging.hoverInvCell   then NS.dragging.hoverInvCell:UnlockHighlight() end
+    if NS.dragging.hoverBtn         then NS.dragging.hoverBtn:UnlockHighlight(); CB_ResetSlotTint(NS.dragging.hoverBtn) end
+    if NS.dragging.hoverInvCell     then NS.dragging.hoverInvCell:UnlockHighlight() end
+    if NS.dragging.hoverInvGridCell  then NS.dragging.hoverInvGridCell:UnlockHighlight() end
+    if NS.dragging.hoverBankGridCell then NS.dragging.hoverBankGridCell:UnlockHighlight() end
     if NS.dragging.hoverTradeSlot and NS.tradeSlotOverlays then
         local ov = NS.tradeSlotOverlays[NS.dragging.hoverTradeSlot]
         if ov then ov:UnlockHighlight() end
@@ -218,6 +400,26 @@ local function CB_StopDrag()
     local invDropCell  = NS.dragging.invDropCell
     local dropTradeSlot = NS.dragging.dropTradeSlot
     local src          = NS.dragging.sourceCell
+
+    -- ── Cross-frame bank moves (server-authoritative; both frames re-fetch) ──
+    -- A reconcile can lock either grid mid-drag; cancel the move if so (the dropped item
+    -- snaps back and the in-flight refresh wins) rather than acting on stale state.
+    local bankBusy = CB_GridLocked("inventory", NS.dragging.key) or CB_GridLocked("bank", NS.dragging.key)
+    if NS.dragging.sourceKind == "bank" then
+        -- Bank item dropped onto the inventory grid → withdraw (into the dropped-on slot).
+        if NS.dragging.dropInvGridCell and not bankBusy then
+            local entry = CleanBot_PartyBots[NS.dragging.key]
+            if entry then NS.CB_BankMove(NS.dragging.key, entry.name, NS.dragging.link, "withdraw", src, NS.dragging.dropInvGridCell) end
+        end
+        if src then src.icon:SetDesaturated(false) end
+        NS.dragging = nil; NS.CB_EndCapture(); ResetCursor(); return
+    elseif NS.dragging.dropBankGridCell and not bankBusy then
+        -- Inventory item dropped onto the bank grid → deposit (into the dropped-on slot).
+        local entry = CleanBot_PartyBots[NS.dragging.key]
+        if entry then NS.CB_BankMove(NS.dragging.key, entry.name, NS.dragging.link, "deposit", src, NS.dragging.dropBankGridCell) end
+        if src then src.icon:SetDesaturated(false) end
+        NS.dragging = nil; NS.CB_EndCapture(); ResetCursor(); return
+    end
 
     if dropBtn then
         -- ── Drop onto equip slot → equip item ─────────────────
@@ -272,22 +474,8 @@ local function CB_StopDrag()
         else invDropCell.countText:Hide() end
 
         -- Sync quality borders to match swapped item links.
-        if src.itemLink then
-            local _, _, q = GetItemInfo(src.itemLink)
-            if q then NS.CB_SetQualityBorder(src, q) else NS.CB_ClearQualityBorder(src) end
-            NS.CB_SetRarityOverlay(src, q)
-        else
-            NS.CB_ClearQualityBorder(src)
-            NS.CB_SetRarityOverlay(src, nil)
-        end
-        if invDropCell.itemLink then
-            local _, _, q = GetItemInfo(invDropCell.itemLink)
-            if q then NS.CB_SetQualityBorder(invDropCell, q) else NS.CB_ClearQualityBorder(invDropCell) end
-            NS.CB_SetRarityOverlay(invDropCell, q)
-        else
-            NS.CB_ClearQualityBorder(invDropCell)
-            NS.CB_SetRarityOverlay(invDropCell, nil)
-        end
+        NS.CB_ApplyItemVisuals(src, src.itemLink)
+        NS.CB_ApplyItemVisuals(invDropCell, invDropCell.itemLink)
 
         src.icon:SetDesaturated(false)
     elseif dropTradeSlot then
@@ -310,15 +498,61 @@ end
 NS.CB_StopDrag = CB_StopDrag
 
 -- ── Drag tracking ────────────────────────────────────────────────────────
--- Runs while the shared capture frame (NS.CB_BeginCapture) is active during
--- an item drag: highlights whichever equip slot or empty inventory cell the
--- cursor is over and records it as the drop target.
---- OnUpdate handler during an item drag: hit-tests slots/trade overlays and tints them.
+-- Hit-tests the cells of one grid frame against the cursor, returning the cell
+-- under it (excluding `exclude`, e.g. the drag's own source cell). Used for the
+-- inventory-swap, withdraw, and deposit drop targets.
+---@param framesTbl table   NS.botInventoryFrames or NS.botBankFrames.
+---@param key       string  Bot name-key.
+---@param mx        number  Cursor X (UI-scaled).
+---@param my        number  Cursor Y (UI-scaled).
+---@param exclude   table?  A cell to ignore (the source cell).
+---@return table|nil        The hovered cell, or nil.
+local function CB_HitTestGrid(framesTbl, key, mx, my, exclude)
+    local f = framesTbl and framesTbl[key]
+    if not (f and f:IsShown()) then return nil end
+    for _, cell in ipairs(f.cells) do
+        if cell:IsShown() and cell ~= exclude then
+            local l, r, b, t = cell:GetLeft(), cell:GetRight(), cell:GetBottom(), cell:GetTop()
+            if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
+                return cell
+            end
+        end
+    end
+    return nil
+end
+
+-- Swaps the LockHighlight between the previously-hovered and newly-hovered cell,
+-- writing the new cell back to NS.dragging[field].
+---@param field string  The NS.dragging key tracking this hover target.
+---@param cell  table?  The newly-hovered cell (or nil).
+local function CB_UpdateHover(field, cell)
+    if cell ~= NS.dragging[field] then
+        if NS.dragging[field] then NS.dragging[field]:UnlockHighlight() end
+        if cell then cell:LockHighlight() end
+        NS.dragging[field] = cell
+    end
+end
+
+-- Runs while the shared capture frame (NS.CB_BeginCapture) is active during an
+-- item drag: highlights the equip slot / inventory cell / trade slot / bank cell
+-- the cursor is over and records it as the drop target. Routing depends on where
+-- the drag started (NS.dragging.sourceKind): a bank-sourced drag can only land on
+-- the inventory grid (withdraw); an inventory-sourced drag keeps the equip/swap/
+-- trade targets and can additionally land on the bank grid (deposit).
+--- OnUpdate handler during an item drag: hit-tests targets and tints them.
 local function CB_DragOnUpdate()
     if not NS.dragging then return end
     local scale = UIParent:GetEffectiveScale()
     local mx, my = GetCursorPosition()
     mx, my = mx / scale, my / scale
+
+    -- ── Bank-sourced drag: inventory grid is the only valid target (withdraw) ──
+    if NS.dragging.sourceKind == "bank" then
+        local cell = CB_HitTestGrid(NS.botInventoryFrames, NS.dragging.key, mx, my, nil)
+        CB_UpdateHover("hoverInvGridCell", cell)
+        NS.dragging.dropInvGridCell = cell
+        return
+    end
 
     -- ── Equip slot hit-test ───────────────────────────────────
     local slots    = NS.botEquipSlots and NS.botEquipSlots[NS.dragging.key]
@@ -353,27 +587,12 @@ local function CB_DragOnUpdate()
     -- Only allow drop on a compatible slot
     NS.dragging.dropBtn = (foundBtn and NS.dragging.hoverBtnValid) and foundBtn or nil
 
-    -- ── Empty inventory cell hit-test (only when not over an equip slot) ──
+    -- ── Inventory cell hit-test (swap; only when not over an equip slot) ──
     local foundCell = nil
     if not foundBtn then
-        local invFrame = NS.botInventoryFrames and NS.botInventoryFrames[NS.dragging.key]
-        if invFrame and invFrame:IsShown() then
-            for _, cell in ipairs(invFrame.cells) do
-                if cell:IsShown() and cell ~= NS.dragging.sourceCell then
-                    local l, r, b, t = cell:GetLeft(), cell:GetRight(), cell:GetBottom(), cell:GetTop()
-                    if l and r and b and t and mx >= l and mx <= r and my >= b and my <= t then
-                        foundCell = cell; break
-                    end
-                end
-            end
-        end
+        foundCell = CB_HitTestGrid(NS.botInventoryFrames, NS.dragging.key, mx, my, NS.dragging.sourceCell)
     end
-
-    if foundCell ~= NS.dragging.hoverInvCell then
-        if NS.dragging.hoverInvCell then NS.dragging.hoverInvCell:UnlockHighlight() end
-        if foundCell then foundCell:LockHighlight() end
-        NS.dragging.hoverInvCell = foundCell
-    end
+    CB_UpdateHover("hoverInvCell", foundCell)
     NS.dragging.invDropCell = foundCell
 
     -- ── Trade slot hit-test (bot's side; only when trading this bot) ─────────
@@ -408,6 +627,14 @@ local function CB_DragOnUpdate()
         NS.dragging.hoverTradeSlot = foundTradeSlot
     end
     NS.dragging.dropTradeSlot = foundTradeSlot
+
+    -- ── Bank grid hit-test (deposit; only when over nothing else) ──
+    local foundBankCell = nil
+    if not foundBtn and not foundCell and not foundTradeSlot then
+        foundBankCell = CB_HitTestGrid(NS.botBankFrames, NS.dragging.key, mx, my, nil)
+    end
+    CB_UpdateHover("hoverBankGridCell", foundBankCell)
+    NS.dragging.dropBankGridCell = foundBankCell
 end
 
 -- Begins an item drag: shows the shared capture frame wired to track the
@@ -419,17 +646,20 @@ local function CB_BeginItemDrag()
     end)
 end
 
--- ── Build or fetch the inventory frame for one bot ───────────────────────
+-- ── Build or fetch the item-grid frame for one bot (inventory or bank) ────
+---@param kind    string  "inventory" or "bank" (selects the KINDS config).
 ---@param key     string  Bot name-key.
 ---@param botName string  Bot's display name (used in the title bar).
----@return table           The bot's inventory frame, created lazily on first call.
-NS.CB_GetInventoryFrame = function(key, botName)
-    if NS.botInventoryFrames[key] then return NS.botInventoryFrames[key] end
+---@return table           The bot's grid frame, created lazily on first call.
+local function CB_GetGridFrame(kind, key, botName)
+    local cfg = KINDS[kind]
+    if cfg.frames[key] then return cfg.frames[key] end
 
     local padL   = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_INV_PAD.left
     local padR   = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_INV_PAD.right
     local frameW = padL + padR + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
-    local f = CreateFrame("Frame", "CleanBotInventory_" .. key, UIParent)
+    local f = CreateFrame("Frame", cfg.framePrefix .. key, UIParent)
+    f.kind = kind
     NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
     f:SetHeight(NS.FRAME_HEIGHT)
@@ -446,7 +676,7 @@ NS.CB_GetInventoryFrame = function(key, botName)
         NS.CB_ApplyContainerFrameSkin(f)
     end
     local class = (CleanBot_PartyBots[key] and CleanBot_PartyBots[key].class) or "WARRIOR"
-    NS.CB_ApplyInventoryTitleBar(f, botName, class)
+    NS.CB_ApplyInventoryTitleBar(f, botName, class, cfg.titleNoun)
     f:Hide()
 
     -- Close button
@@ -482,8 +712,9 @@ NS.CB_GetInventoryFrame = function(key, botName)
     end
 
     -- Sort (rightmost): re-sorts the displayed grid via a forced full render.
-    local sortBtn = makeActionButton("CleanBotInvSortBtn_" .. key, "Interface\\Icons\\Spell_Frost_Stun", "Sort", function()
-        NS.CB_RenderInventory(key, true)
+    -- Both inventory and bank get a Sort button.
+    local sortBtn = makeActionButton(cfg.framePrefix .. "SortBtn_" .. key, "Interface\\Icons\\Spell_Frost_Stun", "Sort", function()
+        if kind == "bank" then NS.CB_RenderBank(key, true) else NS.CB_RenderInventory(key, true) end
     end)
     -- Right edge flush to the close button's left edge; the button sits just ABOVE the frame
     -- with its bottom edge flush to the frame's top edge (no padding). The Y nudge cancels the
@@ -491,57 +722,73 @@ NS.CB_GetInventoryFrame = function(key, botName)
     local closeYoff = NS.ElvUI_S and 2 or BLIZZ_CLOSE_Y
     sortBtn:SetPoint("BOTTOMRIGHT", closeBtn, "TOPLEFT", 0, -closeYoff)
 
-    -- Sell Trash: vendor-sell the bot's grey items, then re-fetch. The command is "s gray" —
-    -- the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands are
-    -- TRIGGERS, not action names").
-    local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
-        "Sell All Grey Items (Requires a Nearby Vendor)", function()
-            local e       = CleanBot_PartyBots[key]
-            local bn      = (e and e.name) or key
-            NS.CB_SendBotCommand(bn, "s gray")
-            NS.CB_After(1.5, function() NS.CB_FetchInventory(key, bn) end)
-        end)
-    sellBtn:SetPoint("RIGHT", sortBtn, "LEFT", 0, 0)
+    -- Refresh (left of Sort): force an immediate server re-fetch — the escape hatch when a
+    -- whisper reply was lost and the list looks stale. Both kinds get it.
+    local refreshBtn = makeActionButton(cfg.framePrefix .. "RefreshBtn_" .. key, "Interface\\Icons\\Ability_Hunter_Readiness", "Refresh", function()
+        if kind == "bank" then NS.CB_FetchBank(key, botName) else NS.CB_FetchInventory(key, botName) end
+    end)
+    refreshBtn:SetPoint("RIGHT", sortBtn, "LEFT", 0, 0)
 
-    -- Trade: open a trade window with the bot. InitiateTrade accepts a nearby party/raid
-    -- member's name; TRADE_SHOW then drives the rest of the flow in Trade.lua.
-    local tradeBtn = makeActionButton("CleanBotInvTradeBtn_" .. key, "Interface\\Icons\\INV_Misc_GroupLooking",
-        "Trade", function()
-            local e  = CleanBot_PartyBots[key]
-            local bn = (e and e.name) or botName
-            InitiateTrade(bn)
-        end)
-    tradeBtn:SetPoint("RIGHT", sellBtn, "LEFT", 0, 0)
+    -- Sell / Trade / Bank are inventory-only (the bank frame can't sell/trade/re-open itself).
+    if kind == "inventory" then
+        -- Sell Trash: vendor-sell the bot's grey items, then re-fetch. The command is "s gray" —
+        -- the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands are
+        -- TRIGGERS, not action names").
+        local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
+            "Sell All Grey Items (Requires a Nearby Vendor)", function()
+                local e       = CleanBot_PartyBots[key]
+                local bn      = (e and e.name) or key
+                NS.CB_SendBotCommand(bn, "s gray")
+                NS.CB_ScheduleReconcile(key, bn)
+            end)
+        sellBtn:SetPoint("RIGHT", refreshBtn, "LEFT", 0, 0)
 
-    -- Bank: placeholder for the bot's bank view (not yet wired up).
-    local bankBtn = makeActionButton("CleanBotInvBankBtn_" .. key, "Interface\\Icons\\INV_Box_01",
-        "Bank (coming soon)", function() end)
-    bankBtn:SetPoint("RIGHT", tradeBtn, "LEFT", 0, 0)
+        -- Trade: open a trade window with the bot. InitiateTrade accepts a nearby party/raid
+        -- member's name; TRADE_SHOW then drives the rest of the flow in Trade.lua.
+        local tradeBtn = makeActionButton("CleanBotInvTradeBtn_" .. key, "Interface\\Icons\\INV_Misc_GroupLooking",
+            "Trade", function()
+                local e  = CleanBot_PartyBots[key]
+                local bn = (e and e.name) or botName
+                InitiateTrade(bn)
+            end)
+        tradeBtn:SetPoint("RIGHT", sellBtn, "LEFT", 0, 0)
 
-    local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
-    local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X
-    local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_LABEL_X
+        -- Bank: toggle the bot's bank frame (anchored to the left of this inventory frame).
+        local bankBtn = makeActionButton("CleanBotInvBankBtn_" .. key, "Interface\\Icons\\INV_Box_01",
+            "Bank", function() NS.CB_ToggleBank(key, botName) end)
+        bankBtn:SetPoint("RIGHT", tradeBtn, "LEFT", 0, 0)
+    end
 
-    -- Slot counter label (bridge path only)
-    local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    slotLabel:SetTextColor(1, 1, 1)
-    slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FOOTER_LEFT_X, FOOTER_Y)
-    slotLabel:Hide()
-    f.slotLabel = slotLabel
+    -- Footer (slot count + money) is inventory-only — the bank reply carries neither.
+    if cfg.showFooter then
+        local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
+        local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X
+        local FOOTER_RIGHT_X = NS.ElvUI_S and NS.PADDING.frame.right or BLIZZ_LABEL_X
 
-    -- Money label
-    local moneyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    moneyLabel:SetTextColor(1, 1, 1)
-    moneyLabel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -FOOTER_RIGHT_X, FOOTER_Y)
-    moneyLabel:Hide()
-    f.moneyLabel = moneyLabel
+        -- Slot counter label (bridge path only)
+        local slotLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        slotLabel:SetTextColor(1, 1, 1)
+        slotLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FOOTER_LEFT_X, FOOTER_Y)
+        slotLabel:Hide()
+        f.slotLabel = slotLabel
+
+        -- Money label
+        local moneyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        moneyLabel:SetTextColor(1, 1, 1)
+        moneyLabel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -FOOTER_RIGHT_X, FOOTER_Y)
+        moneyLabel:Hide()
+        f.moneyLabel = moneyLabel
+    end
 
     -- Container for item cells (re-used across renders)
     f.cells = {}
 
-    NS.botInventoryFrames[key] = f
+    cfg.frames[key] = f
     return f
 end
+
+NS.CB_GetInventoryFrame = function(key, botName) return CB_GetGridFrame("inventory", key, botName) end
+NS.CB_GetBankFrame      = function(key, botName) return CB_GetGridFrame("bank",      key, botName) end
 
 -- ── Inventory sort ───────────────────────────────────────────────────────
 -- Equipment (by iLevel desc → quality desc → slot) → Consumables → Other → Grey
@@ -684,9 +931,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.icon:SetTexture(GetItemIcon(strmatch(item.link, "item:(%d+)") or 0))
             cell.icon:Show()
             cell.itemLink = item.link
-            local _, _, quality = GetItemInfo(item.link)
-            if quality then NS.CB_SetQualityBorder(cell, quality) end
-            NS.CB_SetRarityOverlay(cell, quality)
+            NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -696,19 +941,21 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
         end
     end
 
-    -- Update footer labels
-    if bagTotal then
-        f.slotLabel:SetText((bagUsed or #rawItems) .. "/" .. bagTotal)
-        f.slotLabel:Show()
-    else
-        f.slotLabel:Hide()
-    end
-    local money = entry.money
-    if money then
-        f.moneyLabel:SetText(FormatMoney(money.gold or 0, money.silver or 0, money.copper or 0))
-        f.moneyLabel:Show()
-    else
-        f.moneyLabel:Hide()
+    -- Update footer labels (inventory only — bank frame has no footer)
+    if f.slotLabel then
+        if bagTotal then
+            f.slotLabel:SetText((bagUsed or #rawItems) .. "/" .. bagTotal)
+            f.slotLabel:Show()
+        else
+            f.slotLabel:Hide()
+        end
+        local money = entry.money
+        if money then
+            f.moneyLabel:SetText(FormatMoney(money.gold or 0, money.silver or 0, money.copper or 0))
+            f.moneyLabel:Show()
+        else
+            f.moneyLabel:Hide()
+        end
     end
 end
 
@@ -754,28 +1001,31 @@ NS.CB_SetInventoryLoading = function(f, on)
     end
 end
 
--- ── Render / re-render the grid from entry.inventory ─────────────────────
----@param key       string   Bot name-key whose inventory frame should be (re)rendered.
+-- ── Render / re-render an item grid from its entry sub-table ─────────────
+---@param kind      string   "inventory" or "bank" (selects the KINDS config).
+---@param key       string   Bot name-key whose grid frame should be (re)rendered.
 ---@param forceFull  boolean? Force a full re-sort + redraw (e.g. the Sort button) instead of
 ---                           the order-preserving patch path.
-NS.CB_RenderInventory = function(key, forceFull)
+local function CB_RenderGrid(kind, key, forceFull)
+    local cfg   = KINDS[kind]
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
     -- Reflect (don't clear) the in-flight flag: the overlay shows while a fetch
     -- is pending and hides once it lands. This is deliberately not a clear point,
-    -- so CB_ShowInventory rendering stale data mid-fetch keeps the overlay up.
-    -- The flag is cleared at true data-landing points (whisper tick finalize,
-    -- bridge INV_END, money reply). entry.invOverlay (set by CB_FetchInventory)
-    -- suppresses the overlay for bridge-path refreshes of already-rendered grids.
-    local lf = NS.botInventoryFrames[key]
+    -- so showing stale data mid-fetch keeps the overlay up. The flag is cleared at
+    -- true data-landing points (whisper tick finalize, bridge INV_END, money reply).
+    -- The overlay field (set by the fetch) suppresses the overlay for bridge-path
+    -- refreshes of already-rendered grids.
+    local lf = cfg.frames[key]
     if lf then
         NS.CB_SetInventoryLoading(lf,
-            (entry.awaitingInventory and entry.invOverlay) and true or false)
+            (entry[cfg.awaitField] and entry[cfg.overlayField]) and true or false)
     end
 
     local forceFullRender = forceFull or false
-    local validation = entry.pendingValidation
+    -- pendingValidation is the equip optimistic-update check — inventory only.
+    local validation = (kind == "inventory") and entry.pendingValidation or nil
     if validation then
         entry.pendingValidation = nil
         local expectId = strmatch(validation.link, "item:(%d+)")
@@ -793,14 +1043,16 @@ NS.CB_RenderInventory = function(key, forceFull)
         -- equipping over an existing item) are reflected visually.
     end
 
-    local inv = entry.inventory or { items = {} }
-    local f   = NS.botInventoryFrames[key]
+    local inv = entry[cfg.dataField] or { items = {} }
+    local f   = cfg.frames[key]
     if not f then return end
 
     local rawItems  = inv.items    or {}
     local bagTotal  = inv.bagTotal
     local bagUsed   = inv.bagUsed
     local cellCount = bagTotal or #rawItems
+    -- Reserve a minimum grid (bank only) so a sparse/empty grid still renders rows.
+    if cfg.minCells and cellCount < cfg.minCells then cellCount = cfg.minCells end
 
     -- ── Patch path: frame already rendered with the same cell count ───────
     if not forceFullRender and f.rendered and #f.cells == cellCount then
@@ -816,6 +1068,9 @@ NS.CB_RenderInventory = function(key, forceFull)
     local padLeft   = NS.ElvUI_S and NS.PADDING.frame.left   or BLIZZ_INV_PAD.left
     local rows   = math.max(1, math.ceil(cellCount / COLS))
     local gridH  = rows * CELL_SIZE + (rows - 1) * CELL_PAD
+    -- FOOTER_H is kept for both kinds: on the Blizz path it is the bottom-border art
+    -- region (the frame height must be 76 + rows*40 for the border to align with the
+    -- last row), not just space for the inventory's slot/money labels.
     local frameH = padTop + gridH + padBottom + FOOTER_H
     f:SetHeight(frameH)
     if not NS.ElvUI_S then NS.CB_UpdateContainerTiles(f, rows) end
@@ -827,7 +1082,7 @@ NS.CB_RenderInventory = function(key, forceFull)
     for i = 1, cellCount do
         local cell = f.cells[i]
         if not cell then
-            local cellName = "CleanBotInvCell_" .. key .. "_" .. i
+            local cellName = cfg.cellPrefix .. key .. "_" .. i
             cell = CreateFrame("Button", cellName, f, "ItemButtonTemplate")
             cell:SetSize(CELL_SIZE, CELL_SIZE)
 
@@ -854,7 +1109,26 @@ NS.CB_RenderInventory = function(key, forceFull)
             -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
             cell:SetScript("OnClick", function(self, btn)
                 if btn == "RightButton" then
-                    CB_ShowInvMenu(self, key)
+                    if not self.itemLink then return end
+                    -- With the bank open we mirror the default WoW bank: plain right-click
+                    -- moves the item (bank cell → withdraw, inventory cell → deposit), and
+                    -- the context menu is on shift+right-click. With the bank closed,
+                    -- plain right-click opens the menu as usual.
+                    local bankF    = NS.botBankFrames[key]
+                    local bankOpen = bankF and bankF:IsShown()
+                    local canMove  = (kind == "bank") or (kind == "inventory" and bankOpen)
+                    if canMove and not IsShiftKeyDown() then
+                        -- A move touches both grids — block while either is mid-refresh.
+                        if CB_GridLocked("inventory", key) or CB_GridLocked("bank", key) then return end
+                        local entry = CleanBot_PartyBots[key]
+                        if entry then
+                            local dir = (kind == "bank") and "withdraw" or "deposit"
+                            NS.CB_BankMove(key, entry.name, self.itemLink, dir, self)
+                        end
+                    else
+                        if CB_GridLocked(kind, key) then return end  -- mid whisper refresh
+                        cfg.menu(self, key)
+                    end
                 elseif btn == "LeftButton" and IsShiftKeyDown() and self.itemLink then
                     ChatEdit_InsertLink(NS.CB_CleanItemLink(self.itemLink))
                 end
@@ -862,9 +1136,10 @@ NS.CB_RenderInventory = function(key, forceFull)
 
             cell:SetScript("OnMouseDown", function(self, btn)
                 if btn ~= "LeftButton" or not self.itemLink or IsShiftKeyDown() then return end
+                if CB_GridLocked(kind, key) then return end  -- mid whisper refresh
                 local itemId   = strmatch(self.itemLink, "item:(%d+)")
                 local iconPath = GetItemIcon(tonumber(itemId) or 0)
-                NS.dragging = { link = self.itemLink, key = key, hoverBtn = nil, sourceCell = self }
+                NS.dragging = { link = self.itemLink, key = key, hoverBtn = nil, sourceCell = self, sourceKind = kind }
                 self.icon:SetDesaturated(true)
                 GameTooltip:Hide()
                 SetCursor(iconPath)
@@ -901,9 +1176,7 @@ NS.CB_RenderInventory = function(key, forceFull)
             cell.icon:SetTexture(tex)
             cell.icon:Show()
             cell.itemLink = item.link
-            local _, _, quality = GetItemInfo(item.link)
-            if quality then NS.CB_SetQualityBorder(cell, quality) end
-            NS.CB_SetRarityOverlay(cell, quality)
+            NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
                 cell.countText:Show()
@@ -914,8 +1187,7 @@ NS.CB_RenderInventory = function(key, forceFull)
             cell.icon:Hide()
             cell.countText:Hide()
             cell.itemLink = nil
-            NS.CB_ClearQualityBorder(cell)
-            NS.CB_SetRarityOverlay(cell, nil)
+            NS.CB_ApplyItemVisuals(cell, nil)
         end
 
         cell:Show()
@@ -923,23 +1195,29 @@ NS.CB_RenderInventory = function(key, forceFull)
 
     f.rendered = true
 
-    -- ── Slot counter (bridge path only) ──────────────────────
-    if bagTotal then
-        f.slotLabel:SetText((bagUsed or #items) .. "/" .. bagTotal)
-        f.slotLabel:Show()
-    else
-        f.slotLabel:Hide()
-    end
+    -- ── Footer (inventory only — bank carries no money/slot data) ──────────
+    if cfg.showFooter then
+        -- Slot counter (bridge path only)
+        if bagTotal then
+            f.slotLabel:SetText((bagUsed or #items) .. "/" .. bagTotal)
+            f.slotLabel:Show()
+        else
+            f.slotLabel:Hide()
+        end
 
-    -- ── Money display ─────────────────────────────────────────
-    local money = entry.money
-    if money then
-        f.moneyLabel:SetText(FormatMoney(money.gold or 0, money.silver or 0, money.copper or 0))
-        f.moneyLabel:Show()
-    else
-        f.moneyLabel:Hide()
+        -- Money display
+        local money = entry.money
+        if money then
+            f.moneyLabel:SetText(FormatMoney(money.gold or 0, money.silver or 0, money.copper or 0))
+            f.moneyLabel:Show()
+        else
+            f.moneyLabel:Hide()
+        end
     end
 end
+
+NS.CB_RenderInventory = function(key, forceFull) CB_RenderGrid("inventory", key, forceFull) end
+NS.CB_RenderBank      = function(key, forceFull) CB_RenderGrid("bank",      key, forceFull) end
 
 -- ── Open the inventory frame (always shows, never toggles) ───────────────
 -- anchor is an optional frame to position relative to. When provided the
@@ -970,5 +1248,32 @@ NS.CB_ToggleInventory = function(key, botName, anchor)
         f:Hide()
     else
         NS.CB_ShowInventory(key, botName, anchor)
+    end
+end
+
+-- ── Open the bank frame (anchored to the LEFT of the inventory frame) ────
+-- Opening triggers the whisper-only bank fetch; the bank button lives on the
+-- inventory frame, so that frame always exists to anchor against.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
+NS.CB_ShowBank = function(key, botName)
+    local invF = NS.CB_GetInventoryFrame(key, botName)
+    local f    = NS.CB_GetBankFrame(key, botName)
+    f:ClearAllPoints()
+    f:SetPoint("TOPRIGHT", invF, "TOPLEFT", -4, 0)
+    NS.CB_FetchBank(key, botName)
+    NS.CB_RenderBank(key)
+    f:Show()
+end
+
+-- ── Toggle the bank frame open/closed ─────────────────────────────────────
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name.
+NS.CB_ToggleBank = function(key, botName)
+    local f = NS.CB_GetBankFrame(key, botName)
+    if f:IsShown() then
+        f:Hide()
+    else
+        NS.CB_ShowBank(key, botName)
     end
 end

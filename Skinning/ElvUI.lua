@@ -205,19 +205,21 @@ end
 -- Applies the inventory window title bar label.
 -- Blizz: plain centred label via CB_ApplyContainerTitleLabel.
 -- ElvUI: centred label using GameFontNormalLarge.
----@param frame   table   The inventory frame.
----@param botName string  Bot's display name (label reads "<botName>'s Inventory").
+---@param frame   table   The grid frame.
+---@param botName string  Bot's display name (label reads "<botName>'s <noun>").
 ---@param class   string? Bot class (unused for the label; kept for signature parity).
-NS.CB_ApplyInventoryTitleBar = function(frame, botName, class)
+---@param noun    string? Title noun ("Inventory" default, or "Bank").
+NS.CB_ApplyInventoryTitleBar = function(frame, botName, class, noun)
+    noun = noun or "Inventory"
     if NS.ElvUI_S then
         local lbl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        lbl:SetText(botName .. "'s Inventory")
+        lbl:SetText(botName .. "'s " .. noun)
         lbl:SetPoint("CENTER", frame, "TOP", 0, -(NS.TITLE_H / 2))
         lbl:SetJustifyH("CENTER")
         return
     end
 
-    NS.CB_ApplyContainerTitleLabel(frame, botName .. "'s Inventory")
+    NS.CB_ApplyContainerTitleLabel(frame, botName .. "'s " .. noun)
 end
 
 -- Assembles the Blizzard ContainerFrame-style backdrop for the inventory frame from

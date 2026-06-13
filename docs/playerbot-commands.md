@@ -56,6 +56,7 @@ action name in `ChatActionContext.h`.**
 | `e <link>` / `ue <link>` / `u <link>` | `e` / `ue` / `u` | `TriggerNode(...)` | ✅ |
 | `s gray` | `s` | `TriggerNode("s")` → sell | ✅ (was `sell gray` — wrong, fixed) |
 | `t <link>` (drag-to-trade) | `t` | `TriggerNode("t")` → trade | ✅ (was `give <link>` — relied on the auto-trade fallback; now the real `t` command) |
+| `bank` / `bank <link>` / `bank -<link>` | `bank` | `ChatTriggerContext` `creators["bank"]` | ✅ (list / deposit / withdraw — see Bank below) |
 
 ---
 
@@ -73,6 +74,7 @@ action name in `ChatActionContext.h`.**
 | `u <link>` (use item) | ✅ | |
 | `t <link>` | ✅ | Trade command (`TriggerNode("t")` → `TradeAction`); toggles the item in the bot's trade window. Used by the drag-to-trade / right-click-remove flow. (We previously sent `give <link>`, which is **not** a real command and only worked via the item-mention auto-trade fallback — switched to `t` for robustness.) |
 | `items` | ⚠️ | Accepts filters (`items quest`, `items food`, by quality/name/slot). |
+| `bank` | ✅ | Bank window. **Whisper-only — there is NO bridge `GET~BANK` packet** (unlike `items`). `bank` (or `bank ?`) lists the bot's bank: reply opens with `=== Bank ===` then item lines in the **same `TellItems` format** as `items` (parsed by the same header-routed staging branch in `Bridge.lua`). The reply carries **no money/slot-count summary**. `bank <itemlink>` deposits (bags→bank), `bank -<itemlink>` withdraws (bank→bags). All three forms share trigger `bank` (`BankAction`) and **require a banker NPC in interaction range** — otherwise the bot whispers `"Cannot find banker nearby"` and does nothing (CleanBot surfaces this as the `CLEANBOT_NO_BANKER` popup). |
 | `quests all` | ✅ | Whisper path sends `quests all` (bridge: `GET~QUESTS~ALL`); lists per-quest links under Incomplete/Complete headers. |
 | `stats` | ⚠️ | Also carries repair cost and rest-XP we don't surface. |
 | `drop <questname>` | ✅ | Abandon quest. |

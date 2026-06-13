@@ -580,19 +580,52 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                 -- its reply arrives on its own and isn't swallowed here.
                 -- On the bridge path invStaging is nil and INV_END has normally
                 -- already rendered; this branch is just a safety-net flag clear.
+                -- Only swap when the reply actually arrived: a lost/late reply times
+                -- out with empty staging, and overwriting would wipe a good list.
                 if entry.invStaging then
-                    if entry.inventory then
-                        entry.inventory.items = entry.invStaging or {}
+                    if entry.invReplyArrived and entry.inventory then
+                        entry.inventory.items = entry.invStaging
+                        -- Inventory just changed (e.g. Sell Trash) — force past the TTL so the
+                        -- bag/money totals reflect the new state (in-flight dedup still applies).
+                        NS.CB_FetchStats(entry, true)
                     end
-                    entry.invStaging     = nil
-                    -- Inventory just changed (e.g. Sell Trash) — force past the TTL so the
-                    -- bag/money totals reflect the new state (in-flight dedup still applies).
-                    NS.CB_FetchStats(entry, true)
+                    entry.invStaging      = nil
+                    entry.invReplyArrived = nil
+                    entry.curItemSection  = nil
                 end
 
                 local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
                 if f and f:IsShown() then
                     NS.CB_RenderInventory(key)
+                elseif f and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(f, false)
+                end
+            end
+        end
+
+        if entry.awaitingBank then
+            entry.bankTimeout = (entry.bankTimeout or 0) + dt
+            if entry.bankTimeout >= NS.WHISPER_SILENCE then
+                entry.awaitingBank = false
+                entry.bankTimeout  = 0
+
+                -- Whisper-only (bankStaging marker): swap the freshly-staged bank items
+                -- in atomically, replacing the preserved stale set so a refresh updates
+                -- cleanly. No money/bag fetch — the bank reply carries no summary.
+                -- Only swap when the reply actually arrived (else keep the stale list,
+                -- so a lost/late reply doesn't wipe the bank to empty).
+                if entry.bankStaging then
+                    if entry.bankReplyArrived and entry.bank then
+                        entry.bank.items = entry.bankStaging
+                    end
+                    entry.bankStaging      = nil
+                    entry.bankReplyArrived = nil
+                end
+                entry.curItemSection = nil
+
+                local f = NS.botBankFrames and NS.botBankFrames[key]
+                if f and f:IsShown() then
+                    NS.CB_RenderBank(key)
                 elseif f and NS.CB_SetInventoryLoading then
                     NS.CB_SetInventoryLoading(f, false)
                 end
@@ -624,6 +657,8 @@ NS.CB_FetchInventory = function(key, botName)
     -- (or by the silence-timeout tick below as a safety net).
     entry.awaitingInventory = true
     entry.invTimeout        = 0
+    entry.curItemSection    = nil    -- reset header-routed staging for the new collection
+    entry.invReplyArrived   = false  -- set true when the reply (header/item) actually lands
 
     -- Overlay policy: always for a first (empty) load, but for a refresh of an
     -- already-rendered grid only on the whisper path — bridge refreshes are
@@ -683,6 +718,70 @@ NS.CB_FetchStats = function(entry, force)
     CB_MarkExpectReply(entry.name)
     CB_TagSelfWhisper(entry.name, "stats")
     SendChatMessage("stats", "WHISPER", nil, entry.name)
+end
+
+-- Fetches a bot's bank contents. Whisper-only — bank has no bridge packet, and the
+-- reply (header "=== Bank ===" then item lines) is collected via the header-routed
+-- staging branch in CHAT_MSG_WHISPER and finalized by the silence tick. The reply
+-- carries no money/slot summary, so there is no stats fetch. Needs a banker NPC near
+-- the bot; otherwise the bot replies "Cannot find banker nearby" (handled as a popup).
+---@param key     string  Bot name-key (lowercased lookup key).
+---@param botName string  Bot's display name (whisper target).
+NS.CB_FetchBank = function(key, botName)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+
+    -- Preserve existing bank items while the fresh fetch is in flight (stale display).
+    entry.bank            = entry.bank or { items = {} }
+    entry.awaitingBank    = true
+    entry.bankTimeout     = 0
+    entry.curItemSection  = nil
+    entry.bankReplyArrived = false  -- set true when the reply (header/item) actually lands
+
+    -- Bank is always whisper-only (replies trickle in over ~0.5s+), so always show
+    -- the overlay — "Loading..." on a first fetch, "Refreshing..." over rendered data.
+    entry.bankOverlay = true
+    local bf = NS.botBankFrames and NS.botBankFrames[key]
+    if bf and bf:IsShown() and NS.CB_SetInventoryLoading then
+        NS.CB_SetInventoryLoading(bf, true)
+    end
+
+    -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
+    entry.bankStaging = {}
+    NS.CB_SendBotCommand(botName, "bank")
+end
+
+-- Debounced post-action reconcile. A burst of optimistic item moves (deposit/withdraw,
+-- use, sell) bumps a per-entry token; the actual refetch fires once the user stops (token
+-- still current) and only for the currently-open frames. This avoids a slow whisper
+-- round-trip per move while the eager optimistic display carries the UI in the meantime.
+-- The bridge path is fast/reliable so it reconciles quickly; the whisper path waits longer
+-- to let a burst settle.
+NS.RECONCILE_DELAY_BRIDGE  = 0.3
+NS.RECONCILE_DELAY_WHISPER = 1.2
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (fetch target).
+NS.CB_ScheduleReconcile = function(key, botName)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    entry.reconcileGen = (entry.reconcileGen or 0) + 1
+    local gen   = entry.reconcileGen
+    -- The bank has no bridge packet (CB_FetchBank always whispers), so any reconcile that
+    -- will refetch the bank must use the slower whisper delay even when the bridge is
+    -- present — otherwise the 0.3s bridge delay fires the slow bank whisper mid-burst,
+    -- locking the bank grid and desyncing the user's in-progress deposits.
+    local bankF        = NS.botBankFrames and NS.botBankFrames[key]
+    local bankInvolved = bankF and bankF:IsShown()
+    local delay = (CB_EffectiveBridgeState() == "present" and not bankInvolved)
+        and NS.RECONCILE_DELAY_BRIDGE or NS.RECONCILE_DELAY_WHISPER
+    NS.CB_After(delay, function()
+        local e = CleanBot_PartyBots[key]
+        if not e or e.reconcileGen ~= gen then return end  -- superseded by a newer action
+        local invF  = NS.botInventoryFrames and NS.botInventoryFrames[key]
+        local bankF = NS.botBankFrames and NS.botBankFrames[key]
+        if invF  and invF:IsShown()  then NS.CB_FetchInventory(key, botName) end
+        if bankF and bankF:IsShown() then NS.CB_FetchBank(key, botName) end
+    end)
 end
 
 ---@param key     string  Bot name-key (lowercased lookup key).
@@ -815,6 +914,22 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
+        -- No-banker error: a bank list/deposit/withdraw issued with no banker NPC near
+        -- the bot. The chat filter hides this line from chat, but this handler still
+        -- receives it (filters are display-only). Surface it as an explanatory popup.
+        if entry and (entry.awaitingBank or entry.awaitingBankOp)
+           and strfind(msg, "Cannot find banker nearby", 1, true) then
+            entry.awaitingBank   = false
+            entry.bankStaging    = nil
+            entry.bankTimeout    = 0
+            entry.awaitingBankOp = false
+            entry.curItemSection = nil
+            local bf = NS.botBankFrames and NS.botBankFrames[key]
+            if bf and NS.CB_SetInventoryLoading then NS.CB_SetInventoryLoading(bf, false) end
+            StaticPopup_Show("CLEANBOT_NO_BANKER", entry.name)
+            return
+        end
+
         -- Spec-list collection: reply lines from "talents spec list", one premade
         -- per line, e.g. "1. arms pve (51-0-20)". Only actual spec lines are consumed
         -- (and reset the silence timeout); any other line falls through to the branches
@@ -836,19 +951,38 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
-        -- Inventory collection (whisper path): grab any item link, ignore everything
-        -- else. Gated on invStaging (the whisper-only marker) rather than
-        -- awaitingInventory, so a bridge-path fetch — which also sets
+        -- Item collection (whisper path): inventory ("items") and bank ("bank") replies
+        -- share the same item-line format, so they're separated by their section headers
+        -- ("=== Inventory ===" / "=== Bank ==="). curItemSection tracks which collection
+        -- the following |Hitem: lines belong to, so a concurrent inventory + bank fetch
+        -- can't cross-contaminate. Gated on the *Staging markers (whisper-only) rather
+        -- than the awaiting flags, so a bridge-path inventory fetch — which sets
         -- awaitingInventory but never sends "items" — doesn't swallow unrelated whispers.
-        if entry and entry.invStaging then
+        if entry and (entry.invStaging or entry.bankStaging) then
+            -- A header (or any item line) means the reply actually arrived — recorded so
+            -- the finalize can tell "bot reported empty" from "reply lost/late" and never
+            -- wipe a good list on a timeout with empty staging.
+            if strfind(msg, "=== Bank ===", 1, true) then
+                entry.curItemSection = "bank";      entry.bankReplyArrived = true; entry.bankTimeout = 0; return
+            elseif strfind(msg, "=== Inventory ===", 1, true) then
+                entry.curItemSection = "inventory"; entry.invReplyArrived  = true; entry.invTimeout  = 0; return
+            end
+
             if strfind(msg, "|Hitem:", 1, true) then
                 local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(msg)
                 if item then
-                    local staging = entry.invStaging
-                    if staging then staging[#staging + 1] = item end
+                    if entry.curItemSection == "bank" and entry.bankStaging then
+                        entry.bankStaging[#entry.bankStaging + 1] = item
+                        entry.bankReplyArrived = true
+                    elseif entry.invStaging then   -- inventory (default before any header)
+                        entry.invStaging[#entry.invStaging + 1] = item
+                        entry.invReplyArrived = true
+                    end
                 end
             end
-            entry.invTimeout = 0   -- reset timeout on every whisper from this bot
+            -- Reset whichever collection's silence timer this line belongs to.
+            if entry.curItemSection == "bank" then entry.bankTimeout = 0
+            else entry.invTimeout = 0 end
             return
         end
 
