@@ -35,6 +35,20 @@ client) installs via `winget install DEVCOM.LuaJIT`:
 `.github/workflows/test.yml` runs `lua spec/run.lua` on every push/PR that touches `.lua`
 files, using PUC Lua 5.1 (the harness is dependency-free, so no LuaRocks/busted install).
 
+## Pre-push hook (local gate)
+
+`.githooks/pre-push` runs the suite before a push and aborts it on failure. Enable once per
+clone:
+
+```
+git config core.hooksPath .githooks
+```
+
+It finds a Lua interpreter on PATH (`luajit`/`lua`), else falls back to the winget LuaJIT at
+`%LOCALAPPDATA%\Programs\LuaJIT\bin\luajit.exe`, and **fails open** (skips with a warning) if
+none is found — CI is the authoritative gate. Bypass a one-off with `git push --no-verify`.
+(`.gitattributes` pins `.githooks/**` to LF so Git Bash can run the script on Windows.)
+
 ## Caveat: load-time side effects
 
 Each addon file creates frames / registers events at load (e.g. `CreateFrame("Frame")`,

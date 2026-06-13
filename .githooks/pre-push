@@ -1,0 +1,33 @@
+#!/bin/sh
+# ============================================================
+# pre-push — run the offline unit suite before a push; abort the push if it fails.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass for a one-off:    git push --no-verify
+#
+# Fail-OPEN if no Lua interpreter is found (so a clone without LuaJIT can still
+# push) — CI (.github/workflows/test.yml) remains the authoritative gate.
+# ============================================================
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# Find a Lua 5.1-compatible interpreter: PATH first, then the winget LuaJIT location.
+LUA=""
+for c in luajit lua lua5.1; do
+    if command -v "$c" >/dev/null 2>&1; then LUA="$c"; break; fi
+done
+if [ -z "$LUA" ] && [ -n "$LOCALAPPDATA" ] && [ -f "$LOCALAPPDATA/Programs/LuaJIT/bin/luajit.exe" ]; then
+    LUA="$LOCALAPPDATA/Programs/LuaJIT/bin/luajit.exe"
+fi
+
+if [ -z "$LUA" ]; then
+    echo "pre-push: no Lua interpreter (luajit/lua) found — skipping tests; CI will still run them." >&2
+    exit 0
+fi
+
+echo "pre-push: running unit tests…"
+if "$LUA" spec/run.lua; then
+    exit 0
+fi
+echo "pre-push: tests FAILED — push aborted. Fix them, or override with 'git push --no-verify'." >&2
+exit 1

@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell hooks must stay LF so Git Bash's sh can execute them on Windows
+# (autocrlf=true would otherwise check them out as CRLF and break the shebang).
+.githooks/** text eol=lf
