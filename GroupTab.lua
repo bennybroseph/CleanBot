@@ -354,7 +354,7 @@ end
 ---@param aggTable        table  The aggregate table to write into (mutated in place).
 local function CB_AggregateStrategyList(slot, list, getMemberSource, aggTable)
     local total = #slot.members
-    for _, s in ipairs(list) do
+    local function aggregateOne(s)
         local result = nil
         local count  = 0
         for _, m in ipairs(slot.members) do
@@ -378,6 +378,15 @@ local function CB_AggregateStrategyList(slot, list, getMemberSource, aggTable)
         aggTable[s.field] = result
         slot.partialFields[s.field] = (count > 0 and count < total) and true or nil
     end
+    -- Inline exclusive-dropdown bundles have no field of their own; aggregate their
+    -- nested options instead (the real toggles).
+    for _, s in ipairs(list) do
+        if s.type == "dropdown" then
+            for _, n in ipairs(s.strategies) do aggregateOne(n) end
+        else
+            aggregateOne(s)
+        end
+    end
 end
 
 -- Aggregates every group in a definition table into aggTable, including
@@ -391,32 +400,41 @@ end
 ---@param getMemberSource fun(entry:table?):table?  Extracts a member's state table.
 ---@param aggTable        table   The aggregate table to write into (mutated in place).
 local function CB_AggregateGroups(slot, groups, prefix, getMemberSource, aggTable)
+    -- A member with nothing active in an exclusive set sits at "none" — the noneLabel
+    -- then joins the dropdown display list. groupId must match the registry's:
+    -- cmd-prefixed group/header (top-level group) or group key (inline dropdown bundle).
+    local function markNone(strategies, groupId)
+        local anyNone = false
+        for _, m in ipairs(slot.members) do
+            local src = getMemberSource(CleanBot_PartyBots[m.key])
+            local hasActive = false
+            for _, s in ipairs(strategies) do
+                if NS.CB_StrategyShown(s, m.class) and src and src[s.field] == true then
+                    hasActive = true
+                    break
+                end
+            end
+            if not hasActive then anyNone = true break end
+        end
+        slot.noneActive[groupId] = anyNone or nil
+    end
+
     for _, grp in ipairs(groups) do
         if not grp.whisper then
             CB_AggregateStrategyList(slot, grp.strategies, getMemberSource, aggTable)
             if grp.subGroups then
                 for _, sg in ipairs(grp.subGroups) do
                     CB_AggregateStrategyList(slot, sg.strategies, getMemberSource, aggTable)
+                    -- Inline exclusive dropdowns inside a subgroup carry their own none-state.
+                    for _, s in ipairs(sg.strategies) do
+                        if s.type == "dropdown" then
+                            markNone(s.strategies, prefix .. ":" .. (s.group or s.field or "dd"))
+                        end
+                    end
                 end
             end
             if grp.noneLabel then
-                -- A member with nothing active in this exclusive set sits at
-                -- "none" — the noneLabel then joins the dropdown display list.
-                -- Key must match the registry's: cmd-prefixed group/header.
-                local groupId = prefix .. ":" .. (grp.group or grp.header)
-                local anyNone = false
-                for _, m in ipairs(slot.members) do
-                    local src = getMemberSource(CleanBot_PartyBots[m.key])
-                    local hasActive = false
-                    for _, s in ipairs(grp.strategies) do
-                        if NS.CB_StrategyShown(s, m.class) and src and src[s.field] == true then
-                            hasActive = true
-                            break
-                        end
-                    end
-                    if not hasActive then anyNone = true break end
-                end
-                slot.noneActive[groupId] = anyNone or nil
+                markNone(grp.strategies, prefix .. ":" .. (grp.group or grp.header))
             end
         end
     end

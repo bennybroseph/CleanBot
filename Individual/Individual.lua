@@ -230,11 +230,19 @@ local function CB_SendTimerValue(slot, strat, v)
     if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
 end
 
+-- Forward declaration: inline exclusive-dropdown renderer for a `type="dropdown"`
+-- strategy bundle. Defined later (after the exclusive-selection + suffix helpers it
+-- depends on), but referenced here in CB_BuildStrategySection.
+local CB_BuildInlineDropdown
+
 -- ============================================================
 -- Strategy section builder — shared by combat, non-combat, and class tabs.
 -- onClickFn(strategy, checked) overrides the default "co +/-cmd" whisper.
 -- sourceTable supplies each checkbox's initial checked state (entry.combat,
 -- entry.nonCombat, or a classData section); nil leaves boxes unchecked.
+-- A strategy with type="dropdown" renders as an inline exclusive dropdown (its
+-- nested `strategies` are the options) — those need cmd/getSource/registry, which
+-- the checkbox path ignores.
 -- Returns (sectionFrame, checkboxes) where checkboxes is keyed by field name.
 -- ============================================================
 ---@param ctrl        table   Container frame the section is built into.
@@ -244,7 +252,10 @@ end
 ---@param tag          string  Disambiguating tag for frame names.
 ---@param onClickFn    fun()   Handler invoked when a strategy toggle is clicked.
 ---@param sourceTable  table   State table the toggles read/write.
-local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable)
+---@param cmd          string?  Bot command prefix (for inline dropdown bundles).
+---@param getSource    fun(entry:table?):table?  State-table extractor (inline dropdowns).
+---@param registry     table?   Registry inline dropdowns self-register into for sync.
+local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable, cmd, getSource, registry)
     local section = CreateFrame("Frame", nil, ctrl)
     NS.CB_AnchorBelow(section, anchor)
     section:SetPoint("RIGHT", ctrl, "RIGHT", -(ctrl.paddingRight or 0), 0)
@@ -291,6 +302,9 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
 
             controls[s.field] = sl
             yOffset = yOffset + NS.MARGIN.slider.top + 54 + NS.MARGIN.slider.bottom
+        elseif s.type == "dropdown" then
+            -- Inline exclusive dropdown bundle (e.g. the DPS "Rotation" selector).
+            yOffset = yOffset + CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
         else
             local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
             cb:SetSize(20, 20)
@@ -572,6 +586,77 @@ local function CB_PartialSuffix(slot, s)
     return (supported > 0 and supported < total) and " (*)" or ""
 end
 
+-- Renders an inline exclusive dropdown (a `type="dropdown"` strategy bundle) inside a
+-- strategy section: a header label + a dropdown whose options are the bundle's nested
+-- strategies (class-filtered), led by the noneLabel "clear" entry. Picking one sends the
+-- mutually-exclusive toggle via CB_ApplyExclusiveSelection, and the dropdown self-registers
+-- a type="dropdown" entry so CB_SyncRegistry repaints it from bot state (Individual + Group).
+-- Returns the vertical space consumed so the section flow continues below it.
+---@param section   table   The section frame to render into.
+---@param s         table   The dropdown bundle definition.
+---@param yOffset   number  Current vertical offset within the section.
+---@param slot      table   The bound slot.
+---@param tag       string  Disambiguating frame-name tag.
+---@param cmd       string  Bot command prefix ("co"/"nc").
+---@param getSource fun(entry:table?):table?  State-table extractor.
+---@param registry  table?  Registry to self-register into for sync.
+---@return number           Vertical space consumed (px).
+function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
+    local nested    = CB_ShownStrategies(s.strategies, slot.class)
+    local noneLabel = s.noneLabel
+    local key       = s.group or s.field or "dd"
+
+    local hdr = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    hdr:SetPoint("TOPLEFT", section, "TOPLEFT",
+        NS.PADDING.section.left + NS.MARGIN.checkbox.left, -yOffset)
+    hdr:SetText(s.header)
+    local used = NS.MARGIN.checkbox.top + 16 + NS.MARGIN.checkbox.bottom
+
+    local dd = NS.CB_CreateDropdown(section, "CleanBotSubDD_" .. cmd .. key .. "_" .. tag, 140)
+    dd:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left, -(yOffset + used))
+
+    UIDropDownMenu_Initialize(dd, function(self)
+        local cd = (getSource and getSource(CB_SlotEntry(slot))) or {}
+        if noneLabel then
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = noneLabel
+            local anyActive = false
+            for _, ns in ipairs(nested) do
+                if cd[ns.field] == true or cd[ns.field] == NS.MIXED then anyActive = true break end
+            end
+            info.checked = not anyActive
+            info.func = function()
+                UIDropDownMenu_SetText(self, noneLabel)
+                CB_ApplyExclusiveSelection(nested, nil, cmd, slot, getSource)
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+        for _, ns in ipairs(nested) do
+            local info           = UIDropDownMenu_CreateInfo()
+            info.text            = ns.name .. CB_PartialSuffix(slot, ns)
+            info.value           = ns.field
+            info.tooltipTitle    = ns.name
+            info.tooltipText     = ns.desc
+            info.tooltipOnButton = 1
+            info.func            = function()
+                UIDropDownMenu_SetText(self, ns.name)
+                CB_ApplyExclusiveSelection(nested, ns.field, cmd, slot, getSource)
+            end
+            info.checked = cd[ns.field] == true
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    if registry then
+        registry[#registry + 1] = {
+            type = "dropdown", dd = dd, strategies = nested, getSource = getSource,
+            noneLabel = noneLabel, groupId = cmd .. ":" .. key,
+        }
+    end
+
+    return used + NS.MARGIN.dropdown.top + 32 + NS.MARGIN.dropdown.bottom
+end
+
 ---@param col       table   The column frame to build into.
 ---@param groups    table   Array of group definitions for this column.
 ---@param cmd       string  Bot command prefix for the column's toggles.
@@ -626,13 +711,12 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     function(s, checked)
                         CB_ToggleStrategy(slot, s, checked, cmd, getSource)
                     end,
-                    initSrc)
+                    initSrc, cmd, getSource, registry)
                 sec:Hide()
                 subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sgStrats }
-                local sectionH = NS.PADDING.section.top
-                    + #sgStrats * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom)
-                    + NS.PADDING.section.bottom
-                maxSubH = math.max(maxSubH, sectionH)
+                -- Use the section's own resolved height: subsections may contain an inline
+                -- dropdown (taller than a checkbox row), so a per-row estimate underreserves.
+                maxSubH = math.max(maxSubH, sec:GetHeight())
             end
 
             -- Map every role field to its sub-section. A subgroup may serve multiple
@@ -777,7 +861,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 function(s, checked)
                     CB_ToggleStrategy(slot, s, checked, cmd, getSource)
                 end,
-                getSource(entry))
+                getSource(entry), cmd, getSource, registry)
             section:Show()
             if registry then
                 registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = groupStrats, getSource = getSource }

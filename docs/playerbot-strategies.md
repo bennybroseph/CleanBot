@@ -84,20 +84,20 @@ Auto Loot, Auto Gather, Enable PvP** are all **on by default**. Plus per-class `
 | Token | Status | What the source does |
 |---|---|---|
 | `threat` | ✅ | Vetoes (×0) any threat-generating action once the bot's threat reaches **80%** of the *tank's* threat — AoE actions already at **50%**. Bypassed when solo or when the `"neglect threat"` value is set. Threat is measured relative to the tank (`ThreatValues.cpp`), so see conflict #2. |
-| `focus` | ✅ | FocusMultiplier vetoes **all AoE actions (except heals) and debuffs on attackers** — pure priority-target damage. (CleanBot calls this "Low Threat Casting".) |
+| `focus` | ✅ | FocusMultiplier vetoes **all AoE actions (except heals) and debuffs on attackers** — pure priority-target damage. CleanBot calls this **"Focus Fire"** and bundles it with **"AoE Rotation"** (`aoe`) in the DPS role's exclusive **"Rotation"** dropdown (the third option, "Standard", leaves both off) — the two hard-conflict (see conflict #1), so a single selector enforces it. |
 | `wait for attack` | ✅ | Vetoes **every** action except a whitelist (keep-safe-distance, `dps assist`, `set facing`, pull actions) until `wait for attack time` seconds after combat starts. Heals are **not** whitelisted — bots genuinely wait to heal too. Requires a real-player master; skipped against player targets. |
-| `cast time` | ⬜ | Deprioritizes (×0.1) any cast whose cast time exceeds the target's remaining life at current group DPS — stops slow casts on dying mobs. |
+| `cast time` | ✅ | Deprioritizes (×0.1) any cast whose cast time exceeds the target's remaining life at current group DPS — stops slow casts on dying mobs. "Smart Cast Time" checkbox in the Timing Controls section (default-on, universal); pure on/off — no value (the threshold is computed dynamically), so it is a checkbox, not a slider. |
 | `save mana` | ✅ | Healer-only: below the config mana threshold, vetoes heals that are mana-inefficient relative to the damage actually being taken (tanks get more lenient rules than non-tanks). |
-| `passive` | ⬜ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. |
+| `passive` | ✅ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. "Passive" checkbox in Combat Control. |
 
 ### Positioning & movement in combat
 
 | Token | Status | What the source does |
 |---|---|---|
-| `close` | ⬜ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee positioning mode. |
-| `ranged` | ⬜ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster positioning mode. |
+| `close` | ✅ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee positioning mode. Exposed in the **"Positioning Mode"** exclusive dropdown (Close / Ranged / Default). |
+| `ranged` | ✅ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster positioning mode. The other half of the **"Positioning Mode"** dropdown. |
 | `behind` | ✅ | `"not behind target"` → `"set behind"` @ MOVE+7. |
-| `kite` | ⬜ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. |
+| `kite` | ✅ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. "Kite" checkbox in the Positioning group (independent of the Positioning Mode dropdown — pairs with `ranged`). |
 | `avoid aoe` | ✅ | Default action `"avoid aoe"` at **emergency** priority — steps out of hostile ground effects. |
 | `tank face` | ✅ | Default action `"tank face"` @ MOVE — turns the mob away from the group. |
 | `formation` | ⬜ | Default action `"combat formation move"` @ NORMAL — holds group formation in combat. |
@@ -113,7 +113,7 @@ throw/gun/bow/crossbow from the equipped ranged weapon.)
 
 | Token | Status | What the source does |
 |---|---|---|
-| `aggressive` | ⬜ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. |
+| `aggressive` | ✅ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. "Aggressive" checkbox in the Other group. |
 | `grind` | ✅ | `"no target"` → `"attack anything"` @ 4, plus baseline food/drink upkeep. |
 | `pvp` | ✅ | `"enemy player near"` → `"attack enemy player"` @ 55. |
 | `duel` / `start duel` | ⬜ | Accept / initiate duels. |
@@ -327,9 +327,9 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   exclusive dropdown (reuses `CB_ApplyExclusiveSelection`); the `noneLabel` clear entry =
   nil selection drops all five. (The Paladin Blessings dropdowns use the same `noneLabel`
   mechanism with `"None"`.)
-- Useful unexposed candidates: `cast time`, `formation`, `kite`,
-  `potions`, `collision`, `mount`, Shaman resistance totems
-  (`frost resistance` / `fire resistance` / `nature resistance`).
+- Useful unexposed candidates: `formation` (the combat strategy — distinct from the
+  Formation *command*), `move from group`, `adds`, `collision`, `mount`, Shaman resistance
+  totems (`frost resistance` / `fire resistance` / `nature resistance`), Paladin `bthreat`.
 
 ---
 

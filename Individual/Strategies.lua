@@ -62,10 +62,19 @@ NS.STRATEGIES = {
                 { cmd = "pull back",   field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
                 { cmd = "tank face",   field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
             }},
-            -- Shared by both DPS roles (single + aoe). "AoE Rotation" is the class cleave
-            -- rotation — distinct from the DPS (AoE) role's target picking.
+            -- Shared by both DPS roles (single + aoe). The "Rotation" dropdown bundles the
+            -- mutually-exclusive damage modes: AoE Rotation (class cleave — distinct from the
+            -- DPS (AoE) role's target picking) vs Focus Fire (single-target only), or "Standard"
+            -- (neither). They hard-conflict engine-side (focus vetoes AoE), hence one exclusive
+            -- selector. Avoid Aggro stays an independent checkbox below it.
             { field = "isDPS", roles = { "isDPS", "isDPSAoe" }, header = "DPS", strategies = {
-                { cmd = "aoe",    field = "aoeTarget",  name = "AoE Rotation", desc = "Use the class AoE rotation — cleave / multi-target spells" },
+                { type = "dropdown", group = "dpsRotation", header = "Rotation", noneLabel = "Standard",
+                  strategies = {
+                      { cmd = "aoe",   field = "aoeTarget", name = "AoE Rotation",
+                        desc = "Use the class AoE rotation — cleave / multi-target spells" },
+                      { cmd = "focus", field = "focusFire",  name = "Focus Fire",
+                        desc = "Concentrate on the priority target — no AoE or debuff spells, just single-target damage (healing is unaffected)" },
+                  } },
                 { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "DPS actively avoids grabbing threat" },
             }},
             { field = "isHealer", header = "Healing", strategies = {
@@ -83,8 +92,7 @@ NS.STRATEGIES = {
             { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "racials",   field = "useRacials",      name = "Use Racials",           desc = "Use racial abilities in combat", default = true },
             { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
-            { cmd = "focus",     field = "lowThreatCast",   name = "Low Threat Casting",    desc = "Stop casting AoE threat and debuff spells" },
-            { cmd = "avoid aoe", field = "avoidAoe",        name = "Avoid AoE",             desc = "Automatically avoid harmful AoE spells" },
+            { cmd = "passive",   field = "passive",         name = "Passive",               desc = "Stand down — do nothing in combat" },
         },
     },
     {
@@ -99,18 +107,39 @@ NS.STRATEGIES = {
         strategies = NS.MOVEMENT_STRATEGIES,
     },
     {
+        -- Engagement range: close (melee) vs ranged (caster) genuinely conflict, so they're
+        -- an exclusive dropdown. "Default" clears both (the spec re-applies one on reset).
+        -- Normally spec-driven, so it shows the bot's reported mode until you pin one.
+        header     = "Positioning Mode",
+        group      = "posMode",
+        column     = "right",
+        type       = "dropdown",
+        noneLabel  = "Default",
+        strategies = {
+            { cmd = "close",  field = "posClose",  name = "Close (Melee)",
+              desc = "Close to melee range of the target." },
+            { cmd = "ranged", field = "posRanged", name = "Ranged (Caster)",
+              desc = "Hold caster distance — back away when a target gets too close to cast." },
+        },
+    },
+    {
         header = "Positioning",
         group  = "position",
         column = "right",
         strategies = {
-            { cmd = "behind", field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
+            { cmd = "kite",      field = "kite",             name = "Kite",               desc = "Run from enemies while you hold their aggro" },
+            { cmd = "avoid aoe", field = "avoidAoe",         name = "Avoid AoE",          desc = "Automatically avoid harmful AoE spells" },
+            { cmd = "behind",    field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
         },
     },
     {
-        header = "Wait to Attack",
+        header = "Timing Controls",
         group  = "timing",
         column = "right",
         strategies = {
+            { cmd = "cast time", field = "castTime", name = "Smart Cast Time",
+              desc = "Skips casts too slow to land before the target dies — favors faster spells on dying mobs.",
+              default = true },
             { cmd = "wait for attack",      field = "waitAttack",    name = "Enable Wait to Attack", desc = "Wait a set time before attacking or healing" },
             { cmd = "wait for attack time", field = "waitAttackTime", name = "Delay",
               type = "timerSlider", min = 1, max = 10, dependsOn = "waitAttack",
@@ -123,7 +152,8 @@ NS.STRATEGIES = {
         column = "right",
         strategies = {
             { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
-            { cmd = "grind", field = "grindMobs", name = "Grind Mobs", desc = "Attack any visible target" },
+            { cmd = "grind",      field = "grindMobs",  name = "Grind Mobs", desc = "Attack any visible target" },
+            { cmd = "aggressive", field = "aggressive", name = "Aggressive", desc = "Auto-attack any nearby hostile, even without a target" },
         },
     },
 }
@@ -170,6 +200,22 @@ NS.CB_StrategyShown = function(s, class)
     return sup[class] == true
 end
 
+-- Iterates the leaf strategies of a list, descending one level into inline
+-- exclusive-dropdown bundles (`type="dropdown"`, whose own `strategies` are the
+-- real toggles). Lets the token map / default builders treat a bundle's options
+-- as ordinary strategies. `fn(leaf)`.
+---@param list table  A strategies array (may contain dropdown bundles).
+---@param fn   fun(s:table)
+local function CB_EachLeafStrategy(list, fn)
+    for _, s in ipairs(list) do
+        if s.type == "dropdown" then
+            for _, n in ipairs(s.strategies) do fn(n) end
+        else
+            fn(s)
+        end
+    end
+end
+
 NS.STRATEGY_MAP        = {}
 NS.ROLE_STRATEGIES     = {}
 NS.TANK_STRATEGIES     = {}
@@ -207,11 +253,11 @@ do
         end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
-                for _, s in ipairs(sg.strategies) do
+                local t = subFieldToTable[sg.field]
+                CB_EachLeafStrategy(sg.strategies, function(s)
                     mapTokens(s)
-                    local t = subFieldToTable[sg.field]
                     if t then t[#t + 1] = s end
-                end
+                end)
             end
         end
     end
@@ -289,7 +335,7 @@ NS.CB_DefaultCombat = function()
         if grp.defaultField then t[grp.defaultField] = true end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
-                for _, s in ipairs(sg.strategies) do t[s.field] = s.default or nil end
+                CB_EachLeafStrategy(sg.strategies, function(s) t[s.field] = s.default or nil end)
             end
         end
     end
