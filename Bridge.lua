@@ -356,6 +356,9 @@ local function CB_MarkExpectReply(botName)
         NS.botReplyWindow[strlower(botName)] = GetTime() + NS.WHISPER_SILENCE
     end
 end
+-- Exposed so broadcast (party/raid) commands can open reply windows for the bots
+-- they reach, letting ChatFilter hide their whispered replies (CommandControls.lua).
+NS.CB_MarkExpectReply = CB_MarkExpectReply
 
 -- Outgoing whisper provenance: CHAT_MSG_WHISPER_INFORM can't tell an addon-sent command from
 -- one the user typed by hand, so we tag each command whisper we send. ChatFilter.lua hides only

@@ -68,15 +68,17 @@ local groupEmptyLabel            -- "No bots found..." (mirrors the Individual t
 local managingLabel              -- "Managing: <bots>" header atop the strategy panel
 local emptyStratLabel            -- "Select a Bot to Begin" (shown when nothing is selected)
 local groupCtrl, groupContainer  -- ctrl panel + content container (class tabs build into it)
-local innerTabBar                -- inner tab bar (Combat / Non-Combat / Class)
+local innerTabBar                -- inner tab bar (Commands / Combat / Non-Combat / Class)
 local innerTabBtns = {}          -- [1] = Combat, [2] = Non-Combat
+local commandsTab                -- "Commands" inner tab (first; shared command set)
 local sharedClassTab             -- single "Class" inner tab (labeled per-class when only one)
 local classDropdown              -- class switcher (shown only when >1 unique class)
 local classContents  = {}        -- [class] = lazily built class content frame
+local commandsContent            -- "Commands" inner tab content (shared command set)
 local combatContent, nonCombatContent
 local selectedClass              ---@type string?  class token shown by the Class tab
 local presentClasses = {}        ---@type table    unique classes in the selected group (roster order)
-local activeInnerKey = 1         ---@type number|string  1 | 2 | "class"
+local activeInnerKey = "commands" ---@type number|string  "commands" | 1 | 2 | "class"
 
 -- ============================================================
 -- Dynamic role groups — auto-derived from each bot's current role state
@@ -487,15 +489,20 @@ local function CB_UpdateClassDropdownShown()
     end
 end
 
--- Shows the content frame matching tabKey (1 = Combat, 2 = Non-Combat,
--- "class" = the selected class's content) and toggles the tab active states.
----@param tabKey number|string  Inner tab key: 1 | 2 | "class".
+-- Shows the content frame matching tabKey ("commands" = shared command set,
+-- 1 = Combat, 2 = Non-Combat, "class" = the selected class's content) and toggles
+-- the tab active states.
+---@param tabKey number|string  Inner tab key: "commands" | 1 | 2 | "class".
 local function CB_SelectGroupInnerTab(tabKey)
     activeInnerKey = tabKey
+    if commandsTab then commandsTab:SetActive(tabKey == "commands") end
     innerTabBtns[1]:SetActive(tabKey == 1)
     innerTabBtns[2]:SetActive(tabKey == 2)
     if sharedClassTab then sharedClassTab:SetActive(tabKey == "class") end
 
+    if commandsContent then
+        if tabKey == "commands" then commandsContent:Show() else commandsContent:Hide() end
+    end
     if tabKey == 1 then combatContent:Show()    else combatContent:Hide()    end
     if tabKey == 2 then nonCombatContent:Show() else nonCombatContent:Hide() end
     for class, frame in pairs(classContents) do
@@ -984,9 +991,18 @@ NS.CleanBot_BuildGroupTab = function()
     innerTabBar:SetPoint("TOPRIGHT", groupContainer, "TOPRIGHT", 0, 0)
     innerTabBar:SetHeight(NS.BOT_BAR_H)
 
+    commandsContent = CreateFrame("Frame", nil, groupContainer)
+    commandsContent:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    commandsContent:SetPoint("BOTTOMRIGHT", groupContainer, "BOTTOMRIGHT", 0, GROUP_LEGEND_H)
+    commandsContent.paddingLeft   = groupCtrl.paddingLeft
+    commandsContent.paddingRight  = groupCtrl.paddingRight
+    commandsContent.paddingTop    = groupCtrl.paddingTop
+    commandsContent.paddingBottom = groupCtrl.paddingBottom
+
     combatContent = CreateFrame("Frame", nil, groupContainer)
     combatContent:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",     0, -NS.BOT_BAR_H)
     combatContent:SetPoint("BOTTOMRIGHT", groupContainer, "BOTTOMRIGHT", 0, GROUP_LEGEND_H)
+    combatContent:Hide()
     combatContent.paddingLeft   = groupCtrl.paddingLeft
     combatContent.paddingRight  = groupCtrl.paddingRight
     combatContent.paddingTop    = groupCtrl.paddingTop
@@ -1001,13 +1017,18 @@ NS.CleanBot_BuildGroupTab = function()
     nonCombatContent.paddingTop    = groupCtrl.paddingTop
     nonCombatContent.paddingBottom = groupCtrl.paddingBottom
 
+    -- Commands tab is first; Combat then anchors ahead of it.
+    commandsTab = NS.CB_CreateTab(innerTabBar, "CleanBotGroupCommandsTab", "Commands",
+                                  function() CB_SelectGroupInnerTab("commands") end)
+    commandsTab:SetPoint("LEFT", innerTabBar, "LEFT",
+        (groupCtrl.paddingLeft or 0) + (commandsTab.marginLeft or 0), 0)
+
     for j, lbl in ipairs({ "Combat", "Non-Combat" }) do
         local jj = j
         local itab = NS.CB_CreateTab(innerTabBar, "CleanBotGroupInnerTab" .. j, lbl,
                                      function() CB_SelectGroupInnerTab(jj) end)
         if j == 1 then
-            itab:SetPoint("LEFT", innerTabBar, "LEFT",
-                (groupCtrl.paddingLeft or 0) + (itab.marginLeft or 0), 0)
+            NS.CB_AnchorAhead(itab, commandsTab)
         else
             NS.CB_AnchorAhead(itab, innerTabBtns[j - 1])
         end
@@ -1038,7 +1059,14 @@ NS.CleanBot_BuildGroupTab = function()
         NS.groupFrames, function(e) return e and e.combat    end)
     NS.CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", NS.groupSlot, "G",
         NS.groupFrames, function(e) return e and e.nonCombat end)
-    CB_SelectGroupInnerTab(1)
+
+    -- Commands tab: shared command set, scoped to the selected group's members
+    -- (fan-out whisper to each, like strategy toggles).
+    NS.CB_BuildPartyRaidCommands(commandsContent, "G", function(cmd)
+        for _, m in ipairs(NS.groupSlot.members) do NS.CB_SendBotCommand(m.name, cmd) end
+    end)
+
+    CB_SelectGroupInnerTab("commands")
 
     -- ── Popups ────────────────────────────────────────────────
     NS.CB_RegisterEditPopup("CLEANBOT_ADD_GROUP",

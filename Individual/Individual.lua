@@ -914,9 +914,18 @@ local function CB_BuildBotContent(container, slot, class, tag)
     -- so CB_AnchorBelow and first-item explicit anchors read the correct offsets.
     local ctrl = container:GetParent()
 
+    local commandsContent = CreateFrame("Frame", nil, container)
+    commandsContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
+    commandsContent:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
+    commandsContent.paddingLeft   = ctrl.paddingLeft
+    commandsContent.paddingRight  = ctrl.paddingRight
+    commandsContent.paddingTop    = ctrl.paddingTop
+    commandsContent.paddingBottom = ctrl.paddingBottom
+
     local combatContent = CreateFrame("Frame", nil, container)
     combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
     combatContent:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
+    combatContent:Hide()
     combatContent.paddingLeft   = ctrl.paddingLeft
     combatContent.paddingRight  = ctrl.paddingRight
     combatContent.paddingTop    = ctrl.paddingTop
@@ -945,17 +954,20 @@ local function CB_BuildBotContent(container, slot, class, tag)
         for j, t in ipairs(innerTabBtns) do
             t:SetActive(j == idx)
         end
+        commandsContent:Hide(); combatContent:Hide(); nonCombatContent:Hide(); classContent:Hide()
         if idx == 1 then
-            combatContent:Show(); nonCombatContent:Hide(); classContent:Hide()
+            commandsContent:Show()
         elseif idx == 2 then
-            combatContent:Hide(); nonCombatContent:Show(); classContent:Hide()
+            combatContent:Show()
+        elseif idx == 3 then
+            nonCombatContent:Show()
         else
-            combatContent:Hide(); nonCombatContent:Hide(); classContent:Show()
+            classContent:Show()
         end
     end
 
     local classDisplayName = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
-    for j, lbl in ipairs({ "Combat", "Non-Combat", classDisplayName }) do
+    for j, lbl in ipairs({ "Commands", "Combat", "Non-Combat", classDisplayName }) do
         local jj = j
         local itab = NS.CB_CreateTab(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
                                      lbl, function() selectInnerTab(jj) end)
@@ -970,6 +982,13 @@ local function CB_BuildBotContent(container, slot, class, tag)
 
     local allFrames = {}
 
+    -- Commands tab: the shared command set, scoped to THIS bot (whisper the open bot).
+    NS.CB_BuildPartyRaidCommands(commandsContent, tag, function(cmd)
+        local e  = CleanBot_PartyBots[slot.key]
+        local bn = (e and e.name) or slot.name
+        if bn then NS.CB_SendBotCommand(bn, cmd) end
+    end)
+
     CB_BuildTwoColumnContent(combatContent,    NS.STRATEGIES,    "co", slot, tag, allFrames, function(e) return e and e.combat    end)
     CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", slot, tag, allFrames, function(e) return e and e.nonCombat end)
 
@@ -980,7 +999,7 @@ local function CB_BuildBotContent(container, slot, class, tag)
     return {
         container      = container,
         selectInnerTab = selectInnerTab,
-        innerTabs      = { combatPanel = combatContent, nonCombatPanel = nonCombatContent, classPanel = classContent },
+        innerTabs      = { commandsPanel = commandsContent, combatPanel = combatContent, nonCombatPanel = nonCombatContent, classPanel = classContent },
         frames         = allFrames,
     }
 end

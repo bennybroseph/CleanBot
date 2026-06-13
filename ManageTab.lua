@@ -411,41 +411,13 @@ NS.CleanBot_BuildManageTab = function()
     targetSection:Finalize(uninviteAllBtn)  -- deepest col-1 widget; col-2 is same depth
 
     -- ── Party/Raid section ────────────────────────────────
-    local function CB_SendGroupCommand(cmd)
-        if GetNumRaidMembers() > 0 then
-            SendChatMessage(cmd, "RAID")
-        elseif GetNumPartyMembers() > 0 then
-            SendChatMessage(cmd, "PARTY")
-        else
-            NS.CB_Print("You are not in a party or raid.")
-        end
-    end
-
+    -- Shared command set (Summon/Maintenance/Eat-Drink/Revive/Release + Formation),
+    -- also used by the Individual/Group "Commands" inner tab. Manage broadcasts to
+    -- the whole party/raid (no single selection here).
     local partyRaidSection = NS.CB_CreateSection(panel, "partyRaid", "Party/Raid", 3)
-
-    local summonBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageSummonBtn",
-        "Summon", 120, 24, function() CB_SendGroupCommand("summon") end)
-    summonBtn:SetPoint("TOPLEFT", partyRaidSection.bg, "TOPLEFT",
-        NS.PADDING.section.left  + (summonBtn.marginLeft or 0),
-      -(NS.PADDING.section.top   + (summonBtn.marginTop  or 0)))
-
-    local maintenanceBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageMaintenanceBtn",
-        "Maintenance", 120, 24, function() CB_SendGroupCommand("maintenance") end)
-    NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
-
-    local eatDrinkBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageEatDrinkBtn",
-        "Eat/Drink", 120, 24, function() CB_SendGroupCommand("drink") end)
-    NS.CB_AnchorBelow(eatDrinkBtn, maintenanceBtn)
-
-    local reviveBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageReviveBtn",
-        "Revive", 120, 24, function() CB_SendGroupCommand("revive") end)
-    NS.CB_AnchorAhead(reviveBtn, summonBtn)
-
-    local releaseBtn = NS.CB_CreateButton(partyRaidSection.bg, "CleanBotManageReleaseBtn",
-        "Release", 120, 24, function() CB_SendGroupCommand("release") end)
-    NS.CB_AnchorAhead(releaseBtn, maintenanceBtn)
-
-    partyRaidSection:Finalize(eatDrinkBtn)  -- col-1 is deeper
+    local partyRaidDeepest = NS.CB_BuildPartyRaidCommands(partyRaidSection.bg, "Manage",
+        function(cmd) NS.CB_SendGroupCommand(cmd) end)
+    partyRaidSection:Finalize(partyRaidDeepest)
 
     -- ── Favorites/Presets section ─────────────────────────
     -- SavedVars shape:

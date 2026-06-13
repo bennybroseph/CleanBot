@@ -57,6 +57,7 @@ action name in `ChatActionContext.h`.**
 | `s gray` | `s` | `TriggerNode("s")` → sell | ✅ (was `sell gray` — wrong, fixed) |
 | `t <link>` (drag-to-trade) | `t` | `TriggerNode("t")` → trade | ✅ (was `give <link>` — relied on the auto-trade fallback; now the real `t` command) |
 | `bank` / `bank <link>` / `bank -<link>` | `bank` | `ChatTriggerContext` `creators["bank"]` | ✅ (list / deposit / withdraw — see Bank below) |
+| `formation <name>` | `formation` | `supported` | ✅ (Commands tab + Manage Party/Raid — see "Commands already sends") |
 
 ---
 
@@ -79,6 +80,7 @@ action name in `ChatActionContext.h`.**
 | `stats` | ⚠️ | Also carries repair cost and rest-XP we don't surface. |
 | `drop <questname>` | ✅ | Abandon quest. |
 | `emote <name>` | ✅ | Takes any emote token; CleanBot sends `emote wave` on bot selection (Settings-gated). |
+| `formation <name>` | ✅ | "Commands" inner tab (Individual + Group) and Manage → Party/Raid. Sets the bot's movement formation (`SetFormationAction`, `src/Ai/Base/Value/Formations.cpp`; trigger `formation` in the `supported` vector). Whisper-only (not bridge-allowlisted). Per-host scope mirrors the rest of that command set: Individual → the open bot; Group → the selected group's members (fan-out); Manage → broadcast to the whole party/raid. Valid tokens (lowercase): `chaos` (default), `near`, `queue`, `circle`, `line`, `shield`, `arrow`, `melee`, `far` — the dropdown shows them title-cased and sends the lowercase token. **Query:** `formation ?` (or no arg) whispers back `Formation: <name>` (the current formation) — queryable, not yet surfaced in the UI. Replies go via `TellMaster` (whisper), so they're hidden by the reply-window filter on the per-bot paths; the Manage broadcast opens a reply window per bot to hide them too. |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)
 Prefix operators on each strategy token:
