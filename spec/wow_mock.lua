@@ -19,6 +19,7 @@ _G.Mock = {
     addon    = {},   -- recorded SendAddonMessage                      → { prefix=, text=, channel= }
     onUpdate = {},   -- captured OnUpdate handlers → { frame=, fn= }
     onEvent  = {},   -- captured OnEvent handlers  → { frame=, fn= }
+    timers   = {},   -- pending CB_After callbacks  → { elapsed=, delay=, fn= }
     now      = 0,    -- value returned by GetTime()
     raid     = 0,    -- GetNumRaidMembers()
     party    = 0,    -- GetNumPartyMembers()
@@ -30,16 +31,26 @@ function Mock.reset()
     Mock.whispers = {}
     Mock.chat     = {}
     Mock.addon    = {}
+    Mock.timers   = {}
     Mock.now      = 0
     Mock.raid     = 0
     Mock.party    = 0
 end
 
---- Advances the clock by dt and fires every captured OnUpdate handler with (frame, dt) —
---- mirrors one client frame for the addon's timers/queue.
+--- Advances the clock by dt, fires every captured OnUpdate handler with (frame, dt), then
+--- fires any CB_After callback whose delay has elapsed — mirrors one client frame.
 function Mock.tick(dt)
     Mock.now = Mock.now + dt
     for _, h in ipairs(Mock.onUpdate) do h.fn(h.frame, dt) end
+    local due = {}
+    for _, t in ipairs(Mock.timers) do
+        t.elapsed = t.elapsed + dt
+        if t.elapsed >= t.delay then due[#due + 1] = t end
+    end
+    for _, t in ipairs(due) do
+        for i, x in ipairs(Mock.timers) do if x == t then table.remove(Mock.timers, i); break end end
+        t.fn()
+    end
 end
 
 --- Fires a WoW event into every captured OnEvent handler as (frame, event, ...).
@@ -98,7 +109,10 @@ _G.strtrim  = function(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
 -- NS helpers normally provided by CleanBot.lua (which we don't load in unit specs). Stubbed so
 -- Bridge.lua's runtime paths don't nil-error; CB_After records its callback rather than firing.
 _G.CleanBotNS.CB_Print = _G.CleanBotNS.CB_Print or function() end
-_G.CleanBotNS.CB_After = _G.CleanBotNS.CB_After or function() end
+-- CB_After schedules onto Mock.timers; Mock.tick fires due callbacks (like the real shared timer).
+_G.CleanBotNS.CB_After = function(delay, fn)
+    Mock.timers[#Mock.timers + 1] = { elapsed = 0, delay = delay, fn = fn }
+end
 -- Faithful copy of CleanBot.lua's plain-separator splitter (used by Bridge.lua to parse
 -- "~"-delimited MBOT packets). Returns (before, after-or-"").
 _G.CleanBotNS.CB_SplitOnce = _G.CleanBotNS.CB_SplitOnce or function(str, sep)

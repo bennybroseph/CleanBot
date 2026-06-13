@@ -178,6 +178,68 @@ describe("Bridge addon packets (CHAT_MSG_ADDON)", function()
     end)
 end)
 
+describe("Quest list collection (whisper)", function()
+    before_each(function() Mock.reset() end)
+
+    -- Quest reply line carrying a |Hquest:ID:…| link, as the bot streams it.
+    local function questLine(id, name)
+        return "|cffffff00|Hquest:" .. id .. ":70|h[" .. name .. "]|h|r"
+    end
+
+    it("routes quest lines by section header and finalizes on the summary line", function()
+        local e = { name = "Bot", quests = {}, awaitingQuests = true, questStaging = {}, questStatus = "I" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Incompleted ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", questLine(101, "Wolves"), "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Completed ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", questLine(202, "Errand"), "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Summary --- Total: 2", "Bot")  -- terminator
+
+        assert.equals(2, #e.quests)
+        assert.equals(101, e.quests[1].id)
+        assert.equals("I", e.quests[1].status)
+        assert.equals(202, e.quests[2].id)
+        assert.equals("C", e.quests[2].status)
+        assert.is_false(e.awaitingQuests)
+    end)
+
+    it("treats a title containing 'Complete' as a quest, not a section header", function()
+        local e = { name = "Bot", quests = {}, awaitingQuests = true, questStaging = {}, questStatus = "I" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", questLine(303, "Complete the Ritual"), "Bot")
+        assert.equals(1, #e.questStaging)
+        assert.equals("I", e.questStaging[1].status)   -- stayed Incomplete; link matched first
+    end)
+end)
+
+describe("Reconcile debounce (coalescing)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.botInventoryFrames.bot = { IsShown = function() return true end }  -- "open" inventory
+        NS.botBankFrames.bot      = nil                                        -- bank closed
+    end)
+
+    it("coalesces a burst of reconciles into a single fetch", function()
+        local realFetch = NS.CB_FetchInventory
+        local calls = 0
+        NS.CB_FetchInventory = function() calls = calls + 1 end
+
+        NS.CB_ScheduleReconcile("bot", "Bot")
+        NS.CB_ScheduleReconcile("bot", "Bot")
+        NS.CB_ScheduleReconcile("bot", "Bot")
+        assert.equals(0, calls)              -- nothing fires until the debounce delay elapses
+        Mock.tick(NS.RECONCILE_DELAY + 0.1)  -- all timers due; only the latest gen runs
+
+        NS.CB_FetchInventory      = realFetch   -- restore before asserting
+        NS.botInventoryFrames.bot = nil
+
+        assert.equals(1, calls)
+    end)
+end)
+
 describe("Whisper reply routing", function()
     before_each(function()
         Mock.reset()
