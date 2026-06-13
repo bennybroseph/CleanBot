@@ -76,15 +76,21 @@ end
 -- hidden on empty slots. No-op on ElvUI, which shows quality via its own border.
 local RARITY_OVERLAY_TEX = "Interface\\Buttons\\UI-ActionButton-Border"
 
+-- Gold for quest items — they carry no quality colour of their own, so we give them
+-- the standard quest yellow for both their border and their glow to stand out.
+local QUEST_BORDER_COLOR = { 1.0, 0.82, 0.0 }
+
 -- Every button that has been given a rarity overlay, so the "Enable Item Glow" setting
 -- can re-evaluate them all live when toggled. Buttons persist for the session, so this
 -- registry never needs pruning.
 local rarityOverlayBtns = {}
 
 --- Shows/updates a persistent rarity-coloured overlay on an item or equip button.
----@param btn     table   The item/equip button.
----@param quality number? Item quality 0–6, or nil/empty to hide the overlay.
-NS.CB_SetRarityOverlay = function(btn, quality)
+---@param btn     table    The item/equip button.
+---@param quality number?  Item quality 0–6, or nil/empty to hide the overlay.
+---@param colorOverride number[]? Explicit {r,g,b} that forces the glow on regardless of
+---                       the quality threshold (used to give quest items a gold glow).
+NS.CB_SetRarityOverlay = function(btn, quality, colorOverride)
     if NS.ElvUI_S then return end
     local ov = btn.cbRarityOverlay
     if not ov then
@@ -102,10 +108,15 @@ NS.CB_SetRarityOverlay = function(btn, quality)
         btn.cbRarityOverlay = ov
         rarityOverlayBtns[#rarityOverlayBtns + 1] = btn
     end
-    -- Gated by the "Enable Item Glow" setting (default on), and only for uncommon
-    -- (green, quality 2) and above — poor/common/empty/disabled get no overlay.
-    if NS.itemGlow ~= false and quality and quality >= 2 then
-        ov:SetVertexColor(NS.CB_GetQualityColor(quality))
+    -- Gated by the "Enable Item Glow" setting (default on). A colour override forces the
+    -- glow on (quest items); otherwise only uncommon (green, quality 2) and above glow —
+    -- poor/common/empty/disabled get no overlay.
+    if NS.itemGlow ~= false and (colorOverride or (quality and quality >= 2)) then
+        if colorOverride then
+            ov:SetVertexColor(colorOverride[1], colorOverride[2], colorOverride[3])
+        else
+            ov:SetVertexColor(NS.CB_GetQualityColor(quality))
+        end
         ov:Show()
     else
         ov:Hide()
@@ -113,11 +124,17 @@ NS.CB_SetRarityOverlay = function(btn, quality)
 end
 
 --- Re-evaluates every rarity overlay against the current NS.itemGlow setting, reading
---- each button's quality from its live itemLink. Called when the setting is toggled.
+--- each button's quality (and quest status) from its live itemLink. Called when the
+--- setting is toggled.
 NS.CB_RefreshRarityOverlays = function()
     for _, btn in ipairs(rarityOverlayBtns) do
-        local quality = btn.itemLink and select(3, GetItemInfo(btn.itemLink)) or nil
-        NS.CB_SetRarityOverlay(btn, quality)
+        local quality, override
+        if btn.itemLink then
+            local _, _, q, _, _, itemType = GetItemInfo(btn.itemLink)
+            quality = q
+            if itemType == "Quest" then override = QUEST_BORDER_COLOR end
+        end
+        NS.CB_SetRarityOverlay(btn, quality, override)
     end
 end
 
@@ -142,14 +159,15 @@ NS.CB_ApplyQualityBackdrop = function(btn)
     btn.qualityFrame = f
 end
 
--- Colors the border of an item button to match the item's quality.
+-- Applies an explicit colour to an item button's border, dispatching by path.
 -- ElvUI: SetBackdropBorderColor (targets SetTemplate's iborder/oborder frames).
 -- Blizz with qualityFrame (equip slots): SetBackdropBorderColor on the child frame.
 -- Blizz with normTex only (inventory cells): vertex-colours normTex (already visible).
----@param btn     table   The item button.
----@param quality number? Item quality 0–6 (default 1).
-NS.CB_SetQualityBorder = function(btn, quality)
-    local r, g, b = GetItemQualityColor(quality or 1)
+---@param btn table   The item button.
+---@param r   number  Red 0–1.
+---@param g   number  Green 0–1.
+---@param b   number  Blue 0–1.
+local function CB_ApplyBorderColor(btn, r, g, b)
     if NS.ElvUI_S then
         btn:SetBackdropBorderColor(r, g, b, 1)
     elseif btn.qualityFrame then
@@ -157,6 +175,37 @@ NS.CB_SetQualityBorder = function(btn, quality)
     elseif btn.normTex then
         btn.normTex:SetVertexColor(r, g, b)
     end
+end
+
+-- Colors the border of an item button to match the item's quality.
+---@param btn     table   The item button.
+---@param quality number? Item quality 0–6 (default 1).
+NS.CB_SetQualityBorder = function(btn, quality)
+    CB_ApplyBorderColor(btn, GetItemQualityColor(quality or 1))
+end
+
+-- Sets both the quality border and the rarity overlay for an item from its link,
+-- treating quest items specially (gold border, no overlay). The single entry point
+-- for "this cell now holds this item" so quest detection lives in one place.
+---@param btn  table    The item button.
+---@param link string?  The item's link, or nil to clear the visuals.
+NS.CB_ApplyItemVisuals = function(btn, link)
+    if not link then
+        NS.CB_ClearQualityBorder(btn)
+        NS.CB_SetRarityOverlay(btn, nil)
+        return
+    end
+    local _, _, quality, _, _, itemType = GetItemInfo(link)
+    local glowOverride
+    if itemType == "Quest" then
+        CB_ApplyBorderColor(btn, unpack(QUEST_BORDER_COLOR))
+        glowOverride = QUEST_BORDER_COLOR
+    elseif quality then
+        NS.CB_SetQualityBorder(btn, quality)
+    else
+        NS.CB_ClearQualityBorder(btn)
+    end
+    NS.CB_SetRarityOverlay(btn, quality, glowOverride)
 end
 
 -- Resets the border of an item button to its uncoloured state.

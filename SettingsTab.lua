@@ -988,6 +988,10 @@ NS.CleanBot_BuildSettingsTab = function()
         function() NS.CB_RunTimingMeasure(3) end)
     NS.CB_AnchorAhead(timingBtn, knownBotsBtn)
 
+    local iconBrowserBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugIconBrowserBtn", "Icon Browser", 110, 22,
+        function() if NS.CB_ToggleIconBrowser then NS.CB_ToggleIconBrowser() end end)
+    NS.CB_AnchorBelow(iconBrowserBtn, knownBotsBtn)
+
     -- Syncs all Debug-tab controls from NS state. Called at build and by every
     -- setter in Debug.lua (so slash-command changes update an open panel).
     NS.CB_RefreshDebugTab = function()

@@ -4,9 +4,9 @@
 -- When the player initiates a trade with a tracked bot:
 --   • Their inventory frame opens automatically.
 --   • Dragging an item from the inventory onto a trade slot
---     whispers "give <itemlink>" to offer it for trade.
---   • Right-clicking a filled trade slot whispers "give <itemlink>"
---     to remove it (give toggles the item on/off).
+--     whispers "t <itemlink>" to offer it for trade.
+--   • Right-clicking a filled trade slot whispers "t <itemlink>"
+--     to remove it (the trade command toggles the item on/off).
 --   • The inventory frame closes when the trade window closes.
 -- ============================================================
 
@@ -96,9 +96,10 @@ local function CB_CreateTradeSlotOverlays()
                 local link = GetTradeTargetItemLink(slotIndex)
                 if not link then return end
 
+                -- "t" toggles the item in the bot's trade window, so re-sending removes it.
                 local botEntry = CleanBot_PartyBots and CleanBot_PartyBots[activeTradeKey]
                 if botEntry then
-                    NS.CB_SendBotCommand(botEntry.name, "give " .. NS.CB_CleanItemLink(link))
+                    NS.CB_SendBotCommand(botEntry.name, "t " .. NS.CB_CleanItemLink(link))
                 end
             end)
 

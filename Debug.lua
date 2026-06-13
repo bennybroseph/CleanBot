@@ -495,3 +495,148 @@ SLASH_CBINSPECT1 = "/cbinspect"
 SlashCmdList["CBINSPECT"] = function()
     NS.CB_SetInspectTrace(not NS.debugInspectTrace)
 end
+
+-- ── /cbicons — scrollable icon browser ───────────────────────────────────
+-- Browse every usable icon (the macro-icon database via GetMacroIconInfo /
+-- GetMacroItemIconInfo) in a scrollable grid. Type to filter by name; hover for
+-- the full path; click to print a paste-ready "Interface\Icons\..." path to chat.
+local PAD, CELL, ICON, COLS, ROWS = 14, 40, 36, 12, 10
+
+local iconBrowser       ---@type table|nil
+local allIcons          ---@type string[]|nil  Every macro icon texture, built once.
+
+-- Normalize a macro-icon texture to a paste-ready full path. GetMacroIconInfo
+-- returns either a bare name ("INV_Misc_Coin_01") or a full path; SetTexture
+-- accepts both, but our code wants the "Interface\Icons\..." form.
+---@param tex string  Raw texture as returned by the macro-icon APIs.
+---@return string     Full texture path.
+local function CB_IconFullPath(tex)
+    if tex:find("\\", 1, true) then return tex end
+    return "Interface\\Icons\\" .. tex
+end
+
+-- Builds the flat list of every macro icon once, deduped.
+local function CB_BuildIconList()
+    if allIcons then return end
+    allIcons = {}
+    local seen = {}
+    local function add(tex)
+        if not tex or type(tex) ~= "string" or seen[tex] then return end
+        seen[tex] = true
+        allIcons[#allIcons + 1] = tex
+    end
+    for i = 1, GetNumMacroIcons() do add(GetMacroIconInfo(i)) end
+    for i = 1, GetNumMacroItemIcons() do add(GetMacroItemIconInfo(i)) end
+end
+
+local function CB_BuildIconBrowser()
+    CB_BuildIconList()
+
+    local f = CreateFrame("Frame", "CleanBotIconBrowser", UIParent)
+    f:SetFrameStrata("DIALOG")
+    f:SetWidth(PAD * 2 + COLS * CELL + 24)  -- +24 leaves room for the scrollbar
+    f:SetHeight(PAD * 2 + 56 + ROWS * CELL)
+    f:SetPoint("CENTER")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop",  f.StopMovingOrSizing)
+    NS.CB_ApplyFrameSkin(f, 0)
+
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD)
+    title:SetText("Icon Browser — click to print path")
+
+    local search = NS.CB_CreateEditBox(f, "CleanBotIconBrowserSearch", 200, 20)
+    search:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 4, -(PAD + 22))
+    search:SetAutoFocus(false)
+
+    local scroll = CreateFrame("ScrollFrame", "CleanBotIconBrowserScroll", f, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -(PAD + 50))
+    scroll:SetWidth(COLS * CELL)
+    scroll:SetHeight(ROWS * CELL)
+
+    local filtered = allIcons or {}
+    local pool = {}
+
+    local function RefreshGrid()
+        local total    = #filtered
+        local numLines = math.ceil(total / COLS)
+        FauxScrollFrame_Update(scroll, numLines, ROWS, CELL)
+        local offset = FauxScrollFrame_GetOffset(scroll)
+        for idx = 1, COLS * ROWS do
+            local btn = pool[idx]
+            local tex = filtered[offset * COLS + idx]
+            if tex then
+                btn.tex:SetTexture(tex)
+                btn.rawTex = tex
+                btn:Show()
+            else
+                btn:Hide()
+            end
+        end
+    end
+
+    for idx = 1, COLS * ROWS do
+        local col, row = (idx - 1) % COLS, math.floor((idx - 1) / COLS)
+        local btn = CreateFrame("Button", nil, scroll)
+        btn:SetSize(ICON, ICON)
+        btn:SetPoint("TOPLEFT", scroll, "TOPLEFT",
+            col * CELL + (CELL - ICON) / 2, -(row * CELL + (CELL - ICON) / 2))
+        btn.tex = btn:CreateTexture(nil, "ARTWORK")
+        btn.tex:SetAllPoints()
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
+        hl:SetBlendMode("ADD")
+        btn:SetScript("OnEnter", function(self)
+            if not self.rawTex then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(CB_IconFullPath(self.rawTex), 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn:SetScript("OnClick", function(self)
+            if self.rawTex then print("|cff66ccffCleanBot icon:|r " .. CB_IconFullPath(self.rawTex)) end
+        end)
+        pool[idx] = btn
+    end
+
+    scroll:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, CELL, RefreshGrid)
+    end)
+
+    -- Filter on type: substring match against the raw texture name, reset to top.
+    search:SetScript("OnTextChanged", function(self)
+        local q = strlower(strtrim(self:GetText() or ""))
+        if q == "" then
+            filtered = allIcons or {}
+        else
+            filtered = {}
+            for _, tex in ipairs(allIcons) do
+                if strfind(strlower(tex), q, 1, true) then filtered[#filtered + 1] = tex end
+            end
+        end
+        local bar = _G["CleanBotIconBrowserScrollScrollBar"]
+        if bar then bar:SetValue(0) end
+        RefreshGrid()
+    end)
+    search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    RefreshGrid()
+    f:Hide()  -- start hidden so the first toggle shows it
+    return f
+end
+
+NS.CB_ToggleIconBrowser = function()
+    if not iconBrowser then iconBrowser = CB_BuildIconBrowser() end
+    if iconBrowser:IsShown() then iconBrowser:Hide() else iconBrowser:Show() end
+end
+
+SLASH_CBICONS1 = "/cbicons"
+SlashCmdList["CBICONS"] = function() NS.CB_ToggleIconBrowser() end
