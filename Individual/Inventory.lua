@@ -481,27 +481,42 @@ NS.CB_GetInventoryFrame = function(key, botName)
         return b
     end
 
-    -- Sell Trash (rightmost): vendor-sell the bot's grey items, then re-fetch. The command is
-    -- "s gray" — the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands
-    -- are TRIGGERS, not action names").
-    local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
-        "Sell All Grey Items (Requires a Nearby Vendor)", function()
-            local e       = CleanBot_PartyBots[key]
-            local botName = (e and e.name) or key
-            NS.CB_SendBotCommand(botName, "s gray")
-            NS.CB_After(1.5, function() NS.CB_FetchInventory(key, botName) end)
-        end)
+    -- Sort (rightmost): re-sorts the displayed grid via a forced full render.
+    local sortBtn = makeActionButton("CleanBotInvSortBtn_" .. key, "Interface\\Icons\\Spell_Frost_Stun", "Sort", function()
+        NS.CB_RenderInventory(key, true)
+    end)
     -- Right edge flush to the close button's left edge; the button sits just ABOVE the frame
     -- with its bottom edge flush to the frame's top edge (no padding). The Y nudge cancels the
     -- close button's own offset from the frame top so the bottom lands exactly on the edge.
     local closeYoff = NS.ElvUI_S and 2 or BLIZZ_CLOSE_Y
-    sellBtn:SetPoint("BOTTOMRIGHT", closeBtn, "TOPLEFT", 0, -closeYoff)
+    sortBtn:SetPoint("BOTTOMRIGHT", closeBtn, "TOPLEFT", 0, -closeYoff)
 
-    -- Sort (immediately to its left, no gap): re-sorts the displayed grid via a forced full render.
-    local sortBtn = makeActionButton("CleanBotInvSortBtn_" .. key, "Interface\\Icons\\Ability_Hunter_Readiness", "Sort", function()
-        NS.CB_RenderInventory(key, true)
-    end)
-    sortBtn:SetPoint("RIGHT", sellBtn, "LEFT", 0, 0)
+    -- Sell Trash: vendor-sell the bot's grey items, then re-fetch. The command is "s gray" —
+    -- the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands are
+    -- TRIGGERS, not action names").
+    local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
+        "Sell All Grey Items (Requires a Nearby Vendor)", function()
+            local e       = CleanBot_PartyBots[key]
+            local bn      = (e and e.name) or key
+            NS.CB_SendBotCommand(bn, "s gray")
+            NS.CB_After(1.5, function() NS.CB_FetchInventory(key, bn) end)
+        end)
+    sellBtn:SetPoint("RIGHT", sortBtn, "LEFT", 0, 0)
+
+    -- Trade: open a trade window with the bot. InitiateTrade accepts a nearby party/raid
+    -- member's name; TRADE_SHOW then drives the rest of the flow in Trade.lua.
+    local tradeBtn = makeActionButton("CleanBotInvTradeBtn_" .. key, "Interface\\Icons\\INV_Misc_GroupLooking",
+        "Trade", function()
+            local e  = CleanBot_PartyBots[key]
+            local bn = (e and e.name) or botName
+            InitiateTrade(bn)
+        end)
+    tradeBtn:SetPoint("RIGHT", sellBtn, "LEFT", 0, 0)
+
+    -- Bank: placeholder for the bot's bank view (not yet wired up).
+    local bankBtn = makeActionButton("CleanBotInvBankBtn_" .. key, "Interface\\Icons\\INV_Box_01",
+        "Bank (coming soon)", function() end)
+    bankBtn:SetPoint("RIGHT", tradeBtn, "LEFT", 0, 0)
 
     local FOOTER_Y       = NS.ElvUI_S and 8             or BLIZZ_LABEL_Y
     local FOOTER_LEFT_X  = NS.ElvUI_S and NS.PADDING.frame.left  or BLIZZ_LABEL_X

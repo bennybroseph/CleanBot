@@ -54,6 +54,13 @@ mouse-enabled) plus the state of the key Manage-tab frames. Hover the stuck widg
 then run it. Useful for strata-inheritance bugs (see CLAUDE.md's note on BACKGROUND vs
 MEDIUM strata).
 
+## `/cbicons`
+
+Toggles the Icon Browser: a scrollable grid of every usable icon (the macro-icon database,
+via `GetMacroIconInfo` + `GetMacroItemIconInfo`). Type in the search box to filter by name,
+hover an icon for its full path, and click to print a paste-ready `Interface\Icons\…` path
+to chat. Also available as the Debug sub-tab's "Icon Browser" button (`NS.CB_ToggleIconBrowser`).
+
 ## `/cleanbot debug knownbots`
 
 Opens the KnownBots popup window: handshake state, last `HELLO_ACK`, active overrides,
