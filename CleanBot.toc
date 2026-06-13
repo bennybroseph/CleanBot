@@ -23,6 +23,7 @@ Individual\Equip.lua
 Individual\Model.lua
 Individual\Individual.lua
 Trade.lua
+UnitMenu.lua
 ManageTab.lua
 GroupTab.lua
 SettingsTab.lua

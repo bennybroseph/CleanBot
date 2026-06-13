@@ -1221,15 +1221,18 @@ NS.CB_RenderInventory = function(key, forceFull) CB_RenderGrid("inventory", key,
 NS.CB_RenderBank      = function(key, forceFull) CB_RenderGrid("bank",      key, forceFull) end
 
 -- ── Open the inventory frame (always shows, never toggles) ───────────────
--- anchor is an optional frame to position relative to. When provided the
--- inventory is placed to its right; otherwise it defaults to CleanBotFrame's left.
----@param key     string  Bot name-key.
----@param botName string  Bot's display name.
----@param anchor  table?  Optional frame to anchor the window beside (e.g. TradeFrame).
+-- anchor positions the frame: a frame places the inventory to its right; the
+-- string "CENTER" centers it on screen (used by the unit right-click menu, which
+-- opens away from CleanBotFrame); nil defaults to CleanBotFrame's left.
+---@param key     string        Bot name-key.
+---@param botName string        Bot's display name.
+---@param anchor  table|string? Frame to anchor beside, "CENTER", or nil.
 NS.CB_ShowInventory = function(key, botName, anchor)
     local f = NS.CB_GetInventoryFrame(key, botName)
     f:ClearAllPoints()
-    if anchor then
+    if anchor == "CENTER" then
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    elseif anchor then
         f:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
     else
         f:SetPoint("TOPRIGHT", CleanBotFrame, "TOPLEFT", -4, 0)
@@ -1240,9 +1243,9 @@ end
 
 -- ── Toggle the inventory frame open/closed ────────────────────────────────
 -- anchor is forwarded to CB_ShowInventory when opening.
----@param key     string  Bot name-key.
----@param botName string  Bot's display name.
----@param anchor  table?  Optional frame to anchor the window beside.
+---@param key     string        Bot name-key.
+---@param botName string        Bot's display name.
+---@param anchor  table|string? Frame to anchor beside, "CENTER", or nil.
 NS.CB_ToggleInventory = function(key, botName, anchor)
     local f = NS.CB_GetInventoryFrame(key, botName)
     if f:IsShown() then

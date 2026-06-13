@@ -593,7 +593,13 @@ end
 ---@param send fun()   Performs the raw whisper send.
 NS.CB_EnqueueRequest = function(key, send)
     local entry = CleanBot_PartyBots[key]
-    if not entry then return end
+    if not entry then
+        -- No per-bot entry to serialize against — e.g. a no-bridge discovery probe
+        -- ("co ?") to a member not yet known to be a bot. There is no reply stream to
+        -- interleave with, so send immediately rather than dropping it.
+        send()
+        return
+    end
     entry.reqQueue = entry.reqQueue or {}
     entry.reqQueue[#entry.reqQueue + 1] = send
     CB_PumpQueue(key)
@@ -870,11 +876,12 @@ NS.CB_ScheduleReconcile = function(key, botName)
     end)
 end
 
----@param key     string  Bot name-key (lowercased lookup key).
----@param botName string  Bot's display name (whisper/bridge target).
-NS.CB_RequestInventory = function(key, botName)
+---@param key     string        Bot name-key (lowercased lookup key).
+---@param botName string        Bot's display name (whisper/bridge target).
+---@param anchor  table|string? Placement forwarded to CB_ToggleInventory ("CENTER", a frame, or nil).
+NS.CB_RequestInventory = function(key, botName, anchor)
     NS.CB_FetchInventory(key, botName)
-    NS.CB_ToggleInventory(key, botName)
+    NS.CB_ToggleInventory(key, botName, anchor)
 end
 
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS

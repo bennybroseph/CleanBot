@@ -118,6 +118,15 @@ describe("Serial whisper queue", function()
 
         Mock.tick(0.4); assert.are.same({ "a", "b" }, order)   -- 0.8 since reset ≥ 0.5: advances
     end)
+
+    it("sends immediately when the bot has no entry yet (discovery probe)", function()
+        -- A no-bridge probe whispers "co ?" to a member not yet in CleanBot_PartyBots.
+        -- With no per-bot entry to serialize against, the send must still go out (the
+        -- regression: it was silently dropped, so no-bridge detection never fired).
+        local order = {}
+        NS.CB_EnqueueRequest("stranger", recorder(order, "probe"))
+        assert.are.same({ "probe" }, order)
+    end)
 end)
 
 describe("Bridge addon packets (CHAT_MSG_ADDON)", function()

@@ -1250,6 +1250,23 @@ SelectBot = function(key, silent)
     end
 end
 
+-- Exposed for the unit-frame right-click menu (UnitMenu.lua).
+NS.CB_SelectBot = SelectBot
+
+-- ============================================================
+-- NS.CB_ManageBot — opens the main window on the Individual tab focused on a
+-- specific bot. Used by the party/raid right-click "Manage" entry.
+-- ============================================================
+--- @param key string  Bot name-key (strlower of the bot's name).
+NS.CB_ManageBot = function(key)
+    if not key then return end
+    NS.selectedBotKey = key                 -- CleanBot_RefreshTabs selects this (step 4)
+    CleanBotFrame:Show()
+    if NS.CleanBot_RefreshTabs then NS.CleanBot_RefreshTabs() end
+    NS.CleanBot_SelectTopTab(2)             -- 2 = "Individual" (tab order in CleanBot.lua)
+    NS.CB_RequestRosterThenRefresh()        -- freshen the roster like a normal window open
+end
+
 -- ============================================================
 -- NS.CB_ToggleIndividualExpand — shows/hides the strategy panel and resizes
 -- CleanBotFrame. No slot relayout is needed because each panel (model and

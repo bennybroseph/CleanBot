@@ -865,25 +865,33 @@ NS.CB_GetQuestFrame = function(key, botName)
 end
 
 -- ── Show / fetch quests ──────────────────────────────────────────────────
----@param key     string  Bot name-key.
----@param botName string  Bot's display name.
-NS.CB_ShowQuests = function(key, botName)
+-- anchor "CENTER" centers the frame on screen (used by the unit right-click menu,
+-- which opens away from CleanBotFrame); nil defaults beside CleanBotFrame.
+---@param key     string   Bot name-key.
+---@param botName string   Bot's display name.
+---@param anchor  string?  "CENTER" or nil.
+NS.CB_ShowQuests = function(key, botName, anchor)
     local f = NS.CB_GetQuestFrame(key, botName)
     f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", CleanBotFrame, "TOPRIGHT", 4, 0)
+    if anchor == "CENTER" then
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    else
+        f:SetPoint("TOPLEFT", CleanBotFrame, "TOPRIGHT", 4, 0)
+    end
     NS.CB_FetchQuests(key, botName)
     f:Show()
 end
 
 -- ── Toggle quests open/closed ────────────────────────────────────────────
----@param key     string  Bot name-key.
----@param botName string  Bot's display name.
-NS.CB_ToggleQuests = function(key, botName)
+---@param key     string   Bot name-key.
+---@param botName string   Bot's display name.
+---@param anchor  string?  Placement forwarded to CB_ShowQuests ("CENTER" or nil).
+NS.CB_ToggleQuests = function(key, botName, anchor)
     local f = NS.CB_GetQuestFrame(key, botName)
     if f:IsShown() then
         f:Hide()
     else
-        NS.CB_ShowQuests(key, botName)
+        NS.CB_ShowQuests(key, botName, anchor)
     end
 end
 
