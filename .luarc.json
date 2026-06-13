@@ -6,7 +6,10 @@
     "library": [
       "C:/Users/benny/.luadefs/vscode-wow-api/Annotations"
     ],
-    "checkThirdParty": false
+    "checkThirdParty": false,
+    "ignoreDir": [
+      "spec"
+    ]
   },
   "diagnostics": {
     "disable": [

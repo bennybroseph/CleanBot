@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+    paths:
+      - '**.lua'
+      - '.github/workflows/test.yml'
+  pull_request:
+    paths:
+      - '**.lua'
+      - '.github/workflows/test.yml'
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # PUC Lua 5.1 matches the client's language version. The harness is dependency-free,
+      # so no LuaRocks/busted install is needed — just an interpreter.
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - name: Run specs
+        run: lua spec/run.lua
