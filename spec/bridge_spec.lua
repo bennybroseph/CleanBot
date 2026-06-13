@@ -7,8 +7,15 @@
 -- the OnUpdate tick is driven via Mock.tick.
 -- ============================================================
 
-dofile("Bridge.lua")
+-- Load once: re-dofile'ing would re-register the OnUpdate/OnEvent handlers with the mock.
+if not CleanBotNS.CB_EnqueueRequest then dofile("Bridge.lua") end
 local NS = CleanBotNS
+
+-- Item line as the bot streams it (the "items"/"bank" reply format).
+local function itemLine(id, name, count)
+    local s = "|cffffffff|Hitem:" .. id .. "|h[" .. name .. "]|h|r"
+    return count and (s .. " x" .. count) or s
+end
 
 describe("Bridge command routing", function()
     before_each(function()
@@ -93,5 +100,73 @@ describe("Serial whisper queue", function()
 
         Mock.tick(0.3); assert.are.same({ "a" }, order)        -- 0.3 < 0.5: still busy
         Mock.tick(0.3); assert.are.same({ "a", "b" }, order)   -- cumulative 0.6 ≥ 0.5: advances
+    end)
+end)
+
+describe("Whisper reply routing", function()
+    before_each(function()
+        Mock.reset()
+    end)
+
+    it("routes item lines to the section named by the last header (no cross-contamination)", function()
+        local e = { name = "Bot", inventory = { items = {} }, bank = { items = {} },
+                    awaitingInventory = true, invStaging = {},
+                    awaitingBank = true, bankStaging = {} }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", itemLine(111, "Inv One"), "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "=== Bank ===", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", itemLine(222, "Bank One"), "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", itemLine(333, "Bank Two", 3), "Bot")
+
+        assert.equals(1, #e.invStaging)
+        assert.equals(2, #e.bankStaging)
+        assert.is_true(e.invReplyArrived)
+        assert.is_true(e.bankReplyArrived)
+        assert.equals(3, e.bankStaging[2].count)
+    end)
+
+    it("finalizes a bank reply into bank.items on silence", function()
+        local e = { name = "Bot", bank = { items = {} }, awaitingBank = true, bankStaging = {} }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "=== Bank ===", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", itemLine(222, "Bank One"), "Bot")
+        Mock.tick(0.6)
+
+        assert.equals(1, #e.bank.items)
+        assert.is_false(e.awaitingBank)
+        assert.is_nil(e.bankStaging)
+    end)
+
+    it("keeps the stale list when a reply never arrives (wipe guard)", function()
+        local e = { name = "Bot", bank = { items = { { link = "KEEP", count = 1 } } },
+                    awaitingBank = true, bankStaging = {}, bankReplyArrived = false }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.tick(0.6)   -- silence, but no reply ever arrived
+
+        assert.equals(1, #e.bank.items)
+        assert.equals("KEEP", e.bank.items[1].link)
+        assert.is_false(e.awaitingBank)
+    end)
+end)
+
+describe("Stats reply parsing", function()
+    before_each(function() Mock.reset() end)
+
+    it("parses money, bag totals (free→used), and clears awaitingMoney", function()
+        local e = { name = "Bot", inventory = { items = {} }, awaitingMoney = true }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "5g 30s 10c, 12/16 Bag, 87% (5g 24s) Dur, 45/67% XP", "Bot")
+
+        assert.equals(5,  e.money.gold)
+        assert.equals(30, e.money.silver)
+        assert.equals(10, e.money.copper)
+        assert.equals(16, e.inventory.bagTotal)
+        assert.equals(4,  e.inventory.bagUsed)   -- 16 total - 12 free
+        assert.is_false(e.awaitingMoney)
     end)
 end)

@@ -18,6 +18,7 @@ _G.Mock = {
     chat     = {},   -- recorded SendChatMessage on any other channel  → { text=, channel= }
     addon    = {},   -- recorded SendAddonMessage                      → { prefix=, text=, channel= }
     onUpdate = {},   -- captured OnUpdate handlers → { frame=, fn= }
+    onEvent  = {},   -- captured OnEvent handlers  → { frame=, fn= }
     now      = 0,    -- value returned by GetTime()
     raid     = 0,    -- GetNumRaidMembers()
     party    = 0,    -- GetNumPartyMembers()
@@ -41,13 +42,19 @@ function Mock.tick(dt)
     for _, h in ipairs(Mock.onUpdate) do h.fn(h.frame, dt) end
 end
 
+--- Fires a WoW event into every captured OnEvent handler as (frame, event, ...).
+--- e.g. Mock.fireEvent("CHAT_MSG_WHISPER", "=== Bank ===", "Bot").
+function Mock.fireEvent(event, ...)
+    for _, h in ipairs(Mock.onEvent) do h.fn(h.frame, event, ...) end
+end
+
 -- Chainable frame stub. SetScript captures OnUpdate/OnEvent so specs can drive them; every
 -- other method is a no-op returning the frame so load-time frame setup survives `dofile`.
 local function makeFrame()
     local f = {}
     f.SetScript = function(self, event, fn)
         if event == "OnUpdate" then Mock.onUpdate[#Mock.onUpdate + 1] = { frame = self, fn = fn } end
-        if event == "OnEvent"  then self._onEvent = fn end
+        if event == "OnEvent"  then Mock.onEvent[#Mock.onEvent + 1]   = { frame = self, fn = fn } end
         return self
     end
     f.HookScript    = function(self) return self end
