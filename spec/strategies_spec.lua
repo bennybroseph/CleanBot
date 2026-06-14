@@ -46,6 +46,27 @@ describe("Strategy token map", function()
     end)
 end)
 
+describe("Slot-aware visibility (CB_StrategyShownForSlot)", function()
+    -- "cc" has class gaps (no WARRIOR; MAGE supported) in STRATEGY_CLASS_SUPPORT.
+    local cc = { cmd = "cc", field = "useCC" }
+
+    it("delegates to the class on a single-bot slot", function()
+        assert.is_false(NS.CB_StrategyShownForSlot(cc, { class = "WARRIOR" }))
+        assert.is_true(NS.CB_StrategyShownForSlot(cc, { class = "MAGE" }))
+    end)
+
+    it("shows a group entry when ANY member's class supports it", function()
+        assert.is_false(NS.CB_StrategyShownForSlot(cc, { isGroup = true, members = { { class = "WARRIOR" } } }))
+        assert.is_true(NS.CB_StrategyShownForSlot(cc, { isGroup = true, members = { { class = "MAGE" } } }))
+        assert.is_true(NS.CB_StrategyShownForSlot(cc,
+            { isGroup = true, members = { { class = "WARRIOR" }, { class = "MAGE" } } }))
+    end)
+
+    it("shows everything for an empty group (degenerate — panel is hidden anyway)", function()
+        assert.is_true(NS.CB_StrategyShownForSlot(cc, { isGroup = true, members = {} }))
+    end)
+end)
+
 describe("Non-combat strategy map", function()
     it("maps real nc tokens but skips a settingDropdown group's command options", function()
         assert.equals("autoLoot",   NS.NC_STRATEGY_MAP["loot"])   -- normal nc strategy

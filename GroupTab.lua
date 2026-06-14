@@ -731,6 +731,18 @@ local function CB_ApplyMemberSelection()
         NS.CB_RefreshGroupAggregate(NS.groupClassSlots[class])
     end
 
+    -- Reflow the generic Combat/Non-Combat tabs to hide strategies no member's class can use.
+    -- Only when the managed class-set actually changed (selection toggles within one class-set
+    -- are the common case and need no relayout) — keyed by a sorted-unique class signature.
+    local sigParts = {}
+    for _, c in ipairs(classes) do sigParts[#sigParts + 1] = c end
+    table.sort(sigParts)
+    local sig = table.concat(sigParts, ",")
+    if sig ~= NS.groupSlot._classSig then
+        NS.groupSlot._classSig = sig
+        if NS.CB_RelayoutGroupContent then NS.CB_RelayoutGroupContent() end
+    end
+
     CB_SyncGroupViews()
 
     -- Surface the selected members' current formation in the Commands tab: query any

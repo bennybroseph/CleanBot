@@ -263,6 +263,11 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     NS.CB_ApplyFrameSkin(section, 4)
 
     local controls = {}
+    -- Ordered render metadata for CB_RelayoutSection: each item carries its strategy
+    -- (for the visibility test), the frames to show/hide, a `place(y)` that re-pins the
+    -- row at a vertical offset, and the height it consumes. Bundles flag isBundle so the
+    -- relayout tests "any nested option shown" instead of a single field.
+    local layoutItems = {}
     local yOffset  = NS.PADDING.section.top
 
     for _, s in ipairs(strategies) do
@@ -301,10 +306,21 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             end)
 
             controls[s.field] = sl
-            yOffset = yOffset + NS.MARGIN.slider.top + 54 + NS.MARGIN.slider.bottom
+            local sHeight = NS.MARGIN.slider.top + 54 + NS.MARGIN.slider.bottom
+            layoutItems[#layoutItems + 1] = {
+                strat = s, frames = { sl }, height = sHeight,
+                place = function(y) sl:SetPoint("TOPLEFT", section, "TOPLEFT",
+                    NS.PADDING.section.left + NS.MARGIN.slider.left, -y) end,
+            }
+            yOffset = yOffset + sHeight
         elseif s.type == "dropdown" then
             -- Inline exclusive dropdown bundle (e.g. the DPS "Rotation" selector).
-            yOffset = yOffset + CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
+            local consumed, place, frames =
+                CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
+            layoutItems[#layoutItems + 1] = {
+                strat = s, isBundle = true, frames = frames, height = consumed, place = place,
+            }
+            yOffset = yOffset + consumed
         else
             local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
             cb:SetSize(20, 20)
@@ -348,10 +364,20 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             end
 
             controls[s.field] = cb
-            yOffset = yOffset + NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom
+            local cHeight = NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom
+            -- The label is anchored to cb (so re-pinning cb carries it along) but is parented to
+            -- the section, not cb — so it must be shown/hidden explicitly alongside cb, else a
+            -- hidden row's label floats over the rows that repack into its place.
+            layoutItems[#layoutItems + 1] = {
+                strat = s, frames = { cb, lbl }, height = cHeight,
+                place = function(y) cb:SetPoint("TOPLEFT", section, "TOPLEFT",
+                    NS.PADDING.section.left + NS.MARGIN.checkbox.left, -y) end,
+            }
+            yOffset = yOffset + cHeight
         end
     end
 
+    section.layoutItems = layoutItems
     section:SetHeight(yOffset + NS.PADDING.section.bottom)
 
     -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked slider.
@@ -374,6 +400,47 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
     end
 
     return section, controls
+end
+
+-- Whether a section layout item is supported by a slot: a bundle is shown when ANY of its
+-- nested options is, an ordinary row when its own strategy is (CB_StrategyShownForSlot).
+---@param item table  A section.layoutItems entry.
+---@param slot table  The bound slot.
+---@return boolean
+local function CB_LayoutItemShown(item, slot)
+    if item.isBundle then
+        for _, ns in ipairs(item.strat.strategies) do
+            if NS.CB_StrategyShownForSlot(ns, slot) then return true end
+        end
+        return false
+    end
+    return NS.CB_StrategyShownForSlot(item.strat, slot)
+end
+
+-- Reflows a strategy section for the slot's current members: hides rows no member supports,
+-- re-pins the shown rows so the gaps close, and resizes the section. The running offset
+-- mirrors CB_BuildStrategySection exactly (the per-row place closures reuse the same
+-- constants), so a fully-shown section lands identically to its build-time layout. Returns
+-- the new section height (the column relayout uses it to recompute reserved sub-section room).
+---@param section table  A section frame stamped with `layoutItems` by CB_BuildStrategySection.
+---@param slot    table  The bound slot.
+---@return number        The section's new height.
+local function CB_RelayoutSection(section, slot)
+    local items = section.layoutItems
+    if not items then return section:GetHeight() end
+    local yOffset = NS.PADDING.section.top
+    for _, item in ipairs(items) do
+        if CB_LayoutItemShown(item, slot) then
+            item.place(yOffset)
+            for _, f in ipairs(item.frames) do f:Show() end
+            yOffset = yOffset + item.height
+        else
+            for _, f in ipairs(item.frames) do f:Hide() end
+        end
+    end
+    local h = yOffset + NS.PADDING.section.bottom
+    section:SetHeight(h)
+    return h
 end
 
 -- Applies a mutually-exclusive strategy selection per target: each gets a
@@ -599,7 +666,8 @@ end
 -- strategies (class-filtered), led by the noneLabel "clear" entry. Picking one sends the
 -- mutually-exclusive toggle via CB_ApplyExclusiveSelection, and the dropdown self-registers
 -- a type="dropdown" entry so CB_SyncRegistry repaints it from bot state (Individual + Group).
--- Returns the vertical space consumed so the section flow continues below it.
+-- Returns the vertical space consumed (so the section flow continues below it), plus a
+-- `place(y)` that re-pins the header + dropdown for the reflow, and the frames to show/hide.
 ---@param section   table   The section frame to render into.
 ---@param s         table   The dropdown bundle definition.
 ---@param yOffset   number  Current vertical offset within the section.
@@ -609,6 +677,8 @@ end
 ---@param getSource fun(entry:table?):table?  State-table extractor.
 ---@param registry  table?  Registry to self-register into for sync.
 ---@return number           Vertical space consumed (px).
+---@return fun(y:number)    place — re-pins the header + dropdown at a new vertical offset.
+---@return table            frames — { header, dropdown } to show/hide during reflow.
 function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
     local nested    = CB_ShownStrategies(s.strategies, slot.class)
     local noneLabel = s.noneLabel
@@ -646,18 +716,22 @@ function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, 
             UIDropDownMenu_AddButton(info)
         end
         for _, ns in ipairs(nested) do
-            local info           = UIDropDownMenu_CreateInfo()
-            info.text            = ns.name .. CB_PartialSuffix(slot, ns)
-            info.value           = ns.field
-            info.tooltipTitle    = ns.name
-            info.tooltipText     = ns.desc
-            info.tooltipOnButton = 1
-            info.func            = function()
-                UIDropDownMenu_SetText(self, ns.name)
-                CB_ApplyExclusiveSelection(nested, ns.field, cmd, slot, getSource)
+            -- Drop options no current member's class supports (group slot); always
+            -- shown on the single-bot path where nested is already class-filtered.
+            if NS.CB_StrategyShownForSlot(ns, slot) then
+                local info           = UIDropDownMenu_CreateInfo()
+                info.text            = ns.name .. CB_PartialSuffix(slot, ns)
+                info.value           = ns.field
+                info.tooltipTitle    = ns.name
+                info.tooltipText     = ns.desc
+                info.tooltipOnButton = 1
+                info.func            = function()
+                    UIDropDownMenu_SetText(self, ns.name)
+                    CB_ApplyExclusiveSelection(nested, ns.field, cmd, slot, getSource)
+                end
+                info.checked = cd[ns.field] == true
+                UIDropDownMenu_AddButton(info)
             end
-            info.checked = cd[ns.field] == true
-            UIDropDownMenu_AddButton(info)
         end
     end)
 
@@ -668,7 +742,14 @@ function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, 
         }
     end
 
-    return used + NS.MARGIN.dropdown.top + 32 + NS.MARGIN.dropdown.bottom
+    -- Relayout closure: re-pin the header + dropdown to a new vertical offset (used by
+    -- CB_RelayoutSection when earlier rows hide and this bundle slides up).
+    local function place(y)
+        hdr:SetPoint("TOPLEFT", section, "TOPLEFT",
+            NS.PADDING.section.left + NS.MARGIN.checkbox.left, -y)
+        dd:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left, -(y + used))
+    end
+    return used + NS.MARGIN.dropdown.top + 32 + NS.MARGIN.dropdown.bottom, place, { hdr, dd }
 end
 
 -- Unique key for a roleDropdown's none-subsection (the subGroup with `none = true`, shown
@@ -691,6 +772,42 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
     -- that later group (so the Role and Assist dropdowns sit one after the other). Holds
     -- { anchor, maxSubH, afterKey } until that group renders; resolved at the loop's tail.
     local deferredSub = nil
+
+    -- Generic Group columns (group slot, no fixed class) build the FULL strategy list and
+    -- later reflow per selection (CB_RelayoutColumn) to hide strategies no member supports.
+    -- Record an ordered node per top-level group so the reflow can re-run this same anchor
+    -- walk over the built frames. Single-bot / per-class columns build class-filtered and
+    -- never reflow, so they skip this bookkeeping entirely.
+    local isGenericGroup = slot.isGroup and not slot.class
+    local chain = isGenericGroup and {} or nil
+    -- Builds a header re-anchor closure mirroring the build-time anchoring (below prevBottom,
+    -- or the column's top-left when it's the first shown node).
+    local function makeAnchorHead(hdr)
+        return function(pb)
+            if pb then
+                NS.CB_AnchorBelow(hdr, pb)
+            else
+                hdr:ClearAllPoints()
+                hdr:SetPoint("TOPLEFT", col, "TOPLEFT",
+                    (col.paddingLeft or 0) + (hdr.marginLeft or 0),
+                    -((col.paddingTop or 0) + (hdr.marginTop or 0)))
+            end
+        end
+    end
+    -- Whether ANY leaf strategy in a group list is shown for the slot (descends inline
+    -- dropdown bundles). A group node hides when this is false (no member supports anything).
+    local function anyStrategyShown(strategies)
+        for _, s in ipairs(strategies) do
+            if s.type == "dropdown" then
+                for _, ns in ipairs(s.strategies) do
+                    if NS.CB_StrategyShownForSlot(ns, slot) then return true end
+                end
+            elseif NS.CB_StrategyShownForSlot(s, slot) then
+                return true
+            end
+        end
+        return false
+    end
 
     for gi = (startGi or 1), #groups do
         local group = groups[gi]
@@ -724,6 +841,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             -- none-subsection (sg.none — the "DPS" default) is keyed under the ROLE_NONE
             -- sentinel since it has no field of its own.
             local subSections = {}
+            local subSecList  = {}   -- ordered sections, for the reflow's maxSubH recompute
             local maxSubH     = 0
             local initSrc     = getSource(entry) or {}
             for _, sg in ipairs(group.subGroups) do
@@ -736,6 +854,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 sec:Hide()
                 subSections[sg.none and ROLE_NONE or sg.field] =
                     { section = sec, checkboxes = cbs, strategies = sgStrats }
+                subSecList[#subSecList + 1] = sec
                 -- Use the section's own resolved height: subsections may contain an inline
                 -- dropdown (taller than a checkbox row), so a per-row estimate underreserves.
                 maxSubH = math.max(maxSubH, sec:GetHeight())
@@ -805,30 +924,55 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     UIDropDownMenu_AddButton(info)
                 end
                 for _, s in ipairs(strategies) do
-                    local info           = UIDropDownMenu_CreateInfo()
-                    info.text            = s.name .. CB_PartialSuffix(slot, s)
-                    info.value           = s.field
-                    info.tooltipTitle    = s.name
-                    info.tooltipText     = s.desc
-                    info.tooltipOnButton = 1
-                    info.func            = function()
-                        UIDropDownMenu_SetText(self, s.name)
-                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
-                        for _, sub in pairs(subSections) do sub.section:Hide() end
-                        local sec = roleToSection[s.field]
-                        if sec then sec.section:Show() end
+                    -- Hide role options no current member's class can perform (group slot).
+                    if NS.CB_StrategyShownForSlot(s, slot) then
+                        local info           = UIDropDownMenu_CreateInfo()
+                        info.text            = s.name .. CB_PartialSuffix(slot, s)
+                        info.value           = s.field
+                        info.tooltipTitle    = s.name
+                        info.tooltipText     = s.desc
+                        info.tooltipOnButton = 1
+                        info.func            = function()
+                            UIDropDownMenu_SetText(self, s.name)
+                            CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
+                            for _, sub in pairs(subSections) do sub.section:Hide() end
+                            local sec = roleToSection[s.field]
+                            if sec then sec.section:Show() end
+                        end
+                        info.checked = src[s.field] == true
+                        UIDropDownMenu_AddButton(info)
                     end
-                    info.checked = src[s.field] == true
-                    UIDropDownMenu_AddButton(info)
                 end
             end)
+
+            -- Reflow node (generic Group only): the role dropdown stays visible (its "DPS"
+            -- default is always meaningful — every class is at least a damage dealer); the
+            -- reflow only re-pins the header, re-flows each sub-section's rows, and recomputes
+            -- the reserved sub-section height from the rows that survive for the members.
+            local roleNode
+            if isGenericGroup then
+                roleNode = {
+                    kind = "role", groupKey = group.group, shown = function() return true end,
+                    anchorHead = makeAnchorHead(header), dd = dd, ddAnchor = ddAnchor,
+                    subAfter = group.subAfter, maxSubH = maxSubH, frames = { header, dd },
+                    relayoutSubs = function()
+                        local m = 0
+                        for _, sec in ipairs(subSecList) do
+                            m = math.max(m, CB_RelayoutSection(sec, slot))
+                        end
+                        roleNode.maxSubH = m
+                        return m
+                    end,
+                }
+                chain[#chain + 1] = roleNode
+            end
 
             if group.subAfter then
                 -- Defer the sub-sections (and their reserved height) to render below a later
                 -- group; the loop tail re-anchors ddAnchor + drops the spacer once it renders.
                 -- The next group anchors right under the role dropdown → adjacent dropdowns.
                 prevBottom  = dd
-                deferredSub = { anchor = ddAnchor, maxSubH = maxSubH, afterKey = group.subAfter }
+                deferredSub = { anchor = ddAnchor, maxSubH = maxSubH, afterKey = group.subAfter, node = roleNode }
             else
                 -- Spacer to hold vertical room for the dropdown + tallest sub-section.
                 local spacer = CreateFrame("Frame", nil, col)
@@ -837,6 +981,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 spacer.marginBottom = 0
                 spacer:SetPoint("TOPLEFT", ddAnchor, "TOPLEFT", 0, -maxSubH)
                 prevBottom = spacer
+                if roleNode then roleNode.spacer = spacer end
             end
 
             if registry then
@@ -898,18 +1043,21 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     UIDropDownMenu_AddButton(info)
                 end
                 for _, s in ipairs(strategies) do
-                    local info           = UIDropDownMenu_CreateInfo()
-                    info.text            = s.name .. CB_PartialSuffix(slot, s)
-                    info.value           = s.field
-                    info.tooltipTitle    = s.name
-                    info.tooltipText     = s.desc
-                    info.tooltipOnButton = 1
-                    info.func            = function()
-                        UIDropDownMenu_SetText(self, s.name)
-                        CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
+                    -- Drop options no current member's class supports (group slot).
+                    if NS.CB_StrategyShownForSlot(s, slot) then
+                        local info           = UIDropDownMenu_CreateInfo()
+                        info.text            = s.name .. CB_PartialSuffix(slot, s)
+                        info.value           = s.field
+                        info.tooltipTitle    = s.name
+                        info.tooltipText     = s.desc
+                        info.tooltipOnButton = 1
+                        info.func            = function()
+                            UIDropDownMenu_SetText(self, s.name)
+                            CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
+                        end
+                        info.checked = cd[s.field] == true
+                        UIDropDownMenu_AddButton(info)
                     end
-                    info.checked = cd[s.field] == true
-                    UIDropDownMenu_AddButton(info)
                 end
             end)
             if group.readonly then UIDropDownMenu_DisableDropDown(dd) end
@@ -918,6 +1066,13 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 -- groupId is cmd-prefixed: the combat and non-combat Movement groups
                 -- share group="movement", and the none-state map must keep them apart.
                 registry[#registry + 1] = { type = "dropdown", dd = dd, strategies = strategies, getSource = getSource, noneLabel = noneLabel, groupId = cmd .. ":" .. (group.group or group.header) }
+            end
+            if isGenericGroup then
+                chain[#chain + 1] = {
+                    kind = "simple", groupKey = group.group, frames = { header, dd },
+                    anchorHead = makeAnchorHead(header), bottom = dd,
+                    shown = function() return anyStrategyShown(strategies) end,
+                }
             end
             prevBottom = dd
 
@@ -983,6 +1138,14 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             end
             refresh()
             NS.commandRefreshers[#NS.commandRefreshers + 1] = refresh
+            if isGenericGroup then
+                -- A command setting, not a class-gated strategy → always shown.
+                chain[#chain + 1] = {
+                    kind = "simple", groupKey = group.group, frames = { header, dd },
+                    anchorHead = makeAnchorHead(header), bottom = dd,
+                    shown = function() return true end,
+                }
+            end
             prevBottom = dd
 
         else
@@ -1004,6 +1167,13 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             if registry then
                 registry[#registry + 1] = { type = "checkboxes", checkboxes = checkboxes, strategies = groupStrats, getSource = getSource }
             end
+            if isGenericGroup then
+                chain[#chain + 1] = {
+                    kind = "simple", groupKey = group.group, frames = { header, section },
+                    anchorHead = makeAnchorHead(header), bottom = section, section = section,
+                    shown = function() return anyStrategyShown(group.strategies) end,
+                }
+            end
             prevBottom = section
         end
 
@@ -1018,6 +1188,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             spacer.marginBottom = 0
             spacer:SetPoint("TOPLEFT", deferredSub.anchor, "TOPLEFT", 0, -deferredSub.maxSubH)
             prevBottom  = spacer
+            if deferredSub.node then deferredSub.node.spacer = spacer end
             deferredSub = nil
         end
     end
@@ -1030,6 +1201,76 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
         spacer.marginTop    = 0
         spacer.marginBottom = 0
         spacer:SetPoint("TOPLEFT", deferredSub.anchor, "TOPLEFT", 0, -deferredSub.maxSubH)
+        if deferredSub.node then deferredSub.node.spacer = spacer end
+    end
+
+    if isGenericGroup then col.__layoutChain = chain end
+end
+
+-- Reflows one generic Group column for the slot's current members: re-runs the build's
+-- anchor walk over the recorded node chain, hiding groups no member supports and closing
+-- the gap (prevBottom is only advanced past shown nodes). The role dropdown stays put but
+-- re-flows its sub-sections and updates its reserved height; the deferred sub-section block
+-- and its spacer are re-anchored exactly as the build does. Reuses every built frame — no
+-- frame is created here, so repeated relayouts never leak.
+---@param col  table  A column frame stamped with `__layoutChain` (generic Group only).
+---@param slot table  The generic group slot (NS.groupSlot).
+local function CB_RelayoutColumn(col, slot)
+    local chain = col.__layoutChain
+    if not chain then return end
+    local prevBottom = nil
+    local deferred   = nil   -- a role node awaiting its `subAfter` target group
+
+    -- Re-anchor a role node's deferred sub-section block (ddAnchor) below `below`, then its
+    -- spacer below ddAnchor reserving the current maxSubH.
+    local function placeRoleTail(node, below)
+        node.ddAnchor:ClearAllPoints()
+        node.ddAnchor:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, 0)
+        node.spacer:ClearAllPoints()
+        node.spacer:SetPoint("TOPLEFT", node.ddAnchor, "TOPLEFT", 0, -node.maxSubH)
+    end
+
+    for _, node in ipairs(chain) do
+        if node.kind == "role" then
+            -- Always shown; re-pin the header (dd + ddAnchor chain follow) and re-flow subs.
+            node.anchorHead(prevBottom)
+            for _, f in ipairs(node.frames) do f:Show() end
+            node.relayoutSubs()   -- recomputes node.maxSubH from the surviving rows
+            if node.subAfter then
+                prevBottom = node.dd
+                deferred   = node
+            else
+                placeRoleTail(node, node.dd)
+                prevBottom = node.spacer
+            end
+        elseif node.shown(slot) then
+            node.anchorHead(prevBottom)
+            for _, f in ipairs(node.frames) do f:Show() end
+            if node.section then CB_RelayoutSection(node.section, slot) end
+            prevBottom = node.bottom
+        else
+            for _, f in ipairs(node.frames) do f:Hide() end
+            -- prevBottom unchanged → the next shown node anchors here, closing the gap.
+        end
+
+        -- Resolve a deferred role node once its subAfter target group has been processed
+        -- (matches the build's loop-tail resolution; fires regardless of that node's state).
+        if deferred and node.groupKey == deferred.subAfter then
+            placeRoleTail(deferred, prevBottom)
+            prevBottom = deferred.spacer
+            deferred   = nil
+        end
+    end
+
+    -- Fallback: the subAfter target never appeared — reserve below the role dropdown.
+    if deferred then placeRoleTail(deferred, deferred.dd) end
+end
+
+-- Reflows the generic Group Combat / Non-Combat columns for NS.groupSlot's current members.
+-- Called from the Group tab whenever the managed class-set changes (GroupTab.lua).
+NS.CB_RelayoutGroupContent = function()
+    for _, col in ipairs(NS.groupLayoutChains or {}) do
+        CB_RelayoutColumn(col, NS.groupSlot)
     end
 end
 
@@ -1131,6 +1372,14 @@ local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry
 
     CB_BuildColumnGroups(leftCol,  leftGroups,  cmd, slot, tag, 1, registry, getSource)
     CB_BuildColumnGroups(rightCol, rightGroups, cmd, slot, tag, 1, registry, getSource)
+
+    -- Generic Group columns carry a reflow chain (single-bot / per-class columns don't).
+    -- Register them so CB_RelayoutGroupContent can hide unsupported strategies per selection.
+    if leftCol.__layoutChain or rightCol.__layoutChain then
+        NS.groupLayoutChains = NS.groupLayoutChains or {}
+        if leftCol.__layoutChain  then NS.groupLayoutChains[#NS.groupLayoutChains + 1] = leftCol  end
+        if rightCol.__layoutChain then NS.groupLayoutChains[#NS.groupLayoutChains + 1] = rightCol end
+    end
 end
 -- Exported for GroupTab.lua, which renders NS.STRATEGIES / NS.NC_STRATEGIES
 -- against its group slot so Strategies.lua changes reach both tabs for free.

@@ -251,6 +251,22 @@ NS.CB_StrategyShown = function(s, class)
     return sup[class] == true
 end
 
+-- Slot-aware visibility: whether a strategy entry should be shown for a slot. A single-bot
+-- slot defers to its class; a group slot shows the entry when ANY current member's class
+-- supports it (so the generic Group tabs hide strategies no selected bot can use). An empty
+-- group shows everything (degenerate — the generic panel is hidden with no members anyway).
+---@param s    table  Strategy definition.
+---@param slot table  A bot slot or group slot ({ isGroup, class, members }).
+---@return boolean
+NS.CB_StrategyShownForSlot = function(s, slot)
+    if not slot.isGroup then return NS.CB_StrategyShown(s, slot.class) end
+    if #slot.members == 0 then return true end
+    for _, m in ipairs(slot.members) do
+        if NS.CB_StrategyShown(s, m.class) then return true end
+    end
+    return false
+end
+
 -- Iterates the leaf strategies of a list, descending one level into inline
 -- exclusive-dropdown bundles (`type="dropdown"`, whose own `strategies` are the
 -- real toggles). Lets the token map / default builders treat a bundle's options
