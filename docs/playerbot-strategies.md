@@ -289,6 +289,20 @@ Priest `dps`→shadow; Shaman `heal`→resto, `dps`/`melee`→enh, `caster`→el
 Not a conflict, but looks like one: during a pull, `pull`'s PullMultiplier vetoes
 every non-pull action — the bot ignoring orders mid-pull is working as intended.
 
+### Tank self-healing (Paladin) — sparse by design
+
+A tanking Paladin barely self-heals in combat, and it's intended, not a bug.
+`TankPaladinStrategy` adds **no** heal trigger (its `medium health` @65% → **Holy Shield**, a
+block buff). The only in-combat heals come from the always-on `GenericPaladinStrategy`:
+`critical health` (≤`CriticalHealth`, default 25%) → **Lay on Hands** / **Divine Shield** (long
+cooldowns — Divine Shield also sheds all threat), and `divine shield low health` → **Flash of
+Light/Holy Light**, whose trigger is literally `HasAura("divine shield") && health < 80` — i.e. it
+only casts a normal heal *while bubbled*. So from ~25% to full it casts nothing but Holy Shield, and
+full mana is irrelevant (no mana-spending heal runs while tanking). `heal`/`offheal` are
+sibling-exclusive with `tank`, so there's no "tank + self-heal" combo to enable — keep a healer in
+the group, or run the Paladin as **Off-Heal** (ret + emergency heals) if it should self-sustain
+instead of tank.
+
 ---
 
 ## CleanBot integration notes (observations only — no committed work)
