@@ -141,6 +141,7 @@ NS.STRATEGIES = {
             { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "racials",   field = "useRacials",      name = "Use Racials",           desc = "Use racial abilities in combat", default = true },
             { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Crowd-control the enemy marked with the Moon icon" },
+            { cmd = "aggressive", field = "aggressive",     name = "Aggressive",            desc = "Attack any hostile that comes near" },
         },
     },
     {
@@ -156,27 +157,21 @@ NS.STRATEGIES = {
         strategies = NS.MOVEMENT_STRATEGIES,
     },
     {
-        -- Engagement range: close (melee) vs ranged (caster) genuinely conflict, so they're
-        -- an exclusive dropdown. "Default" clears both (the spec re-applies one on reset).
-        -- Normally spec-driven, so it shows the bot's reported mode until you pin one.
-        header     = "Positioning Mode",
-        group      = "posMode",
-        column     = "right",
-        type       = "dropdown",
-        noneLabel  = "Default",
-        noneDesc   = "Use the spec's normal engagement range",
-        strategies = {
-            { cmd = "close",  field = "posClose",  name = "Close (Melee)",
-              desc = "Close to melee range of the target" },
-            { cmd = "ranged", field = "posRanged", name = "Ranged (Caster)",
-              desc = "Hold caster distance — back away when a target gets too close to cast" },
-        },
-    },
-    {
         header = "Positioning",
         group  = "position",
         column = "right",
         strategies = {
+            -- Engagement range as an inline exclusive dropdown leading the section: close (melee)
+            -- vs ranged (caster) genuinely conflict. "Default" clears both (the spec re-applies one
+            -- on reset); normally spec-driven, so it shows the bot's reported mode until you pin one.
+            { type = "dropdown", group = "posMode", header = "Distance", noneLabel = "Default",
+              noneDesc = "Use the spec's normal engagement range",
+              strategies = {
+                  { cmd = "close",  field = "posClose",  name = "Close (Melee)",
+                    desc = "Close to melee range of the target" },
+                  { cmd = "ranged", field = "posRanged", name = "Ranged (Caster)",
+                    desc = "Hold caster distance — back away when a target gets too close to cast" },
+              } },
             { cmd = "kite",      field = "kite",             name = "Kite",               desc = "Run from enemies while you hold their aggro" },
             { cmd = "avoid aoe", field = "avoidAoe",         name = "Avoid AoE",          desc = "Automatically avoid harmful AoE spells" },
             { cmd = "behind",    field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
@@ -203,7 +198,6 @@ NS.STRATEGIES = {
         strategies = {
             { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Mark attackers with raid target icons" },
             { cmd = "grind",      field = "grindMobs",  name = "Grind Mobs", desc = "Roam and attack anything to farm, resting between fights" },
-            { cmd = "aggressive", field = "aggressive", name = "Aggressive", desc = "Attack any hostile that comes near" },
         },
     },
 }
@@ -303,11 +297,14 @@ do
         end
     end
     for _, grp in ipairs(NS.STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do
+        local t = groupToTable[grp.group]
+        -- CB_EachLeafStrategy descends one level into inline exclusive-dropdown bundles, so a
+        -- top-level group may carry a dropdown bundle (e.g. Positioning's "Distance") alongside
+        -- plain checkboxes and its options still map/route like ordinary strategies.
+        CB_EachLeafStrategy(grp.strategies, function(s)
             mapTokens(s)
-            local t = groupToTable[grp.group]
             if t then t[#t + 1] = s end
-        end
+        end)
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
                 local t = subFieldToTable[sg.field]
@@ -393,7 +390,7 @@ end
 NS.CB_DefaultCombat = function()
     local t = {}
     for _, grp in ipairs(NS.STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        CB_EachLeafStrategy(grp.strategies, function(s) t[s.field] = s.default or nil end)
         if grp.defaultField then t[grp.defaultField] = true end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do

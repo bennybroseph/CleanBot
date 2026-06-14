@@ -99,10 +99,10 @@ set to Single Target makes its Healer-DPS damage assist the group's kill target)
 
 | Token | Status | What the source does |
 |---|---|---|
-| `close` | ✅ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee positioning mode. Exposed in the **"Positioning Mode"** exclusive dropdown (Close / Ranged / Default). |
-| `ranged` | ✅ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster positioning mode. The other half of the **"Positioning Mode"** dropdown. |
+| `close` | ✅ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee engagement range. Exposed in the **"Distance"** exclusive dropdown (Close / Ranged / Default) at the top of the Positioning group. |
+| `ranged` | ✅ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster engagement range. The other half of the **"Distance"** dropdown. |
 | `behind` | ✅ | `"not behind target"` → `"set behind"` @ MOVE+7. |
-| `kite` | ✅ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. "Kite" checkbox in the Positioning group (independent of the Positioning Mode dropdown — pairs with `ranged`). |
+| `kite` | ✅ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. "Kite" checkbox in the Positioning group (independent of the Distance dropdown — pairs with `ranged`). |
 | `avoid aoe` | ✅ | Default action `"avoid aoe"` at **emergency** priority — steps out of hostile ground effects. |
 | `tank face` | ✅ | Default action `"tank face"` @ MOVE — turns the mob away from the group. |
 | `formation` | ⬜ | Default action `"combat formation move"` @ NORMAL — holds group formation in combat. |
@@ -118,7 +118,7 @@ throw/gun/bow/crossbow from the equipped ranged weapon.)
 
 | Token | Status | What the source does |
 |---|---|---|
-| `aggressive` | ✅ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. "Aggressive" checkbox in the Other group. |
+| `aggressive` | ✅ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. "Aggressive" checkbox in the Combat Control group. |
 | `grind` | ✅ | `"no target"` → `"attack anything"` @ 4, plus baseline food/drink upkeep. |
 | `pvp` | ✅ | `"enemy player near"` → `"attack enemy player"` @ 55. |
 | `duel` / `start duel` | ⬜ | Accept / initiate duels. |

@@ -423,6 +423,13 @@ local function CB_AggregateGroups(slot, groups, prefix, getMemberSource, aggTabl
     for _, grp in ipairs(groups) do
         if not grp.whisper then
             CB_AggregateStrategyList(slot, grp.strategies, getMemberSource, aggTable)
+            -- Inline exclusive dropdowns at the top level (e.g. Positioning's "Distance") carry
+            -- their own none-state, same as those nested in a subgroup below.
+            for _, s in ipairs(grp.strategies) do
+                if s.type == "dropdown" then
+                    markNone(s.strategies, prefix .. ":" .. (s.group or s.field or "dd"))
+                end
+            end
             if grp.subGroups then
                 for _, sg in ipairs(grp.subGroups) do
                     CB_AggregateStrategyList(slot, sg.strategies, getMemberSource, aggTable)
