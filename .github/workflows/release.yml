@@ -45,11 +45,13 @@ jobs:
           rsync -a \
             --exclude='.git' \
             --exclude='.github' \
+            --exclude='.githooks' \
             --exclude='.gitattributes' \
             --exclude='.gitignore' \
             --exclude='.luarc.json' \
             --exclude='*.warperia' \
             --exclude='docs' \
+            --exclude='spec' \
             --exclude='dist' \
             --exclude='CHANGELOG.md' \
             ./ dist/CleanBot/
