@@ -126,6 +126,7 @@ NS.CLASS_STRATEGIES = {
                 header    = "Blessings (Combat)",
                 type      = "dropdown",
                 noneLabel = "None",   -- clears all blessings (no upkeep — saves mana)
+                noneDesc  = "Maintain no blessing — saves mana",
                 strategies = {
                     { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
@@ -166,6 +167,7 @@ NS.CLASS_STRATEGIES = {
                 header    = "Blessings (Out of Combat)",
                 type      = "dropdown",
                 noneLabel = "None",
+                noneDesc  = "Maintain no blessing — saves mana",
                 strategies = {
                     { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
@@ -596,14 +598,50 @@ NS.CLASS_STRATEGIES = {
                       desc = "Active strategy set by the bot's talents — Restoration healer" },
                 },
             },
-            {
-                header = "Support",
-                strategies = {
-                    { cmd = "offheal", field = "offheal", name = "Off-Heal",
-                      desc = "Provide supplemental healing while in a DPS role" },
-                },
-            },
+            -- Off-Heal (independent add-on; Druid registers it in the non-sibling general
+            -- context) is exposed in the generic Role group's DPS sub-section instead — it
+            -- reads more naturally next to Avoid Aggro than alone in a class group.
         },
     },
 
 }
+
+-- ============================================================
+-- Detected-spec DPS rotation tokens
+--
+-- When the user picks the "DPS" Role, the engine has already dropped the spec's damage
+-- rotation (a sibling of tank/heal), so clearing tank/heal alone leaves the bot with no
+-- rotation. We re-add the rotation that matches the bot's DETECTED talent spec — preserving
+-- intent (a Fury warrior gets Fury back, a Balance druid gets Balance back) — by mapping the
+-- spec field CB_SyncTalentSpec wrote into classData.combat to the rotation token to send.
+--
+-- Only classes whose Role dropdown offers Tank or Heal appear here: only they can leave DPS
+-- and lose the rotation (pure-DPS classes never set a non-DPS role). Tank/heal spec fields are
+-- intentionally absent — picking DPS on them falls back to the Role group's dpsCmdByClass.
+-- ============================================================
+NS.SPEC_DPS_TOKEN = {
+    WARRIOR     = { armsPvE = "arms", armsPvP = "arms", fury = "fury", furyPvP = "fury" },
+    PALADIN     = { retPve = "dps", retPvp = "dps" },
+    PRIEST      = { shadowPve = "dps", shadowPvp = "dps" },
+    SHAMAN      = { elePve = "ele", elePvp = "ele", enhPve = "enh", enhPvp = "enh" },
+    WARLOCK     = { affliPve = "affli", affliPvp = "affli", demoPve = "demo", demoPvp = "demo",
+                    destroPve = "destro", destroPvp = "destro" },
+    DRUID       = { balancePve = "balance", balancePvp = "balance", catPve = "cat", catPvp = "cat" },
+    DEATHKNIGHT = { frostPve = "frost", frostPvp = "frost", unholyPve = "unholy", unholyPvp = "unholy" },
+}
+
+-- The DPS rotation token for a bot's detected talent spec, or nil if its spec isn't a
+-- damage spec / isn't known yet (no inspect). Reads the spec field CB_SyncTalentSpec stamped
+-- into entry.classData.combat (stable across role toggles, unlike the live co? rotation).
+---@param entry table?  CleanBot_PartyBots[key].
+---@return string?       Rotation token to re-add (e.g. "fury", "balance", "dps"), or nil.
+NS.CB_DetectedDpsToken = function(entry)
+    if not (entry and entry.class) then return nil end
+    local map = NS.SPEC_DPS_TOKEN[entry.class]
+    local src = entry.classData and entry.classData.combat
+    if not (map and src) then return nil end
+    for field, token in pairs(map) do
+        if src[field] == true then return token end
+    end
+    return nil
+end

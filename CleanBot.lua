@@ -144,13 +144,17 @@ CleanBot_PartyBots = {}  -- global so other modules and XML scripts can reach it
 -- Layout constants
 -- ============================================================
 NS.EXPANDED_WIDTH    = 850
-NS.FRAME_HEIGHT      = 560
+NS.FRAME_HEIGHT      = 600
 NS.TAB_WIDTH         = 88
 NS.TAB_HEIGHT        = 24
 NS.TITLE_H           = 28
 NS.PAD               = 6
 NS.COLUMN_GAP        = 4   -- horizontal space between side-by-side column pairs
 NS.MODEL_GAP         = 25  -- gap between the model panel and the strategy panel in the Individual tab
+-- Fixed model render width. Pinned to a constant (the value the old modelH*0.7 formula produced
+-- at the original 560-tall frame) so the model column — and thus the strategy-panel width — stays
+-- static regardless of FRAME_HEIGHT. Adjust here if the model looks too wide/narrow.
+NS.MODEL_WIDTH       = 270
 NS.TOP_BAR_H         = NS.TAB_HEIGHT + 8
 NS.BOT_BAR_H         = NS.TAB_HEIGHT + 8
 -- Individual-tab bot selector: ≤ threshold bots show the tab row; more swap to a
@@ -389,7 +393,7 @@ NS.CB_BuildFrames = function()
 end
 
 -- ============================================================
--- Initialise at login (ElvUI is ready by PLAYER_LOGIN)
+-- Initialize at login (ElvUI is ready by PLAYER_LOGIN)
 -- ============================================================
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -407,7 +411,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         NS.THEME_DEFAULTS.transparency  = defaultTransparency
         NS.transparency                 = defaultTransparency
 
-        -- Initialise saved variables, preserving any existing data
+        -- Initialize saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
         if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
@@ -514,7 +518,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent colour is baked in during CB_ApplyFrameSkin calls inside
+        -- Accent color is baked in during CB_ApplyFrameSkin calls inside
         -- NS.CB_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end

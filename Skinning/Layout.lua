@@ -47,7 +47,7 @@ NS.CB_AnchorAhead = function(widget, before)
 end
 
 -- Horizontal rule. ElvUI: 1px line using E.media.blank tinted with the border
--- colour. Fallback: the UI-TooltipDivider-Transparent tiled texture at 8px.
+-- color. Fallback: the UI-TooltipDivider-Transparent tiled texture at 8px.
 -- Width is NOT set — callers size it after anchoring with CB_AnchorBelow.
 --- Creates a 1px horizontal separator frame with margins stamped.
 ---@param parent table  Parent frame to create the separator inside.

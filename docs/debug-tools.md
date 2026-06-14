@@ -74,7 +74,7 @@ ON / OFF / unknown.
 - **Settings → Debug sub-tab** — revealed by `/cbdebug enable`; checkboxes/buttons mirror
   the setters above, and an "Auto (<state>)" label tracks the real handshake underneath
   any override (`NS.CB_RefreshDebugTab`).
-- **Minimap button tooltip** — always shows the real bridge state; adds grey lines for an
+- **Minimap button tooltip** — always shows the real bridge state; adds gray lines for an
   active bridge override, simulate mode, and verify logging.
 - **Persistence** — `debugTabEnabled`, `debugBridgeOverride`, `debugSimulate`, and
   `debugVerify` persist in `CleanBot_SavedVars` and are restored at `PLAYER_LOGIN`

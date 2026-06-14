@@ -51,7 +51,7 @@ local minimapShapes = {
 -- resized minimap it scales so the button still hugs the rim.
 local RIM_OVERHANG = 10
 
---- Repositions the button on the minimap rim for currentAngle, honouring minimap shape
+--- Repositions the button on the minimap rim for currentAngle, honoring minimap shape
 --- AND the live minimap size (radius derived from Minimap:GetWidth()/GetHeight()).
 local function UpdatePosition()
     local a = math.rad(currentAngle)
@@ -75,7 +75,7 @@ end
 UpdatePosition()
 
 -- ── Left-click drag to move ──────────────────────────────────────────────────
--- While dragging, track the cursor's angle from the minimap centre, persist it, reposition.
+-- While dragging, track the cursor's angle from the minimap center, persist it, reposition.
 -- A plain left click (press + release, no drag) still fires OnClick → toggles the window.
 local function OnDragUpdate()
     local mx, my = Minimap:GetCenter()
@@ -141,7 +141,7 @@ end)
 btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- Restore the saved drag position at login. Minimap.lua loads after CleanBot.lua, so its
--- PLAYER_LOGIN handler fires after CleanBot_SavedVars is initialised; by login any
+-- PLAYER_LOGIN handler fires after CleanBot_SavedVars is initialized; by login any
 -- square-minimap addon that provides GetMinimapShape has also loaded, so the reposition
 -- lands on the correct rim.
 local loader = CreateFrame("Frame")

@@ -11,5 +11,6 @@ dofile("spec/framework.lua")
 -- Spec files (add new ones here).
 dofile("spec/inventory_spec.lua")
 dofile("spec/bridge_spec.lua")
+dofile("spec/strategies_spec.lua")
 
 _RUN_FINISH()

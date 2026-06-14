@@ -32,46 +32,104 @@ NS.MOVEMENT_STRATEGIES = {
     { cmd = "stay",           field = "mStay",     name = "Stay",           desc = "Hold current position; return to it if moved" },
     { cmd = "guard",          field = "mGuard",    name = "Guard",          desc = "Guard this spot — engage what approaches, then return" },
     { cmd = "runaway",        field = "mRunaway",  name = "Run Away",       desc = "Keep distance from enemies" },
-    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat specifically from add packs" },
+    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat from add packs" },
 }
 
 NS.STRATEGIES = {
     {
+        -- Rotation axis. tank/heal (and spec aliases bear/blood/resto, plus Paladin offheal)
+        -- live in each class's combat StrategyContext built (false, true) → supportsSiblings:
+        -- mutually exclusive server-side, so this is one exclusive dropdown. "DPS" is the
+        -- noneLabel — no rotation token set means the talent spec's own damage rotation runs.
+        -- There is no universal "dps" token (War/Hun/Mag/Lock/DK register only spec tokens),
+        -- so DPS can only be expressed as the absence of tank/heal. The separate "Assist
+        -- Target" group below is the orthogonal AssistStrategyContext axis (who to focus).
         header     = "Role",
         group      = "role",
         column     = "left",
         type       = "roleDropdown",
+        noneLabel  = "DPS",
+        noneDesc   = "Runs the talent spec's own damage rotation — no tank or heal strategy",
+        -- Render the role sub-sections below the "assist" group so the Role and Assist Target
+        -- dropdowns sit one after the other (see CB_BuildColumnGroups' deferred sub-section).
+        subAfter   = "assist",
+        -- Picking "DPS" clears tank/heal/offheal — but the engine dropped the spec damage
+        -- rotation (a sibling) when tank/heal was set, so clearing alone leaves the bot with
+        -- NO rotation. We re-add the rotation matching the bot's DETECTED talent spec
+        -- (NS.CB_DetectedDpsToken → NS.SPEC_DPS_TOKEN) so a Fury warrior gets Fury back, a
+        -- Balance druid gets Balance back, etc. dpsCmdByClass is only the fallback when the
+        -- spec isn't known yet (no inspect): Paladin/Priest have a single canonical DPS token.
+        dpsCmdByClass = { PALADIN = "dps", PRIEST = "dps" },
         strategies = {
             -- cmdByClass: classes that implement the role under a different token.
             -- Druid/DK have no literal "tank" rotation token — they tank via their
             -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
-            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
+            { cmd = "tank", field = "isTank",   name = "Tank",   desc = "Hold threat so enemies don't attack the group",
               cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
-            -- dps assist / dps aoe are mutually-exclusive target-acquisition siblings
-            -- (AssistStrategyContext, supportsSiblings): single-target focus vs anchoring
-            -- on the highest-HP attacker for AoE cleave. Both are universal (no gating).
-            { cmd = "dps assist", field = "isDPS",    name = "DPS (Single)", desc = "Assist the group on one efficient kill target at a time" },
-            { cmd = "dps aoe",    field = "isDPSAoe", name = "DPS (AoE)",    desc = "Anchor on the toughest attacker so the AoE rotation cleaves the pack" },
-            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing",
+            { cmd = "heal", field = "isHealer", name = "Healer", desc = "Focus on healing the group",
               cmdByClass = { DRUID = "resto", SHAMAN = "resto" } },
+            -- Paladin's offheal IS a sibling of tank/dps/heal (OffhealRetPaladinStrategy =
+            -- full ret damage + emergency heals, replacing the plain ret rotation), so it
+            -- belongs in this exclusive list — but only Paladin registers it that way.
+            -- Druid's offheal is independent and lives in its own ClassData "Support" group.
+            { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "PALADIN",
+              desc = "Retribution DPS that also throws emergency party heals" },
         },
         subGroups = {
-            { field = "isTank",   header = "Tank",    strategies = {
-                { cmd = "tank assist", field = "peelAggro",      name = "Peel Aggro",       desc = "Tank pulls mobs off other party members" },
-                { cmd = "pull",        field = "pull",           name = "Pull",             desc = "Tank pulls mobs using a ranged skill" },
-                { cmd = "pull back",   field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
-                { cmd = "tank face",   field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
+            -- none/DPS section: shown when no rotation token is set (the "DPS" default) and for
+            -- the Paladin Off-Heal role (ret-based, so the same damage options apply). The
+            -- "Rotation" dropdown bundles the mutually-exclusive damage modes: AoE Rotation
+            -- (class cleave) vs Focus Fire (single-target only), or "Balanced" (neither). They
+            -- hard-conflict engine-side (focus vetoes AoE), hence one exclusive selector.
+            { none = true, roles = { "offheal" }, header = "DPS", strategies = {
+                { type = "dropdown", group = "dpsRotation", header = "Rotation", noneLabel = "Balanced",
+                  noneDesc = "Default rotation — neither AoE cleave nor single-target priority",
+                  strategies = {
+                      { cmd = "focus", field = "focusFire",  name = "Focus Fire",
+                        desc = "Focus on single target spells — no AoE or debuffs (healing is unaffected)" },
+                      { cmd = "aoe",   field = "aoeTarget", name = "AoE Rotation",
+                        desc = "Use the class appropriate AoE rotation — cleave / multi-target spells" },
+                  } },
+                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "Hold back damage to avoid pulling threat off the tank" },
+                -- Druid-only independent add-on: throw emergency heals while keeping the DPS
+                -- form's rotation. Shares the "offheal" field with the Paladin Off-Heal ROLE
+                -- above (classOnly keeps each to its own class — a bot is only ever one).
+                { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "DRUID",
+                  desc = "Provide supplemental emergency healing between attacks" },
             }},
-            -- Shared by both DPS roles (single + aoe). "AoE Rotation" is the class cleave
-            -- rotation — distinct from the DPS (AoE) role's target picking.
-            { field = "isDPS", roles = { "isDPS", "isDPSAoe" }, header = "DPS", strategies = {
-                { cmd = "aoe",    field = "aoeTarget",  name = "AoE Rotation", desc = "Use the class AoE rotation — cleave / multi-target spells" },
-                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "DPS actively avoids grabbing threat" },
+            { field = "isTank",   header = "Tank",    strategies = {
+                { cmd = "pull",      field = "pull",           name = "Pull",             desc = "Tank pulls mobs using a ranged skill" },
+                { cmd = "pull back", field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
+                { cmd = "tank face", field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
+                -- Druid-only: also legitimate while tanking (niche — limited in Bear Form, but
+                -- it works). Same "offheal" field as the DPS-section / Paladin-role entries.
+                { cmd = "offheal",   field = "offheal",        name = "Off-Heal", classOnly = "DRUID",
+                  desc = "Provide supplemental healing while tanking (limited in Bear Form)" },
             }},
             { field = "isHealer", header = "Healing", strategies = {
                 { cmd = "save mana",  field = "saveMana",  name = "Save Mana",  desc = "Healers prioritize high-efficiency spells" },
                 { cmd = "healer dps", field = "healerDps", name = "Healer DPS", desc = "Healers cast damage spells when mana allows" },
             }},
+        },
+    },
+    {
+        -- Assist/target axis (AssistStrategyContext, also built (false, true) → exclusive).
+        -- Orthogonal to the rotation Role above: any role may pick a focus target — e.g. a
+        -- Healer set to Single Target so its Healer-DPS damage assists the group's kill target,
+        -- or a Tank set to Tank / Peel. noneLabel "None" clears all three.
+        header     = "Targeting",
+        group      = "assist",
+        column     = "left",
+        type       = "dropdown",
+        noneLabel  = "None",
+        noneDesc   = "No coordinated focus — the bot picks its own targets",
+        strategies = {
+            { cmd = "dps assist", field = "assistSingle", name = "Focus Down",
+              desc = "Focus the group's kill target, one enemy at a time" },
+            { cmd = "dps aoe",    field = "assistAoe",    name = "Cleave Anchor",
+              desc = "Target the toughest attacker so AoE/Cleave hits the whole pack" },
+            { cmd = "tank assist", field = "assistTank",  name = "Peel",
+              desc = "Target mobs attacking non-tank party members" },
         },
     },
     {
@@ -82,9 +140,8 @@ NS.STRATEGIES = {
             { cmd = "potions",   field = "usePotions",      name = "Use Potions",           desc = "Use healing and mana potions in combat", default = true },
             { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "racials",   field = "useRacials",      name = "Use Racials",           desc = "Use racial abilities in combat", default = true },
-            { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
-            { cmd = "focus",     field = "lowThreatCast",   name = "Low Threat Casting",    desc = "Stop casting AoE threat and debuff spells" },
-            { cmd = "avoid aoe", field = "avoidAoe",        name = "Avoid AoE",             desc = "Automatically avoid harmful AoE spells" },
+            { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Crowd-control the enemy marked with the Moon icon" },
+            { cmd = "aggressive", field = "aggressive",     name = "Aggressive",            desc = "Attack any hostile that comes near" },
         },
     },
     {
@@ -96,6 +153,7 @@ NS.STRATEGIES = {
         column     = "right",
         type       = "dropdown",
         noneLabel  = "Free Roam",
+        noneDesc   = "No pinned position — combat positioning decides where to stand",
         strategies = NS.MOVEMENT_STRATEGIES,
     },
     {
@@ -103,14 +161,30 @@ NS.STRATEGIES = {
         group  = "position",
         column = "right",
         strategies = {
-            { cmd = "behind", field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
+            -- Engagement range as an inline exclusive dropdown leading the section: close (melee)
+            -- vs ranged (caster) genuinely conflict. "Default" clears both (the spec re-applies one
+            -- on reset); normally spec-driven, so it shows the bot's reported mode until you pin one.
+            { type = "dropdown", group = "posMode", header = "Distance", noneLabel = "Default",
+              noneDesc = "Use the spec's normal engagement range",
+              strategies = {
+                  { cmd = "close",  field = "posClose",  name = "Close (Melee)",
+                    desc = "Close to melee range of the target" },
+                  { cmd = "ranged", field = "posRanged", name = "Ranged (Caster)",
+                    desc = "Hold caster distance — back away when a target gets too close to cast" },
+              } },
+            { cmd = "kite",      field = "kite",             name = "Kite",               desc = "Run from enemies while you hold their aggro" },
+            { cmd = "avoid aoe", field = "avoidAoe",         name = "Avoid AoE",          desc = "Automatically avoid harmful AoE spells" },
+            { cmd = "behind",    field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
         },
     },
     {
-        header = "Wait to Attack",
+        header = "Timing Controls",
         group  = "timing",
         column = "right",
         strategies = {
+            { cmd = "cast time", field = "castTime", name = "Smart Cast Time",
+              desc = "Skips casts too slow to land before the target dies — favors faster spells on dying mobs",
+              default = true },
             { cmd = "wait for attack",      field = "waitAttack",    name = "Enable Wait to Attack", desc = "Wait a set time before attacking or healing" },
             { cmd = "wait for attack time", field = "waitAttackTime", name = "Delay",
               type = "timerSlider", min = 1, max = 10, dependsOn = "waitAttack",
@@ -122,8 +196,8 @@ NS.STRATEGIES = {
         group  = "other",
         column = "right",
         strategies = {
-            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
-            { cmd = "grind", field = "grindMobs", name = "Grind Mobs", desc = "Attack any visible target" },
+            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Mark attackers with raid target icons" },
+            { cmd = "grind",      field = "grindMobs",  name = "Grind Mobs", desc = "Roam and attack anything to farm, resting between fights" },
         },
     },
 }
@@ -164,10 +238,49 @@ end
 ---@return boolean
 NS.CB_StrategyShown = function(s, class)
     if not class then return true end
+    -- classOnly: entry exclusive to one class (string) or a set (table). Used where a shared
+    -- token surfaces differently per class — e.g. "offheal" is a Paladin Role option but a
+    -- Druid-only Combat Control checkbox. Definitive: matching class shows, all others hide.
+    if s.classOnly then
+        if type(s.classOnly) == "table" then return s.classOnly[class] == true end
+        return s.classOnly == class
+    end
     if s.cmdByClass and s.cmdByClass[class] then return true end
     local sup = NS.STRATEGY_CLASS_SUPPORT[s.cmd]
     if not sup then return true end
     return sup[class] == true
+end
+
+-- Slot-aware visibility: whether a strategy entry should be shown for a slot. A single-bot
+-- slot defers to its class; a group slot shows the entry when ANY current member's class
+-- supports it (so the generic Group tabs hide strategies no selected bot can use). An empty
+-- group shows everything (degenerate — the generic panel is hidden with no members anyway).
+---@param s    table  Strategy definition.
+---@param slot table  A bot slot or group slot ({ isGroup, class, members }).
+---@return boolean
+NS.CB_StrategyShownForSlot = function(s, slot)
+    if not slot.isGroup then return NS.CB_StrategyShown(s, slot.class) end
+    if #slot.members == 0 then return true end
+    for _, m in ipairs(slot.members) do
+        if NS.CB_StrategyShown(s, m.class) then return true end
+    end
+    return false
+end
+
+-- Iterates the leaf strategies of a list, descending one level into inline
+-- exclusive-dropdown bundles (`type="dropdown"`, whose own `strategies` are the
+-- real toggles). Lets the token map / default builders treat a bundle's options
+-- as ordinary strategies. `fn(leaf)`.
+---@param list table  A strategies array (may contain dropdown bundles).
+---@param fn   fun(s:table)
+local function CB_EachLeafStrategy(list, fn)
+    for _, s in ipairs(list) do
+        if s.type == "dropdown" then
+            for _, n in ipairs(s.strategies) do fn(n) end
+        else
+            fn(s)
+        end
+    end
 end
 
 NS.STRATEGY_MAP        = {}
@@ -200,21 +313,28 @@ do
         end
     end
     for _, grp in ipairs(NS.STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do
+        local t = groupToTable[grp.group]
+        -- CB_EachLeafStrategy descends one level into inline exclusive-dropdown bundles, so a
+        -- top-level group may carry a dropdown bundle (e.g. Positioning's "Distance") alongside
+        -- plain checkboxes and its options still map/route like ordinary strategies.
+        CB_EachLeafStrategy(grp.strategies, function(s)
             mapTokens(s)
-            local t = groupToTable[grp.group]
             if t then t[#t + 1] = s end
-        end
+        end)
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
-                for _, s in ipairs(sg.strategies) do
+                local t = subFieldToTable[sg.field]
+                CB_EachLeafStrategy(sg.strategies, function(s)
                     mapTokens(s)
-                    local t = subFieldToTable[sg.field]
                     if t then t[#t + 1] = s end
-                end
+                end)
             end
         end
     end
+    -- "passive" is surfaced in the Commands tab (not as a Combat-tab strategy), but it is still
+    -- a combat-strategy token — keep it in the parse map so a co? reply sets entry.combat.passive
+    -- (the Commands-tab checkbox reads that for its state).
+    NS.STRATEGY_MAP["passive"] = "passive"
 end
 
 -- ============================================================
@@ -230,7 +350,7 @@ NS.NC_STRATEGIES = {
         column = "left",
         strategies = {
             { cmd = "food", field = "useFood",   name = "Eat & Drink", desc = "Automatically eat and drink when low on health or mana", default = true },
-            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Enable PvP mode — bot will flag for PvP and engage enemy players", default = true },
+            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Flag for PvP and engage enemy players", default = true },
         },
     },
     {
@@ -241,6 +361,7 @@ NS.NC_STRATEGIES = {
         column       = "left",
         type         = "dropdown",
         noneLabel    = "Free Roam",
+        noneDesc     = "No follow or hold — the bot isn't tethered to you or a spot",
         defaultField = "mFollow",
         strategies   = NS.MOVEMENT_STRATEGIES,
     },
@@ -253,6 +374,28 @@ NS.NC_STRATEGIES = {
             { cmd = "gather", field = "autoGather", name = "Auto Gather", desc = "Automatically gather nearby nodes after combat", default = true },
         },
     },
+    {
+        -- Loot-quality policy (the "ll" command — a per-bot setting queried via "ll ?", NOT an
+        -- nc on/off strategy). type="settingDropdown" sends "ll <value>" to the slot's targets and
+        -- reflects entry.lootStrategy (parsed from the "Loot strategy:" reply). It carries `options`
+        -- (value/name/desc) rather than `strategies`, so the nc map/default builders skip it.
+        -- Mode meanings verified from each strategy's CanLoot() (LootStrategyValue.cpp) + the
+        -- ItemUsage classification (ItemUsageValue.cpp): gray items with a sell price resolve to
+        -- ITEM_USAGE_VENDOR, so "normal" already loots gray vendor-trash. Default is "normal"
+        -- (LootStrategyValue's ManualSetValue base is seeded with `normal`).
+        header  = "Loot Quality",
+        group   = "lootQuality",
+        column  = "right",
+        type    = "settingDropdown",
+        cmd     = "ll",
+        field   = "lootStrategy",
+        options = {
+            { value = "all",        name = "All",        desc = "Loot everything on the corpse" },
+            { value = "normal",     name = "Normal",     desc = "Loot items with a use or sell value — includes most gray junk (Default)" },
+            { value = "disenchant", name = "Disenchant", desc = "Loot useful items plus disenchantable gear (uncommon+ weapons/armor)" },
+            { value = "gray",       name = "Gray",       desc = "Loot useful items and every gray, even worthless ones" },
+        },
+    },
 }
 
 NS.NC_STRATEGY_MAP      = {}
@@ -262,10 +405,14 @@ do
         general      = NS.NC_GENERAL_STRATEGIES,
     }
     for _, grp in ipairs(NS.NC_STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do
-            NS.NC_STRATEGY_MAP[s.cmd] = s.field
-            local t = groupToTable[grp.group]
-            if t then t[#t + 1] = s end
+        -- settingDropdown groups carry `options`, not `strategies` (and their options are command
+        -- values, not nc tokens) — skip them so nothing maps a nil cmd into NC_STRATEGY_MAP.
+        if grp.strategies then
+            for _, s in ipairs(grp.strategies) do
+                NS.NC_STRATEGY_MAP[s.cmd] = s.field
+                local t = groupToTable[grp.group]
+                if t then t[#t + 1] = s end
+            end
         end
     end
 end
@@ -285,11 +432,11 @@ end
 NS.CB_DefaultCombat = function()
     local t = {}
     for _, grp in ipairs(NS.STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        CB_EachLeafStrategy(grp.strategies, function(s) t[s.field] = s.default or nil end)
         if grp.defaultField then t[grp.defaultField] = true end
         if grp.subGroups then
             for _, sg in ipairs(grp.subGroups) do
-                for _, s in ipairs(sg.strategies) do t[s.field] = s.default or nil end
+                CB_EachLeafStrategy(sg.strategies, function(s) t[s.field] = s.default or nil end)
             end
         end
     end
@@ -300,7 +447,9 @@ end
 NS.CB_DefaultNonCombat = function()
     local t = {}
     for _, grp in ipairs(NS.NC_STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        if grp.strategies then  -- settingDropdown groups carry `options`, not seedable strategies
+            for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        end
         if grp.defaultField then t[grp.defaultField] = true end
     end
     return t

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Model.lua  —  DressUpModel creation, right-click
---                        rotation drag, and favourite-star button.
+--                        rotation drag, and favorite-star button.
 -- NS.CB_CreateModel is called once per pool slot from CB_CreateSlot.
 -- All event handlers resolve the bound bot live via `slot`, so the model
 -- is rebound (SetUnit + star/equip refresh) rather than recreated.
@@ -56,7 +56,7 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         if button == "RightButton" then stopDrag() end
     end)
 
-    -- ── Favourite star button ─────────────────────────────────
+    -- ── Favorite star button ─────────────────────────────────
     local starBtn = CreateFrame("Button", "CleanBotStar" .. slot.index, model)
     starBtn:SetSize(24, 24)
     starBtn:SetPoint("TOPLEFT", model, "TOPLEFT", 6, -6)
@@ -109,7 +109,7 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         end
     end
 
-    --- Tints the star gold when the bound bot is a favorite, grey otherwise.
+    --- Tints the star gold when the bound bot is a favorite, gray otherwise.
     local function UpdateStar()
         if slot.key and IsFavorite(slot.key) then
             starTex:SetVertexColor(1, 0.82, 0)

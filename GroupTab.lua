@@ -92,28 +92,30 @@ local ROLE_TANK = { 0,     19 / 64, 22 / 64, 41 / 64 }
 local ROLE_HEAL = { 20/64, 39 / 64,  1 / 64, 20 / 64 }
 local ROLE_DMG  = { 20/64, 39 / 64, 22 / 64, 41 / 64 }
 
--- A bot belongs to a role group if ANY of the listed combat fields is set; coords
--- give the role's right-aligned list icon.
+-- DPS = the rotation default: a bot with combat data but neither the Tank nor Healer
+-- rotation token. There is no universal "dps" token, so the damage role is the absence of
+-- tank/heal (see the Role group in Strategies.lua).
+local function isDmgRole(cd) return cd ~= nil and not cd.isTank and not cd.isHealer end
+
+-- Role groups, keyed off the two combat axes: the rotation role (isTank / isHealer /
+-- DPS-default) and, for the DPS sub-buckets, the assist-target token (assistSingle /
+-- assistAoe). `match(cd)` tests a bot's combat state; coords give the right-aligned list icon.
 local ROLE_GROUPS = {
-    { label = "Tanks",        value = "role:tank",      coords = ROLE_TANK, fields = { "isTank" } },
-    { label = "DPS",          value = "role:dps",       coords = ROLE_DMG,  fields = { "isDPS", "isDPSAoe" } },
-    { label = "DPS (Single)", value = "role:dpsSingle", coords = ROLE_DMG,  fields = { "isDPS" } },
-    { label = "DPS (AoE)",    value = "role:dpsAoe",    coords = ROLE_DMG,  fields = { "isDPSAoe" } },
-    { label = "Healers",      value = "role:healer",    coords = ROLE_HEAL, fields = { "isHealer" } },
+    { label = "Tanks",        value = "role:tank",      coords = ROLE_TANK, match = function(cd) return cd ~= nil and cd.isTank == true end },
+    { label = "DPS",          value = "role:dps",       coords = ROLE_DMG,  match = isDmgRole },
+    { label = "DPS (Single)", value = "role:dpsSingle", coords = ROLE_DMG,  match = function(cd) return isDmgRole(cd) and cd.assistSingle == true end },
+    { label = "DPS (AoE)",    value = "role:dpsAoe",    coords = ROLE_DMG,  match = function(cd) return isDmgRole(cd) and cd.assistAoe == true end },
+    { label = "Healers",      value = "role:healer",    coords = ROLE_HEAL, match = function(cd) return cd ~= nil and cd.isHealer == true end },
 }
 local roleByValue = {}
 for _, rg in ipairs(ROLE_GROUPS) do roleByValue[rg.value] = rg end
 
--- Whether a bot entry currently fills a role group (any field true).
----@param entry  table?  CleanBot_PartyBots[key].
----@param fields table   Role field names to test.
+-- Whether a bot entry currently fills a role group (its match predicate over combat state).
+---@param entry table?  CleanBot_PartyBots[key].
+---@param rg    table   Role-group descriptor with a `match(cd)` predicate.
 ---@return boolean
-local function CB_BotInRole(entry, fields)
-    if not (entry and entry.combat) then return false end
-    for _, f in ipairs(fields) do
-        if entry.combat[f] == true then return true end
-    end
-    return false
+local function CB_BotInRole(entry, rg)
+    return rg.match(entry and entry.combat) == true
 end
 
 -- The role-icon descriptor for a bot's CURRENT role (priority tank > heal > dps),
@@ -123,11 +125,10 @@ end
 local function CB_RoleIconForKey(key)
     local cd = CleanBot_PartyBots[key] and CleanBot_PartyBots[key].combat
     if not cd then return nil end
-    local coords
+    -- tank > heal > dps (the default for any bot with combat data and no tank/heal token).
+    local coords = ROLE_DMG
     if cd.isTank then coords = ROLE_TANK
-    elseif cd.isHealer then coords = ROLE_HEAL
-    elseif cd.isDPS or cd.isDPSAoe then coords = ROLE_DMG end
-    if not coords then return nil end
+    elseif cd.isHealer then coords = ROLE_HEAL end
     return { texture = ROLE_TEX, coords = coords }
 end
 
@@ -145,7 +146,7 @@ local function roleRank(key)
     if cd then
         if cd.isTank then return 1
         elseif cd.isHealer then return 2
-        elseif cd.isDPS or cd.isDPSAoe then return 3 end
+        else return 3 end  -- combat data but no tank/heal token → DPS default
     end
     return 9
 end
@@ -201,7 +202,7 @@ end
 
 -- Items for the groups list: the managed "All" group, then class groups
 -- (alphabetical, class-colored + icon), then role groups, then custom groups
--- sorted by name. A custom group greys when ANY stored member is missing from
+-- sorted by name. A custom group grays when ANY stored member is missing from
 -- the party/raid.
 ---@return table  Array of select-list item tables.
 local function CB_GroupItems()
@@ -223,7 +224,7 @@ local function CB_GroupItems()
     for _, rg in ipairs(ROLE_GROUPS) do
         local count = 0
         for _, d in ipairs(NS.desiredBots or {}) do
-            if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then count = count + 1 end
+            if CB_BotInRole(CleanBot_PartyBots[d.key], rg) then count = count + 1 end
         end
         if count > 0 then
             items[#items + 1] = { text = rg.label, value = rg.value,
@@ -242,7 +243,7 @@ local function CB_GroupItems()
         for _, botName in ipairs(groups[name]) do
             if not live[strlower(botName)] then missing = true break end
         end
-        items[#items + 1] = { text = name, value = "custom:" .. name, grey = missing }
+        items[#items + 1] = { text = name, value = "custom:" .. name, gray = missing }
     end
     return items
 end
@@ -250,14 +251,14 @@ end
 -- Appends one group's LIVE members (send/aggregate targets) and member-list
 -- items into the accumulators, deduping across groups (a bot in several selected
 -- groups appears once). Live member/item values are the bot KEY for every kind;
--- a stored custom-group member missing from the roster gets a grey item keyed by
+-- a stored custom-group member missing from the roster gets a gray item keyed by
 -- its stored name (selectable so it can still be removed).
 ---@param value     string  "all:all" | "class:CLASS" | "role:..." | "custom:Name".
 ---@param members   table   Accumulator: array of {key,name,class,value}.
 ---@param items     table   Accumulator: select-list item tables.
 ---@param seenLive  table   key → true (dedup across groups).
----@param seenGrey  table   strlower(stored name) → true (dedup across groups).
-local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+---@param seenGray  table   strlower(stored name) → true (dedup across groups).
+local function CB_CollectGroupMembers(value, members, items, seenLive, seenGray)
     -- Adds one live roster bot (if not already collected).
     local function addLive(d)
         if seenLive[d.key] then return end
@@ -281,7 +282,7 @@ local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
         local rg = roleByValue[value]
         if rg then
             for _, d in ipairs(NS.desiredBots or {}) do
-                if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then addLive(d) end
+                if CB_BotInRole(CleanBot_PartyBots[d.key], rg) then addLive(d) end
             end
         end
     elseif kind == "custom" then
@@ -291,9 +292,9 @@ local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
             local d = live[strlower(botName)]
             if d then
                 addLive(d)
-            elseif not seenGrey[strlower(botName)] then
-                seenGrey[strlower(botName)] = true
-                items[#items + 1] = { text = botName, value = botName, grey = true }
+            elseif not seenGray[strlower(botName)] then
+                seenGray[strlower(botName)] = true
+                items[#items + 1] = { text = botName, value = botName, gray = true }
             end
         end
     end
@@ -302,15 +303,15 @@ end
 -- Resolves the SELECTED group set into the union of their members + items,
 -- sorted. Sort rule: a single selected group keeps its kind-specific order
 -- ("all" → Class → Role → Name; one class → Role → Name; role/custom → Class →
--- Name); several groups use the "all" rule. Greyed items sort last.
+-- Name); several groups use the "all" rule. Grayed items sort last.
 ---@param values table  Selected group values, in list order.
 ---@return table members  Array of {key,name,class,value}.
 ---@return table items    Select-list item tables for the member list.
 local function CB_ResolveSelectedMembers(values)
     local members, items = {}, {}
-    local seenLive, seenGrey = {}, {}
+    local seenLive, seenGray = {}, {}
     for _, value in ipairs(values) do
-        CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+        CB_CollectGroupMembers(value, members, items, seenLive, seenGray)
     end
 
     local kind = #values == 1 and values[1]:match("^(%a+):") or "all"
@@ -331,9 +332,9 @@ local function CB_ResolveSelectedMembers(values)
         return cmp(a.class, a.key, a.name or "", b.class, b.key, b.name or "")
     end)
     table.sort(items, function(a, b)
-        local ag, bg = a.grey and 1 or 0, b.grey and 1 or 0
+        local ag, bg = a.gray and 1 or 0, b.gray and 1 or 0
         if ag ~= bg then return ag < bg end
-        if a.grey then return (a.text or "") < (b.text or "") end
+        if a.gray then return (a.text or "") < (b.text or "") end
         return cmp(a.class, a.botKey, a.text or "", b.class, b.botKey, b.text or "")
     end)
 
@@ -353,8 +354,9 @@ end
 ---@param getMemberSource fun(entry:table?):table?  Extracts a member's state table.
 ---@param aggTable        table  The aggregate table to write into (mutated in place).
 local function CB_AggregateStrategyList(slot, list, getMemberSource, aggTable)
+    if not list then return end   -- e.g. a settingDropdown group has `options`, not `strategies`
     local total = #slot.members
-    for _, s in ipairs(list) do
+    local function aggregateOne(s)
         local result = nil
         local count  = 0
         for _, m in ipairs(slot.members) do
@@ -378,6 +380,15 @@ local function CB_AggregateStrategyList(slot, list, getMemberSource, aggTable)
         aggTable[s.field] = result
         slot.partialFields[s.field] = (count > 0 and count < total) and true or nil
     end
+    -- Inline exclusive-dropdown bundles have no field of their own; aggregate their
+    -- nested options instead (the real toggles).
+    for _, s in ipairs(list) do
+        if s.type == "dropdown" then
+            for _, n in ipairs(s.strategies) do aggregateOne(n) end
+        else
+            aggregateOne(s)
+        end
+    end
 end
 
 -- Aggregates every group in a definition table into aggTable, including
@@ -391,32 +402,51 @@ end
 ---@param getMemberSource fun(entry:table?):table?  Extracts a member's state table.
 ---@param aggTable        table   The aggregate table to write into (mutated in place).
 local function CB_AggregateGroups(slot, groups, prefix, getMemberSource, aggTable)
+    -- A member with nothing active in an exclusive set sits at "none" — the noneLabel
+    -- then joins the dropdown display list. groupId must match the registry's:
+    -- cmd-prefixed group/header (top-level group) or group key (inline dropdown bundle).
+    local function markNone(strategies, groupId)
+        local anyNone = false
+        for _, m in ipairs(slot.members) do
+            local src = getMemberSource(CleanBot_PartyBots[m.key])
+            local hasActive = false
+            for _, s in ipairs(strategies) do
+                if NS.CB_StrategyShown(s, m.class) and src and src[s.field] == true then
+                    hasActive = true
+                    break
+                end
+            end
+            if not hasActive then anyNone = true break end
+        end
+        slot.noneActive[groupId] = anyNone or nil
+    end
+
     for _, grp in ipairs(groups) do
-        if not grp.whisper then
+        -- Skip whisper (talent-spec) groups and settingDropdown groups: the latter carry `options`
+        -- (a queried command setting like loot quality), not aggregatable `strategies` — they
+        -- self-refresh via NS.commandRefreshers, outside the registry aggregation.
+        if not grp.whisper and grp.strategies then
             CB_AggregateStrategyList(slot, grp.strategies, getMemberSource, aggTable)
+            -- Inline exclusive dropdowns at the top level (e.g. Positioning's "Distance") carry
+            -- their own none-state, same as those nested in a subgroup below.
+            for _, s in ipairs(grp.strategies) do
+                if s.type == "dropdown" then
+                    markNone(s.strategies, prefix .. ":" .. (s.group or s.field or "dd"))
+                end
+            end
             if grp.subGroups then
                 for _, sg in ipairs(grp.subGroups) do
                     CB_AggregateStrategyList(slot, sg.strategies, getMemberSource, aggTable)
+                    -- Inline exclusive dropdowns inside a subgroup carry their own none-state.
+                    for _, s in ipairs(sg.strategies) do
+                        if s.type == "dropdown" then
+                            markNone(s.strategies, prefix .. ":" .. (s.group or s.field or "dd"))
+                        end
+                    end
                 end
             end
             if grp.noneLabel then
-                -- A member with nothing active in this exclusive set sits at
-                -- "none" — the noneLabel then joins the dropdown display list.
-                -- Key must match the registry's: cmd-prefixed group/header.
-                local groupId = prefix .. ":" .. (grp.group or grp.header)
-                local anyNone = false
-                for _, m in ipairs(slot.members) do
-                    local src = getMemberSource(CleanBot_PartyBots[m.key])
-                    local hasActive = false
-                    for _, s in ipairs(grp.strategies) do
-                        if NS.CB_StrategyShown(s, m.class) and src and src[s.field] == true then
-                            hasActive = true
-                            break
-                        end
-                    end
-                    if not hasActive then anyNone = true break end
-                end
-                slot.noneActive[groupId] = anyNone or nil
+                markNone(grp.strategies, prefix .. ":" .. (grp.group or grp.header))
             end
         end
     end
@@ -651,7 +681,7 @@ local function CB_ManagingText(managed)
 end
 
 -- Applies the member list's current selection as the managed set: the strategy
--- panel aggregates over and fans out to only the selected (live) bots. Greys map
+-- panel aggregates over and fans out to only the selected (live) bots. Grays map
 -- to no member and are filtered out. No selection → the empty state.
 local function CB_ApplyMemberSelection()
     local byValue = {}
@@ -701,15 +731,28 @@ local function CB_ApplyMemberSelection()
         NS.CB_RefreshGroupAggregate(NS.groupClassSlots[class])
     end
 
+    -- Reflow the generic Combat/Non-Combat tabs to hide strategies no member's class can use.
+    -- Only when the managed class-set actually changed (selection toggles within one class-set
+    -- are the common case and need no relayout) — keyed by a sorted-unique class signature.
+    local sigParts = {}
+    for _, c in ipairs(classes) do sigParts[#sigParts + 1] = c end
+    table.sort(sigParts)
+    local sig = table.concat(sigParts, ",")
+    if sig ~= NS.groupSlot._classSig then
+        NS.groupSlot._classSig = sig
+        if NS.CB_RelayoutGroupContent then NS.CB_RelayoutGroupContent() end
+    end
+
     CB_SyncGroupViews()
 
     -- Surface the selected members' current formation in the Commands tab: query any
-    -- unknown ones (replies repaint via CB_RefreshFormations) and repaint now.
+    -- unknown ones (replies repaint via CB_RefreshCommands) and repaint now.
     for _, m in ipairs(managed) do
         local e = CleanBot_PartyBots[m.key]
         if e and NS.CB_FetchFormation then NS.CB_FetchFormation(e) end
+        if e and NS.CB_FetchLootStrategy then NS.CB_FetchLootStrategy(e) end
     end
-    if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
+    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 end
 
 -- Applies the group list's current selection: resolves the union of the selected
@@ -747,7 +790,7 @@ local function CB_RebuildGroupListOnly()
     if selectedGroupValues then groupList:SetSelectedValues(selectedGroupValues) end
 end
 
--- Rebuilds the Group tab from the current roster: group items, grey states,
+-- Rebuilds the Group tab from the current roster: group items, gray states,
 -- selection restore, and the empty state. Hooked from CleanBot_RefreshTabs
 -- (both exits), so every roster change flows through here.
 NS.CB_RefreshGroupTab = function()
@@ -1091,6 +1134,22 @@ NS.CleanBot_BuildGroupTab = function()
             for _, m in ipairs(NS.groupSlot.members) do
                 local e = CleanBot_PartyBots[m.key]; if e then e.formation = t end
             end
+        end,
+        function()  -- aggregate passive: all members agree → that bool; differ → MIXED
+            local result
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]
+                local v = (e and e.combat and e.combat.passive) == true
+                if result == nil then result = v
+                elseif result ~= v then return NS.MIXED end
+            end
+            return result
+        end,
+        function(b)
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]
+                if e then e.combat = e.combat or {}; e.combat.passive = b end
+            end
         end)
 
     CB_SelectGroupInnerTab("commands")
@@ -1258,7 +1317,7 @@ NS.CleanBot_BuildGroupTab = function()
             return
         end
         -- Member values are bot KEYS for live members; map back to display/stored
-        -- names for removal (greys carry their stored name as the value).
+        -- names for removal (grays carry their stored name as the value).
         local byValue = {}
         for _, m in ipairs(currentMembers) do byValue[m.value] = m end
         local bots = {}

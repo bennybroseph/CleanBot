@@ -320,13 +320,13 @@ end)
 describe("Formation reply parsing", function()
     before_each(function() Mock.reset() end)
 
-    it("caches the formation token from a colour-coded 'Formation:' whisper", function()
+    it("caches the formation token from a color-coded 'Formation:' whisper", function()
         local e = { name = "Bot" }
         CleanBot_PartyBots = { bot = e }
 
         Mock.fireEvent("CHAT_MSG_WHISPER", "Formation: |cff00ff00arrow", "Bot")
 
-        assert.equals("arrow", e.formation)   -- colour codes stripped, lowercased
+        assert.equals("arrow", e.formation)   -- color codes stripped, lowercased
     end)
 
     it("leaves formation unset for an unrelated whisper", function()
@@ -336,5 +336,27 @@ describe("Formation reply parsing", function()
         Mock.fireEvent("CHAT_MSG_WHISPER", "just chatting", "Bot")
 
         assert.is_nil(e.formation)
+    end)
+end)
+
+describe("Loot strategy reply parsing", function()
+    before_each(function() Mock.reset() end)
+
+    it("caches the loot mode from an 'll ?' / 'Loot strategy:' whisper", function()
+        local e = { name = "Bot" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Loot strategy: |cff00ff00disenchant", "Bot")
+
+        assert.equals("disenchant", e.lootStrategy)  -- color codes stripped, lowercased
+    end)
+
+    it("leaves lootStrategy unset for an unrelated whisper", function()
+        local e = { name = "Bot" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "just chatting", "Bot")
+
+        assert.is_nil(e.lootStrategy)
     end)
 end)

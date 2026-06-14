@@ -12,10 +12,10 @@ local function CB_PositionPopup(self)
 end
 
 -- Registers a StaticPopupDialog with a single edit box, OK/Cancel buttons, and
--- a centred position. onAccept(dialog, data) is called on OK or Enter.
+-- a centered position. onAccept(dialog, data) is called on OK or Enter.
 -- Only the prompt text and accept logic vary between popups — everything else
 -- is shared boilerplate handled here.
--- Registers a StaticPopupDialog with Yes/No buttons and a centred position.
+-- Registers a StaticPopupDialog with Yes/No buttons and a centered position.
 -- No edit box — purely a confirmation step.
 -- onAccept(dialog, data) is called when the user clicks Yes.
 -- Pass context to the dialog via StaticPopup_Show(key, nil, nil, data) and
@@ -71,7 +71,7 @@ local CB_RegisterEditPopup = NS.CB_RegisterEditPopup
 -- ── Reusable "copy this text" popup ──────────────────────────────────────────
 -- Default Blizzard StaticPopup styling with a wide, pre-selected edit box so the text
 -- copies with a single Ctrl+C, plus an optional caption/body. Made draggable without
--- restyling; re-centres on each open (StaticPopups don't persist a dragged position).
+-- restyling; re-centers on each open (StaticPopups don't persist a dragged position).
 -- hasWideEditBox gives the 420px dialog + wide box — the widening is applied in
 -- StaticPopup_Resize (which runs AFTER OnShow), so the flag, not a manual SetWidth, must
 -- do it. The caption width is bumped in OnShow before Resize recomputes the height.
@@ -118,7 +118,7 @@ StaticPopupDialogs["CLEANBOT_COPY"] = {
             eb:SetFocus()
             eb:HighlightText()
             -- The wide box is CENTER-anchored by default, which a multi-line caption
-            -- overlaps. Centre it between the caption and the button instead. Deferred a
+            -- overlaps. Center it between the caption and the button instead. Deferred a
             -- frame because StaticPopup_Resize finalizes the caption height and button
             -- position right AFTER OnShow; anchored to the dialog so it tracks dragging.
             if NS.CB_After then
@@ -417,7 +417,22 @@ NS.CleanBot_BuildManageTab = function()
     local partyRaidSection = NS.CB_CreateSection(panel, "partyRaid", "Party/Raid", 3)
     local partyRaidDeepest = NS.CB_BuildPartyRaidCommands(partyRaidSection.bg, "Manage",
         function(cmd) NS.CB_SendGroupCommand(cmd) end,
-        function() return "your party/raid bots'" end)
+        function() return "your party/raid bots'" end,
+        nil, nil,  -- formation stays action-only (broadcast, no aggregate display)
+        function()  -- passive: OR over the group — checked when ANY bot is passive (cache read)
+            local any = false
+            NS.CB_ForEachGroupMember(function(_, name)
+                local e = name and CleanBot_PartyBots[strlower(name)]
+                if e and e.combat and e.combat.passive == true then any = true end
+            end)
+            return any
+        end,
+        function(on)  -- blanket flip: write every known group member's cached state
+            NS.CB_ForEachGroupMember(function(_, name)
+                local e = name and CleanBot_PartyBots[strlower(name)]
+                if e then e.combat = e.combat or {}; e.combat.passive = on end
+            end)
+        end)
     partyRaidSection:Finalize(partyRaidDeepest)
 
     -- ── Favorites/Presets section ─────────────────────────

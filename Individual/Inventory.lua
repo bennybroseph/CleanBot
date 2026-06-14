@@ -488,7 +488,7 @@ local function CB_StopDrag()
         end
         if src then src.icon:SetDesaturated(false) end
     else
-        -- ── Cancelled ─────────────────────────────────────────
+        -- ── Canceled ─────────────────────────────────────────
         if src then src.icon:SetDesaturated(false) end
     end
 
@@ -732,11 +732,11 @@ local function CB_GetGridFrame(kind, key, botName)
 
     -- Sell / Trade / Bank are inventory-only (the bank frame can't sell/trade/re-open itself).
     if kind == "inventory" then
-        -- Sell Trash: vendor-sell the bot's grey items, then re-fetch. The command is "s gray" —
+        -- Sell Trash: vendor-sell the bot's gray items, then re-fetch. The command is "s gray" —
         -- the trigger is "s", not "sell" (see docs/playerbot-commands.md, "Chat commands are
         -- TRIGGERS, not action names").
         local sellBtn = makeActionButton("CleanBotInvSellBtn_" .. key, "Interface\\Icons\\INV_Misc_Coin_03",
-            "Sell All Grey Items (Requires a Nearby Vendor)", function()
+            "Sell All Gray Items (Requires a Nearby Vendor)", function()
                 local e       = CleanBot_PartyBots[key]
                 local bn      = (e and e.name) or key
                 NS.CB_SendBotCommand(bn, "s gray")
@@ -792,7 +792,7 @@ NS.CB_GetInventoryFrame = function(key, botName) return CB_GetGridFrame("invento
 NS.CB_GetBankFrame      = function(key, botName) return CB_GetGridFrame("bank",      key, botName) end
 
 -- ── Inventory sort ───────────────────────────────────────────────────────
--- Equipment (by iLevel desc → quality desc → slot) → Consumables → Other → Grey
+-- Equipment (by iLevel desc → quality desc → slot) → Consumables → Other → Gray
 local SLOT_ORDER = {
     INVTYPE_HEAD            = 1,
     INVTYPE_NECK            = 2,
@@ -961,7 +961,7 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
 end
 
 -- ── Loading overlay (B+C) ────────────────────────────────────────────────
--- A semi-transparent dim + centred text drawn above the grid while an
+-- A semi-transparent dim + centered text drawn above the grid while an
 -- inventory fetch is in flight (entry.awaitingInventory). Useful on both
 -- paths but especially the whisper path, where replies trickle in over ~3s.
 -- The overlay frame sits above the cells (higher frame level) but leaves mouse
@@ -1089,8 +1089,8 @@ local function CB_RenderGrid(kind, key, forceFull)
 
             -- NormalTexture (UI-Quickslot2) provides the rounded slot look.
             -- Kept visible on Blizz path as an empty-slot indicator (standard WoW
-            -- bag behaviour). CB_SkinInventoryCell's StripTextures hides it on ElvUI.
-            -- CB_SetQualityBorder tints it with the item quality colour when equipped.
+            -- bag behavior). CB_SkinInventoryCell's StripTextures hides it on ElvUI.
+            -- CB_SetQualityBorder tints it with the item quality color when equipped.
             cell.normTex = _G[cellName .. "NormalTexture"]
 
             local icon = _G[cellName .. "IconTexture"]
@@ -1107,7 +1107,7 @@ local function CB_RenderGrid(kind, key, forceFull)
             -- own mouse-over highlight untouched.
             NS.CB_SetRarityOverlay(cell, nil)
             cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            -- No CB_ApplyQualityBackdrop — normTex vertex colour is used instead.
+            -- No CB_ApplyQualityBackdrop — normTex vertex color is used instead.
             cell:SetScript("OnClick", function(self, btn)
                 if btn == "RightButton" then
                     if not self.itemLink then return end

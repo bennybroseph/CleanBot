@@ -72,9 +72,14 @@ Auto Loot, Auto Gather, Enable PvP** are all **on by default**. Plus per-class `
 
 | Token | Status | What the source does |
 |---|---|---|
-| `tank assist` | ✅ | Trigger `"tank assist"` → peel mobs off non-tanks @ 50. |
-| `dps assist` | ✅ | `"not dps target active"` → attack the group's DPS target @ 50. |
-| `dps aoe` | ✅ | `"not dps aoe target active"` → `DpsAoeTargetValue`: honors RTI/skull, then picks the **highest-HP attacker** (`FindMaxHpTargetStrategy`) to anchor on while the class AoE rotation cleaves. The AoE *target picker* — distinct from the class `aoe` *rotation*. Exposed as the **DPS (AoE)** Role option. |
+| `tank assist` | ✅ | Trigger `"tank assist"` → peel mobs off non-tanks @ 50. The **Tank / Peel** option of the **Assist Target** dropdown. |
+| `dps assist` | ✅ | `"not dps target active"` → attack the group's DPS target @ 50. The **Single Target** option of the **Assist Target** dropdown. |
+| `dps aoe` | ✅ | `"not dps aoe target active"` → `DpsAoeTargetValue`: honors RTI/skull, then picks the **highest-HP attacker** (`FindMaxHpTargetStrategy`) to anchor on while the class AoE rotation cleaves. The AoE *target picker* — distinct from the class `aoe` *rotation*. The **AoE** option of the **Assist Target** dropdown. |
+
+These three live in `AssistStrategyContext`, built `(false, true)` → `supportsSiblings = true`,
+so they are **mutually exclusive** — one **Assist Target** dropdown enforces that. The assist axis
+is **orthogonal to the rotation Role** (tank/heal/dps); any role may pick a focus target (a Healer
+set to Single Target makes its Healer-DPS damage assist the group's kill target).
 | `attack tagged` | ⬜ | Allows attacking mobs tagged by other players. |
 | `tell target` | ⬜ | Announces target changes in chat. |
 | `focus heal targets` | ⬜ | Restricts healing to an explicit focus list. |
@@ -84,20 +89,20 @@ Auto Loot, Auto Gather, Enable PvP** are all **on by default**. Plus per-class `
 | Token | Status | What the source does |
 |---|---|---|
 | `threat` | ✅ | Vetoes (×0) any threat-generating action once the bot's threat reaches **80%** of the *tank's* threat — AoE actions already at **50%**. Bypassed when solo or when the `"neglect threat"` value is set. Threat is measured relative to the tank (`ThreatValues.cpp`), so see conflict #2. |
-| `focus` | ✅ | FocusMultiplier vetoes **all AoE actions (except heals) and debuffs on attackers** — pure priority-target damage. (CleanBot calls this "Low Threat Casting".) |
+| `focus` | ✅ | FocusMultiplier vetoes **all AoE actions (except heals) and debuffs on attackers** — pure priority-target damage. CleanBot calls this **"Focus Fire"** and bundles it with **"AoE Rotation"** (`aoe`) in the DPS role's exclusive **"Rotation"** dropdown (the third option, "Standard", leaves both off) — the two hard-conflict (see conflict #1), so a single selector enforces it. |
 | `wait for attack` | ✅ | Vetoes **every** action except a whitelist (keep-safe-distance, `dps assist`, `set facing`, pull actions) until `wait for attack time` seconds after combat starts. Heals are **not** whitelisted — bots genuinely wait to heal too. Requires a real-player master; skipped against player targets. |
-| `cast time` | ⬜ | Deprioritizes (×0.1) any cast whose cast time exceeds the target's remaining life at current group DPS — stops slow casts on dying mobs. |
+| `cast time` | ✅ | Deprioritizes (×0.1) any cast whose cast time exceeds the target's remaining life at current group DPS — stops slow casts on dying mobs. "Smart Cast Time" checkbox in the Timing Controls section (default-on, universal); pure on/off — no value (the threshold is computed dynamically), so it is a checkbox, not a slider. |
 | `save mana` | ✅ | Healer-only: below the config mana threshold, vetoes heals that are mana-inefficient relative to the damage actually being taken (tanks get more lenient rules than non-tanks). |
-| `passive` | ⬜ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. |
+| `passive` | ✅ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. "Passive" checkbox in the Commands tab (sent as `co +/-passive`; parse-only entry in `STRATEGY_MAP`). |
 
 ### Positioning & movement in combat
 
 | Token | Status | What the source does |
 |---|---|---|
-| `close` | ⬜ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee positioning mode. |
-| `ranged` | ⬜ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster positioning mode. |
+| `close` | ✅ | `"enemy out of melee"` → `"reach melee"` @ HIGH+1. The melee engagement range. Exposed in the **"Distance"** exclusive dropdown (Close / Ranged / Default) at the top of the Positioning group. |
+| `ranged` | ✅ | `"enemy too close for spell"` → `"flee"` @ MOVE+4. The caster engagement range. The other half of the **"Distance"** dropdown. |
 | `behind` | ✅ | `"not behind target"` → `"set behind"` @ MOVE+7. |
-| `kite` | ⬜ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. |
+| `kite` | ✅ | `"has aggro"` → `"runaway"` @ 51 — flee while being chased. "Kite" checkbox in the Positioning group (independent of the Distance dropdown — pairs with `ranged`). |
 | `avoid aoe` | ✅ | Default action `"avoid aoe"` at **emergency** priority — steps out of hostile ground effects. |
 | `tank face` | ✅ | Default action `"tank face"` @ MOVE — turns the mob away from the group. |
 | `formation` | ⬜ | Default action `"combat formation move"` @ NORMAL — holds group formation in combat. |
@@ -113,7 +118,7 @@ throw/gun/bow/crossbow from the equipped ranged weapon.)
 
 | Token | Status | What the source does |
 |---|---|---|
-| `aggressive` | ⬜ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. |
+| `aggressive` | ✅ | `"no target"` → `"aggressive target"` @ 4 — auto-acquire anything hostile. "Aggressive" checkbox in the Combat Control group. |
 | `grind` | ✅ | `"no target"` → `"attack anything"` @ 4, plus baseline food/drink upkeep. |
 | `pvp` | ✅ | `"enemy player near"` → `"attack enemy player"` @ 55. |
 | `duel` / `start duel` | ⬜ | Accept / initiate duels. |
@@ -305,12 +310,36 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   etc. report). Druid used the fictional `melee`/`caster`/`heal` tokens it never
   registers, so it never matched — now corrected to the real reported tokens
   `bear`/`cat`/`balance`/`resto` (`ClassData.lua`).
-- **`aoe` vs `dps aoe` (implemented).** The Role dropdown now offers **DPS (Single)**
-  (`dps assist`) and **DPS (AoE)** (`dps aoe`) — the mutually-exclusive *target pickers* —
-  as two roles sharing one DPS sub-section (`roles` on the subgroup → `roleToSection` in
-  `Individual.lua`). The sub-section's class-rotation checkbox is relabeled **"AoE Rotation"**
-  (`aoe`) to distinguish it from the targeting choice. A full AoE bot = **DPS (AoE)** role +
-  **AoE Rotation** checked.
+- **Two-axis Role + Assist split (implemented).** The combat tab exposes the two independent
+  engine axes as two controls instead of one conflated "Role" dropdown:
+  - **Role** (`roleDropdown`, rotation axis) — **Tank** (`tank`; cmdByClass bear/blood),
+    **Healer** (`heal`; cmdByClass resto), and a Paladin-only **Off-Heal** (`offheal`). These are
+    siblings in each class's combat `StrategyContext(false, true)`, so the dropdown is exclusive.
+    **DPS is the `noneLabel`** — there is no universal `dps` rotation token (War/Hun/Mag/Lock/DK
+    register only spec tokens), so the damage role is the *absence* of tank/heal. Because setting
+    tank/heal makes the engine *drop* the spec's damage rotation (a sibling), picking "DPS" must
+    re-add it or the bot is left with no rotation. It re-adds the rotation matching the bot's
+    **detected talent spec** (`NS.CB_DetectedDpsToken` → `NS.SPEC_DPS_TOKEN`, keyed off the spec
+    field `CB_SyncTalentSpec` stamped into `classData.combat`) — so a Fury warrior gets `fury`
+    back, a Balance druid gets `balance`, a ret Paladin gets `dps`. The Role group's
+    `dpsCmdByClass` (`PALADIN`/`PRIEST` = `dps`) is only the fallback when the spec isn't known
+    yet (no inspect). The none/DPS sub-section
+    (`none = true`, keyed by the `ROLE_NONE` sentinel in `Individual.lua`) holds the **Rotation**
+    bundle (`aoe`/`focus`) + **Avoid Aggro** (`threat`); the Paladin Off-Heal role reuses it via
+    `roles = { "offheal" }`.
+  - **Assist Target** (plain exclusive `dropdown`, `noneLabel = "None"`) — **Single Target**
+    (`dps assist`), **AoE** (`dps aoe`), **Tank / Peel** (`tank assist`). Orthogonal to Role.
+  - A full AoE bot = Assist **AoE** + **AoE Rotation** checked; a healer that DPSes = Role
+    **Healer** + **Healer DPS** (+ Assist **Single Target** to focus its damage).
+- **Off-heal hybrids (implemented).** `offheal` adds emergency heals on top of a damage rotation.
+  Its engine shape differs by class, so CleanBot exposes it two ways (one shared `offheal` field,
+  each gated to its class via `classOnly` in `CB_StrategyShown`): **Druid** registers it in the
+  *non-sibling* general context → an independent **Off-Heal** checkbox in the Role group's DPS
+  sub-section (next to Avoid Aggro) and Tank sub-section (niche — limited in Bear Form, but valid);
+  **Paladin** registers
+  `OffhealRetPaladinStrategy` in the *sibling* combat context → an exclusive **Off-Heal** **Role**
+  option (ret damage + heals, replacing plain ret). Shaman's `offheal` is commented out in source;
+  no other class registers it.
 - **Conflict guardrails** worth considering: warn (or auto-exclusive) on
   `focus` ↔ `aoe`, `threat` ↔ Tank role, `close` ↔ `ranged`.
 - **Default seeds aligned (implemented).** `CB_DefaultCombat`/`CB_DefaultNonCombat`
@@ -327,9 +356,9 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   exclusive dropdown (reuses `CB_ApplyExclusiveSelection`); the `noneLabel` clear entry =
   nil selection drops all five. (The Paladin Blessings dropdowns use the same `noneLabel`
   mechanism with `"None"`.)
-- Useful unexposed candidates: `cast time`, `formation`, `kite`,
-  `potions`, `collision`, `mount`, Shaman resistance totems
-  (`frost resistance` / `fire resistance` / `nature resistance`).
+- Useful unexposed candidates: `formation` (the combat strategy — distinct from the
+  Formation *command*), `move from group`, `adds`, `collision`, `mount`, Shaman resistance
+  totems (`frost resistance` / `fire resistance` / `nature resistance`), Paladin `bthreat`.
 
 ---
 
