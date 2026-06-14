@@ -723,12 +723,12 @@ local function CB_ApplyMemberSelection()
     CB_SyncGroupViews()
 
     -- Surface the selected members' current formation in the Commands tab: query any
-    -- unknown ones (replies repaint via CB_RefreshFormations) and repaint now.
+    -- unknown ones (replies repaint via CB_RefreshCommands) and repaint now.
     for _, m in ipairs(managed) do
         local e = CleanBot_PartyBots[m.key]
         if e and NS.CB_FetchFormation then NS.CB_FetchFormation(e) end
     end
-    if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
+    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 end
 
 -- Applies the group list's current selection: resolves the union of the selected
@@ -1109,6 +1109,22 @@ NS.CleanBot_BuildGroupTab = function()
         function(t)
             for _, m in ipairs(NS.groupSlot.members) do
                 local e = CleanBot_PartyBots[m.key]; if e then e.formation = t end
+            end
+        end,
+        function()  -- aggregate passive: all members agree → that bool; differ → MIXED
+            local result
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]
+                local v = (e and e.combat and e.combat.passive) == true
+                if result == nil then result = v
+                elseif result ~= v then return NS.MIXED end
+            end
+            return result
+        end,
+        function(b)
+            for _, m in ipairs(NS.groupSlot.members) do
+                local e = CleanBot_PartyBots[m.key]
+                if e then e.combat = e.combat or {}; e.combat.passive = b end
             end
         end)
 

@@ -47,12 +47,12 @@ NS.CB_SendGroupCommand = function(cmd)
     end
 end
 
--- Refreshes every formation dropdown's displayed value from its host's getter.
--- Called when a "Formation:" reply lands, on bot selection, and on group-selection
--- changes (mirrors how the bot-frame registries are repainted on data updates).
-NS.formationRefreshers = NS.formationRefreshers or {}
-NS.CB_RefreshFormations = function()
-    for _, fn in ipairs(NS.formationRefreshers) do fn() end
+-- Refreshes every Commands-tab control (formation dropdowns + passive checkboxes) from its
+-- host's getter. Called when a relevant reply lands, on bot/group selection, and on
+-- combat-data updates (mirrors how the bot-frame registries are repainted on data updates).
+NS.commandRefreshers = NS.commandRefreshers or {}
+NS.CB_RefreshCommands = function()
+    for _, fn in ipairs(NS.commandRefreshers) do fn() end
 end
 
 -- Builds the command buttons + Formation dropdown into `parent`, anchored to its
@@ -74,8 +74,12 @@ end
 ---@param describeTarget fun():string       Possessive phrase naming the target (Auto Equip confirm).
 ---@param formationGet   fun():any|nil      Returns the current formation token / NS.MIXED / nil.
 ---@param formationSet   fun(token:string)? Optimistically caches a picked formation.
+---@param passiveGet     fun():boolean|nil  Current passive state: true/false, or NS.MIXED. Individual
+---                                          = the open bot; Group = all-agree-or-MIXED; Manage = OR
+---                                          ("any bot passive" → on, a global toggle). nil = no getter.
+---@param passiveSet     fun(on:boolean)?   Optimistically caches the picked passive state on the host's bot(s).
 ---@return table                            The deepest widget built (for section Finalize / anchor chains).
-NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, formationGet, formationSet)
+NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, formationGet, formationSet, passiveGet, passiveSet)
     -- Register the Auto Equip confirmation popup once (lazily — CB_RegisterConfirmPopup
     -- is defined in a file that loads after this one, but the builder only runs at
     -- event time, by which point it exists). Context (which bots to gear) is passed
@@ -123,7 +127,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
                 UIDropDownMenu_SetText(formationDD, label)       -- immediate feedback
                 if formationSet then formationSet(f.token) end   -- optimistic cache
                 send("formation " .. f.token)                    -- server expects the lowercase token
-                NS.CB_RefreshFormations()
+                NS.CB_RefreshCommands()
             end
             UIDropDownMenu_AddButton(info)
         end
@@ -143,7 +147,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
         end
     end
     refresh()
-    NS.formationRefreshers[#NS.formationRefreshers + 1] = refresh
+    NS.commandRefreshers[#NS.commandRefreshers + 1] = refresh
 
     -- Command grid below the formation row.
     -- Column 1: Summon / Maintenance / Auto Gear.
@@ -173,5 +177,42 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     local eatDrinkBtn = mkBtn("EatDrink", "Eat/Drink", "drink")
     NS.CB_AnchorAhead(eatDrinkBtn, autoGearBtn)
 
-    return autoGearBtn
+    -- Passive (last item): a combat-strategy toggle surfaced here as a command. Sends
+    -- "co +passive"/"co -passive" to the host's scope and reflects the host's current state
+    -- (true / false / NS.MIXED → " (?)"). When passiveGet is nil (Manage is action-only) the
+    -- checkbox just reflects its last click. Refreshed via NS.commandRefreshers like formation.
+    local passiveCB = NS.CB_CreateCheckBox(parent, "CleanBotCmdPassiveCB_" .. tag)
+    passiveCB:SetSize(20, 20)
+    NS.CB_AnchorBelow(passiveCB, autoGearBtn)
+
+    local passiveLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    passiveLbl:SetPoint("LEFT", passiveCB, "RIGHT", 4, 0)
+    passiveLbl:SetText("Passive")
+
+    passiveCB:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Passive", 1, 1, 1)
+        GameTooltip:AddLine("Stand down — do nothing in combat", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    passiveCB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    passiveCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        if passiveSet then passiveSet(checked) end
+        send("co " .. (checked and "+passive" or "-passive"))
+        NS.CB_RefreshCommands()
+    end)
+
+    -- Reflect the host's current passive state. No-op without a getter (Manage is action-only).
+    local function refreshPassive()
+        if not passiveGet then return end
+        local v = passiveGet()
+        passiveCB:SetChecked(v == true)
+        passiveLbl:SetText(v == NS.MIXED and "Passive (?)" or "Passive")
+    end
+    refreshPassive()
+    NS.commandRefreshers[#NS.commandRefreshers + 1] = refreshPassive
+
+    return passiveCB
 end

@@ -1178,7 +1178,9 @@ local function CB_BuildBotContent(container, slot, class, tag)
             return (bn or "this bot") .. "'s"
         end,
         function() local e = CleanBot_PartyBots[slot.key]; return e and e.formation end,
-        function(t) local e = CleanBot_PartyBots[slot.key]; if e then e.formation = t end end)
+        function(t) local e = CleanBot_PartyBots[slot.key]; if e then e.formation = t end end,
+        function() local e = CleanBot_PartyBots[slot.key]; return e and e.combat and e.combat.passive end,
+        function(b) local e = CleanBot_PartyBots[slot.key]; if e then e.combat = e.combat or {}; e.combat.passive = b end end)
 
     CB_BuildTwoColumnContent(combatContent,    NS.STRATEGIES,    "co", slot, tag, allFrames, function(e) return e and e.combat    end)
     CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", slot, tag, allFrames, function(e) return e and e.nonCombat end)
@@ -1444,10 +1446,10 @@ SelectBot = function(key, silent)
     if NS.CB_RefreshXPBar then NS.CB_RefreshXPBar(slot) end
 
     -- Surface this bot's current formation in the Commands tab: query it if unknown
-    -- (reply repaints via CB_RefreshFormations) and repaint now so the cached value
+    -- (reply repaints via CB_RefreshCommands) and repaint now so the cached value
     -- shows immediately on selection.
     if entry and NS.CB_FetchFormation then NS.CB_FetchFormation(entry) end
-    if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
+    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 
     NS.lruClock = NS.lruClock + 1
     slot.lru = NS.lruClock
@@ -1789,6 +1791,11 @@ NS.CB_UpdateTabData = function(key)
     -- Group hook BEFORE the botFrames guard: a member that isn't bound to an
     -- Individual slot must still refresh the Group tab's aggregate view.
     if NS.CB_OnMemberDataChanged then NS.CB_OnMemberDataChanged(key) end
+
+    -- Repaint the Commands-tab controls (e.g. the Passive checkbox reads entry.combat.passive,
+    -- which a co? reply just updated). Also before the guard so the Group host's aggregate
+    -- reflects members not bound to an Individual slot.
+    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 
     local frames = NS.botFrames[key]
     if not frames then return end

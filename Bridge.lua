@@ -1186,7 +1186,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local name  = clean:match("Formation:%s*(%a+)")
             if name then
                 entry.formation = strlower(name)
-                if NS.CB_RefreshFormations then NS.CB_RefreshFormations() end
+                if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
             end
             return
         end

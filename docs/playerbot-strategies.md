@@ -93,7 +93,7 @@ set to Single Target makes its Healer-DPS damage assist the group's kill target)
 | `wait for attack` | ✅ | Vetoes **every** action except a whitelist (keep-safe-distance, `dps assist`, `set facing`, pull actions) until `wait for attack time` seconds after combat starts. Heals are **not** whitelisted — bots genuinely wait to heal too. Requires a real-player master; skipped against player targets. |
 | `cast time` | ✅ | Deprioritizes (×0.1) any cast whose cast time exceeds the target's remaining life at current group DPS — stops slow casts on dying mobs. "Smart Cast Time" checkbox in the Timing Controls section (default-on, universal); pure on/off — no value (the threshold is computed dynamically), so it is a checkbox, not a slider. |
 | `save mana` | ✅ | Healer-only: below the config mana threshold, vetoes heals that are mana-inefficient relative to the damage actually being taken (tanks get more lenient rules than non-tanks). |
-| `passive` | ✅ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. "Passive" checkbox in Combat Control. |
+| `passive` | ✅ | PassiveMultiplier vetoes essentially everything — the "stand there" switch. "Passive" checkbox in the Commands tab (sent as `co +/-passive`; parse-only entry in `STRATEGY_MAP`). |
 
 ### Positioning & movement in combat
 

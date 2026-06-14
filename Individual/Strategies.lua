@@ -141,7 +141,6 @@ NS.STRATEGIES = {
             { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "racials",   field = "useRacials",      name = "Use Racials",           desc = "Use racial abilities in combat", default = true },
             { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Crowd-control the enemy marked with the Moon icon" },
-            { cmd = "passive",   field = "passive",         name = "Passive",               desc = "Stand down — do nothing in combat" },
         },
     },
     {
@@ -319,6 +318,10 @@ do
             end
         end
     end
+    -- "passive" is surfaced in the Commands tab (not as a Combat-tab strategy), but it is still
+    -- a combat-strategy token — keep it in the parse map so a co? reply sets entry.combat.passive
+    -- (the Commands-tab checkbox reads that for its state).
+    NS.STRATEGY_MAP["passive"] = "passive"
 end
 
 -- ============================================================
