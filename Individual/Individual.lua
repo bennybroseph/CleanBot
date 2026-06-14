@@ -389,7 +389,13 @@ end
 ---@param cmd           string   Bot command prefix to send for the selection.
 ---@param slot          table    A bot slot or group slot.
 ---@param getSource     fun(entry:table?):table?  Extracts the state table from an entry.
-local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, getSource)
+---@param addCmdFn      fun(m:table):string?  Optional per-member resolver returning a token to
+---                              ALSO add (`+token`). Used by the Role group's "DPS" pick to
+---                              re-add the spec damage rotation (matched to each bot's detected
+---                              talent spec) that the engine dropped when tank/heal was set —
+---                              otherwise the bot is left with no rotation. The added token has
+---                              no UI field, so it isn't optimistically written; co? reconciles.
+local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, getSource, addCmdFn)
     local selStrat = nil
     if selectedField then
         for _, rs in ipairs(strategies) do
@@ -409,6 +415,8 @@ local function CB_ApplyExclusiveSelection(strategies, selectedField, cmd, slot, 
                     if ds then ds[rs.field] = on end
                 end
             end
+            local addCmd = addCmdFn and addCmdFn(m)
+            if addCmd then parts[#parts + 1] = "+" .. addCmd end
             if #parts > 0 then
                 -- Optimistic write above; toggle + authoritative reconcile (self-healing).
                 NS.CB_SendStrategyToggle(m, cmd, table.concat(parts, ","), expect)
@@ -657,6 +665,11 @@ function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, 
     return used + NS.MARGIN.dropdown.top + 32 + NS.MARGIN.dropdown.bottom
 end
 
+-- Unique key for a roleDropdown's none-subsection (the subGroup with `none = true`, shown
+-- when no rotation token is set — the "DPS" default). A table sentinel can't collide with a
+-- strategy field name in the subSections / roleToSection maps.
+local ROLE_NONE = {}
+
 ---@param col       table   The column frame to build into.
 ---@param groups    table   Array of group definitions for this column.
 ---@param cmd       string  Bot command prefix for the column's toggles.
@@ -668,6 +681,10 @@ end
 local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, registry, getSource)
     local entry      = CB_SlotEntry(slot)
     local prevBottom = nil
+    -- A roleDropdown with `subAfter = <group key>` defers its sub-sections to render below
+    -- that later group (so the Role and Assist dropdowns sit one after the other). Holds
+    -- { anchor, maxSubH, afterKey } until that group renders; resolved at the loop's tail.
+    local deferredSub = nil
 
     for gi = (startGi or 1), #groups do
         local group = groups[gi]
@@ -697,11 +714,9 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             ddAnchor.marginBottom = 0
             ddAnchor:SetPoint("TOPLEFT", dd, "BOTTOMLEFT", 0, 0)
 
-            local multiRoleLabel = NS.CB_CreateLabel(col, "Multiple Roles Selected", "GameFontRed")
-            NS.CB_AnchorBelow(multiRoleLabel, ddAnchor)
-            multiRoleLabel:Hide()
-
-            -- Build all sub-sections anchored to ddAnchor; only one shows at a time.
+            -- Build all sub-sections anchored to ddAnchor; only one shows at a time. The
+            -- none-subsection (sg.none — the "DPS" default) is keyed under the ROLE_NONE
+            -- sentinel since it has no field of its own.
             local subSections = {}
             local maxSubH     = 0
             local initSrc     = getSource(entry) or {}
@@ -713,37 +728,74 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     end,
                     initSrc, cmd, getSource, registry)
                 sec:Hide()
-                subSections[sg.field] = { section = sec, checkboxes = cbs, strategies = sgStrats }
+                subSections[sg.none and ROLE_NONE or sg.field] =
+                    { section = sec, checkboxes = cbs, strategies = sgStrats }
                 -- Use the section's own resolved height: subsections may contain an inline
                 -- dropdown (taller than a checkbox row), so a per-row estimate underreserves.
                 maxSubH = math.max(maxSubH, sec:GetHeight())
             end
 
             -- Map every role field to its sub-section. A subgroup may serve multiple
-            -- roles (sg.roles) — e.g. one DPS section shared by DPS (Single) and DPS (AoE).
+            -- roles (sg.roles) — e.g. the none/DPS section also serves the Paladin Off-Heal
+            -- role (sg.roles = { "offheal" }). The none case itself is keyed by ROLE_NONE.
             local roleToSection = {}
             for _, sg in ipairs(group.subGroups) do
-                local sec = subSections[sg.field]
+                local sec = subSections[sg.none and ROLE_NONE or sg.field]
                 for _, rf in ipairs(sg.roles or { sg.field }) do roleToSection[rf] = sec end
             end
+            local noneSection = subSections[ROLE_NONE]
 
-            -- Show the correct sub-section based on initial data.
-            local activeCount = 0
-            local activeField = nil
-            for _, s in ipairs(strategies) do
-                if initSrc[s.field] == true then
-                    activeCount = activeCount + 1
-                    if not activeField then activeField = s.field end
+            -- Show the right sub-section: exactly one active rotation token → that role's
+            -- section; otherwise (the "DPS" default — rotation tokens are true engine siblings
+            -- so >1 can't happen) → the none section. Returns the active field, or nil.
+            local function showSection(src)
+                local count, field = 0, nil
+                for _, s in ipairs(strategies) do
+                    if src[s.field] == true then count = count + 1; if not field then field = s.field end end
                 end
+                for _, sub in pairs(subSections) do sub.section:Hide() end
+                if count == 1 and roleToSection[field] then
+                    roleToSection[field].section:Show()
+                    return field
+                end
+                if noneSection then noneSection.section:Show() end
+                return nil
             end
-            if activeCount > 1 then
-                multiRoleLabel:Show()
-            elseif activeField and roleToSection[activeField] then
-                roleToSection[activeField].section:Show()
+            local initField = showSection(initSrc)
+            do  -- collapsed dropdown text: the active role's name, else the noneLabel ("DPS")
+                local label = group.noneLabel
+                for _, s in ipairs(strategies) do if s.field == initField then label = s.name end end
+                UIDropDownMenu_SetText(dd, label)
             end
 
             UIDropDownMenu_Initialize(dd, function(self)
                 local src = getSource(CB_SlotEntry(slot)) or {}
+                -- Leading "DPS" (noneLabel) entry: clears every rotation token, shows none section.
+                if group.noneLabel then
+                    local info           = UIDropDownMenu_CreateInfo()
+                    info.text            = group.noneLabel
+                    info.tooltipTitle    = group.noneLabel
+                    info.tooltipText     = "Damage role — runs the talent spec's own rotation (no tank or heal strategy)."
+                    info.tooltipOnButton = 1
+                    info.func            = function()
+                        UIDropDownMenu_SetText(self, group.noneLabel)
+                        -- Re-add the bot's detected-spec DPS rotation (preserve intent),
+                        -- falling back to the class canonical token if its spec isn't known.
+                        local addCmdFn = function(m)
+                            local e = CleanBot_PartyBots[m.key]
+                            return (NS.CB_DetectedDpsToken and NS.CB_DetectedDpsToken(e))
+                                or (group.dpsCmdByClass and group.dpsCmdByClass[m.class])
+                        end
+                        CB_ApplyExclusiveSelection(strategies, nil, cmd, slot, getSource, addCmdFn)
+                        for _, sub in pairs(subSections) do sub.section:Hide() end
+                        if noneSection then noneSection.section:Show() end
+                    end
+                    -- "Checked" when no rotation token is set.
+                    local anyOn = false
+                    for _, s in ipairs(strategies) do if src[s.field] == true then anyOn = true break end end
+                    info.checked = not anyOn
+                    UIDropDownMenu_AddButton(info)
+                end
                 for _, s in ipairs(strategies) do
                     local info           = UIDropDownMenu_CreateInfo()
                     info.text            = s.name .. CB_PartialSuffix(slot, s)
@@ -754,7 +806,6 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     info.func            = function()
                         UIDropDownMenu_SetText(self, s.name)
                         CB_ApplyExclusiveSelection(strategies, s.field, cmd, slot, getSource)
-                        multiRoleLabel:Hide()
                         for _, sub in pairs(subSections) do sub.section:Hide() end
                         local sec = roleToSection[s.field]
                         if sec then sec.section:Show() end
@@ -764,24 +815,33 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 end
             end)
 
-            -- Spacer to hold vertical room for the dropdown + tallest sub-section.
-            local spacer = CreateFrame("Frame", nil, col)
-            spacer:SetSize(1, 1)
-            spacer.marginTop    = 0
-            spacer.marginBottom = 0
-            spacer:SetPoint("TOPLEFT", ddAnchor, "TOPLEFT", 0, -maxSubH)
-            prevBottom = spacer
+            if group.subAfter then
+                -- Defer the sub-sections (and their reserved height) to render below a later
+                -- group; the loop tail re-anchors ddAnchor + drops the spacer once it renders.
+                -- The next group anchors right under the role dropdown → adjacent dropdowns.
+                prevBottom  = dd
+                deferredSub = { anchor = ddAnchor, maxSubH = maxSubH, afterKey = group.subAfter }
+            else
+                -- Spacer to hold vertical room for the dropdown + tallest sub-section.
+                local spacer = CreateFrame("Frame", nil, col)
+                spacer:SetSize(1, 1)
+                spacer.marginTop    = 0
+                spacer.marginBottom = 0
+                spacer:SetPoint("TOPLEFT", ddAnchor, "TOPLEFT", 0, -maxSubH)
+                prevBottom = spacer
+            end
 
             if registry then
                 registry[#registry + 1] = {
-                    type           = "roleDropdown",
-                    dd             = dd,
-                    strategies     = strategies,
-                    getSource      = getSource,
-                    groupId        = cmd .. ":" .. (group.group or group.header),
-                    subSections    = subSections,
-                    roleToSection  = roleToSection,
-                    multiRoleLabel = multiRoleLabel,
+                    type          = "roleDropdown",
+                    dd            = dd,
+                    strategies    = strategies,
+                    getSource     = getSource,
+                    groupId       = cmd .. ":" .. (group.group or group.header),
+                    noneLabel     = group.noneLabel,
+                    subSections   = subSections,
+                    roleToSection = roleToSection,
+                    noneSection   = noneSection,
                 }
             end
 
@@ -868,6 +928,30 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             end
             prevBottom = section
         end
+
+        -- Resolve a deferred roleDropdown sub-section: once its target group has rendered,
+        -- drop the sub-sections + reserved height below it (prevBottom = that group's bottom).
+        if deferredSub and group.group == deferredSub.afterKey then
+            deferredSub.anchor:ClearAllPoints()
+            deferredSub.anchor:SetPoint("TOPLEFT", prevBottom, "BOTTOMLEFT", 0, 0)
+            local spacer = CreateFrame("Frame", nil, col)
+            spacer:SetSize(1, 1)
+            spacer.marginTop    = 0
+            spacer.marginBottom = 0
+            spacer:SetPoint("TOPLEFT", deferredSub.anchor, "TOPLEFT", 0, -deferredSub.maxSubH)
+            prevBottom  = spacer
+            deferredSub = nil
+        end
+    end
+
+    -- Fallback: target group never rendered (e.g. filtered out) — reserve the sub-section
+    -- height at its initial position (directly under the role dropdown) so nothing overlaps.
+    if deferredSub then
+        local spacer = CreateFrame("Frame", nil, col)
+        spacer:SetSize(1, 1)
+        spacer.marginTop    = 0
+        spacer.marginBottom = 0
+        spacer:SetPoint("TOPLEFT", deferredSub.anchor, "TOPLEFT", 0, -deferredSub.maxSubH)
     end
 end
 
@@ -1658,17 +1742,16 @@ NS.CB_SyncRegistry = function(frames, entry, groupCtx)
             syncControls(cf.checkboxes, cf.strategies, cd)
 
         elseif cf.type == "roleDropdown" then
-            local activeRole = syncDropdown(cf.dd, cf.strategies, cd, nil, cf.groupId)
-            local count = 0
-            if cd then
-                for _, s in ipairs(cf.strategies) do
-                    if cd[s.field] == true then count = count + 1 end
-                end
+            local activeRole, shown = syncDropdown(cf.dd, cf.strategies, cd, cf.noneLabel, cf.groupId)
+            if shown == 0 and cf.noneLabel then
+                UIDropDownMenu_SetText(cf.dd, cf.noneLabel)
             end
-            if cf.multiRoleLabel then
-                if count > 1 then cf.multiRoleLabel:Show() else cf.multiRoleLabel:Hide() end
-            end
-            local activeSection = count <= 1 and activeRole and cf.roleToSection[activeRole] or nil
+            -- Exactly one settled rotation token → that role's section. No token (shown 0 on the
+            -- Individual path, or 1 noneLabel for an all-DPS group) → the none/DPS section.
+            -- shown > 1 (genuinely mixed roles across a group) → hide all (ambiguous).
+            local activeSection
+            if activeRole then activeSection = cf.roleToSection[activeRole]
+            elseif shown <= 1 then activeSection = cf.noneSection end
             for _, sub in pairs(cf.subSections) do
                 if sub == activeSection then sub.section:Show() else sub.section:Hide() end
                 syncControls(sub.checkboxes, sub.strategies, cd)

@@ -37,50 +37,96 @@ NS.MOVEMENT_STRATEGIES = {
 
 NS.STRATEGIES = {
     {
+        -- Rotation axis. tank/heal (and spec aliases bear/blood/resto, plus Paladin offheal)
+        -- live in each class's combat StrategyContext built (false, true) → supportsSiblings:
+        -- mutually exclusive server-side, so this is one exclusive dropdown. "DPS" is the
+        -- noneLabel — no rotation token set means the talent spec's own damage rotation runs.
+        -- There is no universal "dps" token (War/Hun/Mag/Lock/DK register only spec tokens),
+        -- so DPS can only be expressed as the absence of tank/heal. The separate "Assist
+        -- Target" group below is the orthogonal AssistStrategyContext axis (who to focus).
         header     = "Role",
         group      = "role",
         column     = "left",
         type       = "roleDropdown",
+        noneLabel  = "DPS",
+        -- Render the role sub-sections below the "assist" group so the Role and Assist Target
+        -- dropdowns sit one after the other (see CB_BuildColumnGroups' deferred sub-section).
+        subAfter   = "assist",
+        -- Picking "DPS" clears tank/heal/offheal — but the engine dropped the spec damage
+        -- rotation (a sibling) when tank/heal was set, so clearing alone leaves the bot with
+        -- NO rotation. We re-add the rotation matching the bot's DETECTED talent spec
+        -- (NS.CB_DetectedDpsToken → NS.SPEC_DPS_TOKEN) so a Fury warrior gets Fury back, a
+        -- Balance druid gets Balance back, etc. dpsCmdByClass is only the fallback when the
+        -- spec isn't known yet (no inspect): Paladin/Priest have a single canonical DPS token.
+        dpsCmdByClass = { PALADIN = "dps", PRIEST = "dps" },
         strategies = {
             -- cmdByClass: classes that implement the role under a different token.
             -- Druid/DK have no literal "tank" rotation token — they tank via their
             -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
-            { cmd = "tank",       field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
+            { cmd = "tank", field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
               cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
-            -- dps assist / dps aoe are mutually-exclusive target-acquisition siblings
-            -- (AssistStrategyContext, supportsSiblings): single-target focus vs anchoring
-            -- on the highest-HP attacker for AoE cleave. Both are universal (no gating).
-            { cmd = "dps assist", field = "isDPS",    name = "DPS (Single)", desc = "Assist the group on one efficient kill target at a time" },
-            { cmd = "dps aoe",    field = "isDPSAoe", name = "DPS (AoE)",    desc = "Anchor on the toughest attacker so the AoE rotation cleaves the pack" },
-            { cmd = "heal",       field = "isHealer", name = "Healer", desc = "Focus on party healing",
+            { cmd = "heal", field = "isHealer", name = "Healer", desc = "Focus on party healing",
               cmdByClass = { DRUID = "resto", SHAMAN = "resto" } },
+            -- Paladin's offheal IS a sibling of tank/dps/heal (OffhealRetPaladinStrategy =
+            -- full ret damage + emergency heals, replacing the plain ret rotation), so it
+            -- belongs in this exclusive list — but only Paladin registers it that way.
+            -- Druid's offheal is independent and lives in its own ClassData "Support" group.
+            { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "PALADIN",
+              desc = "Retribution damage plus emergency party heals (Holy Shock / Flash / Holy Light)" },
         },
         subGroups = {
-            { field = "isTank",   header = "Tank",    strategies = {
-                { cmd = "tank assist", field = "peelAggro",      name = "Peel Aggro",       desc = "Tank pulls mobs off other party members" },
-                { cmd = "pull",        field = "pull",           name = "Pull",             desc = "Tank pulls mobs using a ranged skill" },
-                { cmd = "pull back",   field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
-                { cmd = "tank face",   field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
-            }},
-            -- Shared by both DPS roles (single + aoe). The "Rotation" dropdown bundles the
-            -- mutually-exclusive damage modes: AoE Rotation (class cleave — distinct from the
-            -- DPS (AoE) role's target picking) vs Focus Fire (single-target only), or "Standard"
-            -- (neither). They hard-conflict engine-side (focus vetoes AoE), hence one exclusive
-            -- selector. Avoid Aggro stays an independent checkbox below it.
-            { field = "isDPS", roles = { "isDPS", "isDPSAoe" }, header = "DPS", strategies = {
-                { type = "dropdown", group = "dpsRotation", header = "Rotation", noneLabel = "Standard",
+            -- none/DPS section: shown when no rotation token is set (the "DPS" default) and for
+            -- the Paladin Off-Heal role (ret-based, so the same damage options apply). The
+            -- "Rotation" dropdown bundles the mutually-exclusive damage modes: AoE Rotation
+            -- (class cleave) vs Focus Fire (single-target only), or "Balanced" (neither). They
+            -- hard-conflict engine-side (focus vetoes AoE), hence one exclusive selector.
+            { none = true, roles = { "offheal" }, header = "DPS", strategies = {
+                { type = "dropdown", group = "dpsRotation", header = "Rotation", noneLabel = "Balanced",
                   strategies = {
-                      { cmd = "aoe",   field = "aoeTarget", name = "AoE Rotation",
-                        desc = "Use the class AoE rotation — cleave / multi-target spells" },
                       { cmd = "focus", field = "focusFire",  name = "Focus Fire",
-                        desc = "Concentrate on the priority target — no AoE or debuff spells, just single-target damage (healing is unaffected)" },
+                        desc = "Focus on single target spells — no AoE or debuffs (healing is unaffected)" },
+                      { cmd = "aoe",   field = "aoeTarget", name = "AoE Rotation",
+                        desc = "Use the class appropriate AoE rotation — cleave / multi-target spells" },
                   } },
-                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "DPS actively avoids grabbing threat" },
+                { cmd = "threat", field = "avoidAggro", name = "Avoid Aggro",  desc = "Hold back damage to avoid pulling threat off the tank" },
+                -- Druid-only independent add-on: throw emergency heals while keeping the DPS
+                -- form's rotation. Shares the "offheal" field with the Paladin Off-Heal ROLE
+                -- above (classOnly keeps each to its own class — a bot is only ever one).
+                { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "DRUID",
+                  desc = "Provide supplemental emergency healing between attacks" },
+            }},
+            { field = "isTank",   header = "Tank",    strategies = {
+                { cmd = "pull",      field = "pull",           name = "Pull",             desc = "Tank pulls mobs using a ranged skill" },
+                { cmd = "pull back", field = "pullBack",       name = "Pull Back",        desc = "Pull mob then return to starting position" },
+                { cmd = "tank face", field = "faceTargetAway", name = "Face Target Away", desc = "Ensure target does not face ranged players" },
+                -- Druid-only: also legitimate while tanking (niche — limited in Bear Form, but
+                -- it works). Same "offheal" field as the DPS-section / Paladin-role entries.
+                { cmd = "offheal",   field = "offheal",        name = "Off-Heal", classOnly = "DRUID",
+                  desc = "Provide supplemental healing while tanking (limited in Bear Form)" },
             }},
             { field = "isHealer", header = "Healing", strategies = {
                 { cmd = "save mana",  field = "saveMana",  name = "Save Mana",  desc = "Healers prioritize high-efficiency spells" },
                 { cmd = "healer dps", field = "healerDps", name = "Healer DPS", desc = "Healers cast damage spells when mana allows" },
             }},
+        },
+    },
+    {
+        -- Assist/target axis (AssistStrategyContext, also built (false, true) → exclusive).
+        -- Orthogonal to the rotation Role above: any role may pick a focus target — e.g. a
+        -- Healer set to Single Target so its Healer-DPS damage assists the group's kill target,
+        -- or a Tank set to Tank / Peel. noneLabel "None" clears all three.
+        header     = "Targeting",
+        group      = "assist",
+        column     = "left",
+        type       = "dropdown",
+        noneLabel  = "None",
+        strategies = {
+            { cmd = "dps assist", field = "assistSingle", name = "Focus Down",
+              desc = "Target as a group and focus down one enemy at a time" },
+            { cmd = "dps aoe",    field = "assistAoe",    name = "Cleave Anchor",
+              desc = "Anchor on the toughest attacker to best set up to cleave using AoE" },
+            { cmd = "tank assist", field = "assistTank",  name = "Peel",
+              desc = "Target mobs attacking non-tank party members" },
         },
     },
     {
@@ -194,6 +240,13 @@ end
 ---@return boolean
 NS.CB_StrategyShown = function(s, class)
     if not class then return true end
+    -- classOnly: entry exclusive to one class (string) or a set (table). Used where a shared
+    -- token surfaces differently per class — e.g. "offheal" is a Paladin Role option but a
+    -- Druid-only Combat Control checkbox. Definitive: matching class shows, all others hide.
+    if s.classOnly then
+        if type(s.classOnly) == "table" then return s.classOnly[class] == true end
+        return s.classOnly == class
+    end
     if s.cmdByClass and s.cmdByClass[class] then return true end
     local sup = NS.STRATEGY_CLASS_SUPPORT[s.cmd]
     if not sup then return true end

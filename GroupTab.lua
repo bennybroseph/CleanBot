@@ -92,28 +92,30 @@ local ROLE_TANK = { 0,     19 / 64, 22 / 64, 41 / 64 }
 local ROLE_HEAL = { 20/64, 39 / 64,  1 / 64, 20 / 64 }
 local ROLE_DMG  = { 20/64, 39 / 64, 22 / 64, 41 / 64 }
 
--- A bot belongs to a role group if ANY of the listed combat fields is set; coords
--- give the role's right-aligned list icon.
+-- DPS = the rotation default: a bot with combat data but neither the Tank nor Healer
+-- rotation token. There is no universal "dps" token, so the damage role is the absence of
+-- tank/heal (see the Role group in Strategies.lua).
+local function isDmgRole(cd) return cd ~= nil and not cd.isTank and not cd.isHealer end
+
+-- Role groups, keyed off the two combat axes: the rotation role (isTank / isHealer /
+-- DPS-default) and, for the DPS sub-buckets, the assist-target token (assistSingle /
+-- assistAoe). `match(cd)` tests a bot's combat state; coords give the right-aligned list icon.
 local ROLE_GROUPS = {
-    { label = "Tanks",        value = "role:tank",      coords = ROLE_TANK, fields = { "isTank" } },
-    { label = "DPS",          value = "role:dps",       coords = ROLE_DMG,  fields = { "isDPS", "isDPSAoe" } },
-    { label = "DPS (Single)", value = "role:dpsSingle", coords = ROLE_DMG,  fields = { "isDPS" } },
-    { label = "DPS (AoE)",    value = "role:dpsAoe",    coords = ROLE_DMG,  fields = { "isDPSAoe" } },
-    { label = "Healers",      value = "role:healer",    coords = ROLE_HEAL, fields = { "isHealer" } },
+    { label = "Tanks",        value = "role:tank",      coords = ROLE_TANK, match = function(cd) return cd ~= nil and cd.isTank == true end },
+    { label = "DPS",          value = "role:dps",       coords = ROLE_DMG,  match = isDmgRole },
+    { label = "DPS (Single)", value = "role:dpsSingle", coords = ROLE_DMG,  match = function(cd) return isDmgRole(cd) and cd.assistSingle == true end },
+    { label = "DPS (AoE)",    value = "role:dpsAoe",    coords = ROLE_DMG,  match = function(cd) return isDmgRole(cd) and cd.assistAoe == true end },
+    { label = "Healers",      value = "role:healer",    coords = ROLE_HEAL, match = function(cd) return cd ~= nil and cd.isHealer == true end },
 }
 local roleByValue = {}
 for _, rg in ipairs(ROLE_GROUPS) do roleByValue[rg.value] = rg end
 
--- Whether a bot entry currently fills a role group (any field true).
----@param entry  table?  CleanBot_PartyBots[key].
----@param fields table   Role field names to test.
+-- Whether a bot entry currently fills a role group (its match predicate over combat state).
+---@param entry table?  CleanBot_PartyBots[key].
+---@param rg    table   Role-group descriptor with a `match(cd)` predicate.
 ---@return boolean
-local function CB_BotInRole(entry, fields)
-    if not (entry and entry.combat) then return false end
-    for _, f in ipairs(fields) do
-        if entry.combat[f] == true then return true end
-    end
-    return false
+local function CB_BotInRole(entry, rg)
+    return rg.match(entry and entry.combat) == true
 end
 
 -- The role-icon descriptor for a bot's CURRENT role (priority tank > heal > dps),
@@ -123,11 +125,10 @@ end
 local function CB_RoleIconForKey(key)
     local cd = CleanBot_PartyBots[key] and CleanBot_PartyBots[key].combat
     if not cd then return nil end
-    local coords
+    -- tank > heal > dps (the default for any bot with combat data and no tank/heal token).
+    local coords = ROLE_DMG
     if cd.isTank then coords = ROLE_TANK
-    elseif cd.isHealer then coords = ROLE_HEAL
-    elseif cd.isDPS or cd.isDPSAoe then coords = ROLE_DMG end
-    if not coords then return nil end
+    elseif cd.isHealer then coords = ROLE_HEAL end
     return { texture = ROLE_TEX, coords = coords }
 end
 
@@ -145,7 +146,7 @@ local function roleRank(key)
     if cd then
         if cd.isTank then return 1
         elseif cd.isHealer then return 2
-        elseif cd.isDPS or cd.isDPSAoe then return 3 end
+        else return 3 end  -- combat data but no tank/heal token → DPS default
     end
     return 9
 end
@@ -223,7 +224,7 @@ local function CB_GroupItems()
     for _, rg in ipairs(ROLE_GROUPS) do
         local count = 0
         for _, d in ipairs(NS.desiredBots or {}) do
-            if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then count = count + 1 end
+            if CB_BotInRole(CleanBot_PartyBots[d.key], rg) then count = count + 1 end
         end
         if count > 0 then
             items[#items + 1] = { text = rg.label, value = rg.value,
@@ -281,7 +282,7 @@ local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
         local rg = roleByValue[value]
         if rg then
             for _, d in ipairs(NS.desiredBots or {}) do
-                if CB_BotInRole(CleanBot_PartyBots[d.key], rg.fields) then addLive(d) end
+                if CB_BotInRole(CleanBot_PartyBots[d.key], rg) then addLive(d) end
             end
         end
     elseif kind == "custom" then

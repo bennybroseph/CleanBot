@@ -72,9 +72,14 @@ Auto Loot, Auto Gather, Enable PvP** are all **on by default**. Plus per-class `
 
 | Token | Status | What the source does |
 |---|---|---|
-| `tank assist` | ✅ | Trigger `"tank assist"` → peel mobs off non-tanks @ 50. |
-| `dps assist` | ✅ | `"not dps target active"` → attack the group's DPS target @ 50. |
-| `dps aoe` | ✅ | `"not dps aoe target active"` → `DpsAoeTargetValue`: honors RTI/skull, then picks the **highest-HP attacker** (`FindMaxHpTargetStrategy`) to anchor on while the class AoE rotation cleaves. The AoE *target picker* — distinct from the class `aoe` *rotation*. Exposed as the **DPS (AoE)** Role option. |
+| `tank assist` | ✅ | Trigger `"tank assist"` → peel mobs off non-tanks @ 50. The **Tank / Peel** option of the **Assist Target** dropdown. |
+| `dps assist` | ✅ | `"not dps target active"` → attack the group's DPS target @ 50. The **Single Target** option of the **Assist Target** dropdown. |
+| `dps aoe` | ✅ | `"not dps aoe target active"` → `DpsAoeTargetValue`: honors RTI/skull, then picks the **highest-HP attacker** (`FindMaxHpTargetStrategy`) to anchor on while the class AoE rotation cleaves. The AoE *target picker* — distinct from the class `aoe` *rotation*. The **AoE** option of the **Assist Target** dropdown. |
+
+These three live in `AssistStrategyContext`, built `(false, true)` → `supportsSiblings = true`,
+so they are **mutually exclusive** — one **Assist Target** dropdown enforces that. The assist axis
+is **orthogonal to the rotation Role** (tank/heal/dps); any role may pick a focus target (a Healer
+set to Single Target makes its Healer-DPS damage assist the group's kill target).
 | `attack tagged` | ⬜ | Allows attacking mobs tagged by other players. |
 | `tell target` | ⬜ | Announces target changes in chat. |
 | `focus heal targets` | ⬜ | Restricts healing to an explicit focus list. |
@@ -305,12 +310,36 @@ every non-pull action — the bot ignoring orders mid-pull is working as intende
   etc. report). Druid used the fictional `melee`/`caster`/`heal` tokens it never
   registers, so it never matched — now corrected to the real reported tokens
   `bear`/`cat`/`balance`/`resto` (`ClassData.lua`).
-- **`aoe` vs `dps aoe` (implemented).** The Role dropdown now offers **DPS (Single)**
-  (`dps assist`) and **DPS (AoE)** (`dps aoe`) — the mutually-exclusive *target pickers* —
-  as two roles sharing one DPS sub-section (`roles` on the subgroup → `roleToSection` in
-  `Individual.lua`). The sub-section's class-rotation checkbox is relabeled **"AoE Rotation"**
-  (`aoe`) to distinguish it from the targeting choice. A full AoE bot = **DPS (AoE)** role +
-  **AoE Rotation** checked.
+- **Two-axis Role + Assist split (implemented).** The combat tab exposes the two independent
+  engine axes as two controls instead of one conflated "Role" dropdown:
+  - **Role** (`roleDropdown`, rotation axis) — **Tank** (`tank`; cmdByClass bear/blood),
+    **Healer** (`heal`; cmdByClass resto), and a Paladin-only **Off-Heal** (`offheal`). These are
+    siblings in each class's combat `StrategyContext(false, true)`, so the dropdown is exclusive.
+    **DPS is the `noneLabel`** — there is no universal `dps` rotation token (War/Hun/Mag/Lock/DK
+    register only spec tokens), so the damage role is the *absence* of tank/heal. Because setting
+    tank/heal makes the engine *drop* the spec's damage rotation (a sibling), picking "DPS" must
+    re-add it or the bot is left with no rotation. It re-adds the rotation matching the bot's
+    **detected talent spec** (`NS.CB_DetectedDpsToken` → `NS.SPEC_DPS_TOKEN`, keyed off the spec
+    field `CB_SyncTalentSpec` stamped into `classData.combat`) — so a Fury warrior gets `fury`
+    back, a Balance druid gets `balance`, a ret Paladin gets `dps`. The Role group's
+    `dpsCmdByClass` (`PALADIN`/`PRIEST` = `dps`) is only the fallback when the spec isn't known
+    yet (no inspect). The none/DPS sub-section
+    (`none = true`, keyed by the `ROLE_NONE` sentinel in `Individual.lua`) holds the **Rotation**
+    bundle (`aoe`/`focus`) + **Avoid Aggro** (`threat`); the Paladin Off-Heal role reuses it via
+    `roles = { "offheal" }`.
+  - **Assist Target** (plain exclusive `dropdown`, `noneLabel = "None"`) — **Single Target**
+    (`dps assist`), **AoE** (`dps aoe`), **Tank / Peel** (`tank assist`). Orthogonal to Role.
+  - A full AoE bot = Assist **AoE** + **AoE Rotation** checked; a healer that DPSes = Role
+    **Healer** + **Healer DPS** (+ Assist **Single Target** to focus its damage).
+- **Off-heal hybrids (implemented).** `offheal` adds emergency heals on top of a damage rotation.
+  Its engine shape differs by class, so CleanBot exposes it two ways (one shared `offheal` field,
+  each gated to its class via `classOnly` in `CB_StrategyShown`): **Druid** registers it in the
+  *non-sibling* general context → an independent **Off-Heal** checkbox in the Role group's DPS
+  sub-section (next to Avoid Aggro) and Tank sub-section (niche — limited in Bear Form, but valid);
+  **Paladin** registers
+  `OffhealRetPaladinStrategy` in the *sibling* combat context → an exclusive **Off-Heal** **Role**
+  option (ret damage + heals, replacing plain ret). Shaman's `offheal` is commented out in source;
+  no other class registers it.
 - **Conflict guardrails** worth considering: warn (or auto-exclusive) on
   `focus` ↔ `aoe`, `threat` ↔ Tank role, `close` ↔ `ranged`.
 - **Default seeds aligned (implemented).** `CB_DefaultCombat`/`CB_DefaultNonCombat`
