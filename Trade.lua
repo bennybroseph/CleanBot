@@ -76,17 +76,13 @@ local function CB_CreateTradeSlotOverlays()
                 hl:SetBlendMode("ADD")
             end
 
-            overlay:SetScript("OnEnter", function(self)
+            NS.CB_AttachTooltip(overlay, function(tt)
                 local link = GetTradeTargetItemLink(slotIndex)
-                if not link then return end
+                if not link then return false end
                 if slot.LockHighlight then slot:LockHighlight() end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetHyperlink(link)
-                GameTooltip:Show()
-            end)
-            overlay:SetScript("OnLeave", function(self)
+                tt:SetHyperlink(link)
+            end, nil, function()
                 if slot.UnlockHighlight then slot:UnlockHighlight() end
-                GameTooltip:Hide()
             end)
 
             overlay:SetScript("OnClick", function(self, button)

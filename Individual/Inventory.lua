@@ -703,12 +703,7 @@ local function CB_GetGridFrame(kind, key, botName)
     ---@return table          The created Button.
     local function makeActionButton(name, iconTex, tip, onClick)
         local b = NS.CB_CreateIconButton(f, name, iconTex, ACTION_SIZE, onClick)
-        b:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(tip, 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        NS.CB_SetTooltip(b, tip, nil, "ANCHOR_TOP")
         return b
     end
 
@@ -1151,13 +1146,10 @@ local function CB_RenderGrid(kind, key, forceFull)
                 if btn == "LeftButton" then CB_StopDrag() end
             end)
 
-            cell:SetScript("OnEnter", function(self)
-                if self.itemLink then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetHyperlink(self.itemLink)
-                end
+            NS.CB_AttachTooltip(cell, function(tt, self)
+                if not self.itemLink then return false end
+                tt:SetHyperlink(self.itemLink)
             end)
-            cell:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
             f.cells[i] = cell
         end

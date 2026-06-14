@@ -765,15 +765,7 @@ NS.CleanBot_BuildSettingsTab = function()
 
     -- Tooltip on hover over the checkbox or its label.
     local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
-    local function showEmoteTooltip(anchor)
-        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
-        GameTooltip:SetText(EMOTE_TOOLTIP, nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end
-    botEmotesCB:SetScript("OnEnter",       function(self) showEmoteTooltip(self) end)
-    botEmotesCB:SetScript("OnLeave",       function()     GameTooltip:Hide()     end)
-    botEmotesCBLblHit:SetScript("OnEnter", function(self) showEmoteTooltip(self) end)
-    botEmotesCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()     end)
+    NS.CB_SetTooltip({ botEmotesCB, botEmotesCBLblHit }, nil, EMOTE_TOOLTIP)
 
     botEmotesCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -808,15 +800,7 @@ NS.CleanBot_BuildSettingsTab = function()
     selfBotCBLblHit:EnableMouse(true)
 
     local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
-    local function showSelfBotTooltip(anchor)
-        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
-        GameTooltip:SetText(SELF_BOT_TOOLTIP, nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end
-    selfBotCB:SetScript("OnEnter",       function(self) showSelfBotTooltip(self) end)
-    selfBotCB:SetScript("OnLeave",       function()     GameTooltip:Hide()       end)
-    selfBotCBLblHit:SetScript("OnEnter", function(self) showSelfBotTooltip(self) end)
-    selfBotCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()       end)
+    NS.CB_SetTooltip({ selfBotCB, selfBotCBLblHit }, nil, SELF_BOT_TOOLTIP)
 
     selfBotCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -860,15 +844,7 @@ NS.CleanBot_BuildSettingsTab = function()
         itemGlowCBLblHit:EnableMouse(true)
 
         local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-colored glow."
-        local function showItemGlowTooltip(anchor)
-            GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
-            GameTooltip:SetText(ITEM_GLOW_TOOLTIP, nil, nil, nil, nil, true)
-            GameTooltip:Show()
-        end
-        itemGlowCB:SetScript("OnEnter",       function(self) showItemGlowTooltip(self) end)
-        itemGlowCB:SetScript("OnLeave",       function()     GameTooltip:Hide()        end)
-        itemGlowCBLblHit:SetScript("OnEnter", function(self) showItemGlowTooltip(self) end)
-        itemGlowCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()        end)
+        NS.CB_SetTooltip({ itemGlowCB, itemGlowCBLblHit }, nil, ITEM_GLOW_TOOLTIP)
 
         itemGlowCB:SetScript("OnClick", function(self)
             local checked = self:GetChecked() and true or false
@@ -897,15 +873,7 @@ NS.CleanBot_BuildSettingsTab = function()
     hideChatterCBLblHit:EnableMouse(true)
 
     local HIDE_CHATTER_TOOLTIP = "When enabled, CleanBot hides its own whispered commands, the bot replies it requests (stats, strategies, inventory, quests), and the server output it triggers from your chat window. Turn off to see the raw traffic for testing."
-    local function showHideChatterTooltip(anchor)
-        GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
-        GameTooltip:SetText(HIDE_CHATTER_TOOLTIP, nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end
-    hideChatterCB:SetScript("OnEnter",       function(self) showHideChatterTooltip(self) end)
-    hideChatterCB:SetScript("OnLeave",       function()     GameTooltip:Hide()           end)
-    hideChatterCBLblHit:SetScript("OnEnter", function(self) showHideChatterTooltip(self) end)
-    hideChatterCBLblHit:SetScript("OnLeave", function()     GameTooltip:Hide()           end)
+    NS.CB_SetTooltip({ hideChatterCB, hideChatterCBLblHit }, nil, HIDE_CHATTER_TOOLTIP)
 
     hideChatterCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -928,12 +896,7 @@ NS.CleanBot_BuildSettingsTab = function()
         NS.CB_AnchorBelow(cb, anchor)
         local lbl = NS.CB_CreateLabel(debugPanel, labelText)
         lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-        cb:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(tooltip, nil, nil, nil, nil, true)
-            GameTooltip:Show()
-        end)
-        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        NS.CB_SetTooltip(cb, nil, tooltip)
         cb:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
         return cb
     end

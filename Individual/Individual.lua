@@ -90,14 +90,9 @@ NS.CleanBot_BuildIndividualTab = function()
     NS.individualExpandBtn:ClearAllPoints()
     NS.individualExpandBtn:SetPoint("RIGHT", CleanBotFrame, "RIGHT", 0, 0)
     NS.individualExpandBtn:SetFrameLevel(CleanBotFrame:GetFrameLevel() + 20)
-    NS.individualExpandBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText(NS.individualExpanded and "Hide Strategies" or "Show Strategies", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    NS.individualExpandBtn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
+    NS.CB_SetTooltip(NS.individualExpandBtn,
+        function() return NS.individualExpanded and "Hide Strategies" or "Show Strategies" end,
+        nil, "ANCHOR_LEFT")
     NS.individualExpandBtn:Hide()  -- shown only when Individual tab is active (CleanBot_SelectTopTab)
 end
 
@@ -334,13 +329,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             cb.labelFS   = lbl
             cb.labelBase = s.name
 
-            cb:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(s.name, 1, 1, 1)
-                GameTooltip:AddLine(s.desc, 0.8, 0.8, 0.8, true)
-                GameTooltip:Show()
-            end)
-            cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            NS.CB_SetTooltip(cb, s.name, s.desc)
 
             cb:SetChecked(sourceTable and sourceTable[s.field] == true)
 

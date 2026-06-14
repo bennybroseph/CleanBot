@@ -237,14 +237,13 @@ NS.CB_CreateEquipSlots = function(slot, model)
             if mouseBtn == "LeftButton" then CB_StopUnequipDrag() end
         end)
 
-        btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        NS.CB_AttachTooltip(btn, function(tt, self)
             local unit = self.slot and self.slot.unit
 
             -- Unit-aware tooltip (gems / enchants / set-bonus highlighting). On a HIT
             -- the bot is still the current inspect target — done.
             if unit and UnitExists(unit) and self.slotId
-               and GameTooltip:SetInventoryItem(unit, self.slotId) then
+               and tt:SetInventoryItem(unit, self.slotId) then
                 return
             end
 
@@ -254,10 +253,9 @@ NS.CB_CreateEquipSlots = function(slot, model)
             -- upgrade the tooltip in place once the data lands — if still hovering this
             -- same slot. Empty slots just show the slot-name label.
             if self.itemLink then
-                GameTooltip:SetHyperlink(self.itemLink)
+                tt:SetHyperlink(self.itemLink)
             else
-                GameTooltip:AddLine(self.slotName, 1, 1, 1)
-                GameTooltip:Show()
+                tt:AddLine(self.slotName, 1, 1, 1)
             end
 
             if unit and UnitExists(unit) and self.slotId and self.itemLink then
@@ -276,7 +274,6 @@ NS.CB_CreateEquipSlots = function(slot, model)
                 end)
             end
         end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
         NS.CB_SkinEquipSlot(btn)
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -321,12 +318,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
             NS.CB_RequestInventory(key, botName)
         end
     end)
-    bagBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Open Inventory", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    bagBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    NS.CB_SetTooltip(bagBtn, "Open Inventory")
 
     NS.CB_CreateQuestButton(slot, model, slotSize)
 

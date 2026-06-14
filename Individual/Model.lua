@@ -129,13 +129,8 @@ NS.CB_CreateModel = function(slot, parent, modelW, modelH)
         end
         UpdateStar()
     end)
-    starBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        local isFav = IsFavorite(slot.key)
-        GameTooltip:AddLine(isFav and "Remove from Favorites" or "Add to Favorites", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    NS.CB_SetTooltip(starBtn,
+        function() return IsFavorite(slot.key) and "Remove from Favorites" or "Add to Favorites" end)
 
     -- ── Refresh Equipment button ──────────────────────────────
     local refreshBtn = NS.CB_CreateButton(model, "CleanBotRefreshEquip" .. slot.index,

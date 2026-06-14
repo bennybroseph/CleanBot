@@ -154,12 +154,20 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     local summonBtn = mkBtn("Summon", "Summon", "summon")
     NS.CB_AnchorBelow(summonBtn, formationDD)
 
+    -- Maintenance ("maintenance" → AutoMaintenanceOnLevelupAction): brings the bot up to date for
+    -- its level — re-trains talents, learns class/trainer spells and professions, and restocks
+    -- consumables (food/water/reagents/ammo/potions). Does not repair or sell; only teleports if
+    -- the server's autoTeleportForLevel is on (off by default).
     local maintenanceBtn = mkBtn("Maintenance", "Maintenance", "maintenance")
+    NS.CB_SetTooltip(maintenanceBtn, "Maintenance",
+        "Brings the bot up to date for its level: re-trains talents, learns class/trainer spells and professions, and restocks consumables (food, water, reagents, ammo, potions). Doesn't repair or sell anything.")
     NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
 
-    -- Auto-Equip ("equip upgrade"): equips stat upgrades found in the bot's bags. Non-destructive
+    -- Equip Upgrades ("equip upgrade"): equips stat upgrades found in the bot's bags. Non-destructive
     -- (only swaps in improvements), so no confirmation — unlike Auto Gear which re-gears wholesale.
-    local autoEquipBtn = mkBtn("AutoEquip", "Auto-Equip", "equip upgrade")
+    local autoEquipBtn = mkBtn("AutoEquip", "Equip Upgrades", "equip upgrade")
+    NS.CB_SetTooltip(autoEquipBtn, "Equip Upgrades",
+        "Equips stat upgrades found in the bot's bags. Only swaps in improvements — never downgrades or unequips, so it's safe to use any time.")
     NS.CB_AnchorBelow(autoEquipBtn, maintenanceBtn)
 
     -- Auto Gear (col 1): auto-equip a fresh gear set ("autogear"). Destructive (replaces all
@@ -170,6 +178,8 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
                 (describeTarget and describeTarget()) or "this bot's", nil,
                 { onConfirm = function() send("autogear") end })
         end)
+    NS.CB_SetTooltip(autoGearBtn, "Auto Gear",
+        "Replaces the bot's entire equipment with an auto-selected gear set, re-gearing from scratch. Destructive — you'll be asked to confirm first.")
     NS.CB_AnchorBelow(autoGearBtn, autoEquipBtn)
 
     -- Column 2: Roll / Revive / Release / Eat-Drink.
@@ -197,13 +207,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     passiveLbl:SetPoint("LEFT", passiveCB, "RIGHT", 4, 0)
     passiveLbl:SetText("Passive")
 
-    passiveCB:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Passive", 1, 1, 1)
-        GameTooltip:AddLine("Stand down — do nothing in combat", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    passiveCB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    NS.CB_SetTooltip(passiveCB, "Passive", "Stand down — do nothing in combat")
 
     passiveCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false

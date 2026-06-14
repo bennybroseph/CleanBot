@@ -303,21 +303,17 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
                 nameText:SetTextColor(1, 1, 1)  -- white when selected
                 NS.CB_RenderQuestDetail(key, questID)
             end)
-            rowBtn:SetScript("OnEnter", function(self)
+            NS.CB_AttachTooltip(rowBtn, function(tt)
                 local f = NS.botQuestFrames and NS.botQuestFrames[key]
                 if not (f and f.selectedRowText == nameText) then
                     nameText:SetTextColor(1, 1, 1)  -- white on hover
                 end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetHyperlink("quest:" .. (questID or 0) .. ":60")
-                GameTooltip:Show()
-            end)
-            rowBtn:SetScript("OnLeave", function()
+                tt:SetHyperlink("quest:" .. (questID or 0) .. ":60")
+            end, nil, function()
                 local f = NS.botQuestFrames and NS.botQuestFrames[key]
                 if not (f and f.selectedRowText == nameText) then
                     nameText:SetTextColor(statusR, statusG, statusB)  -- restore status color
                 end
-                GameTooltip:Hide()
             end)
 
             framePool[#framePool + 1] = rowBtn
@@ -928,12 +924,7 @@ NS.CB_CreateQuestButton = function(slot, model, slotSize)
         local botName = entry and entry.name or slot.name or key
         NS.CB_ToggleQuests(key, botName)
     end)
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Quest Log", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    NS.CB_SetTooltip(btn, "Quest Log")
 
     slot.questBtn = btn
 end

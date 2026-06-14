@@ -1296,13 +1296,7 @@ NS.CB_CreateXPBar = function(parent)
     -- Tooltip — text is filled in by CB_RefreshXPBar (xp.tooltipText). The bar
     -- lives on the (interactive) paperdoll model, so it can take mouse events.
     xp:EnableMouse(true)
-    xp:SetScript("OnEnter", function(self)
-        if not self.tooltipText then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(self.tooltipText, 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    xp:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    NS.CB_SetTooltip(xp, function() return xp.tooltipText end, nil, "ANCHOR_TOP")
 
     xp.fill   = fill
     xp.rested = rested

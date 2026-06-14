@@ -594,13 +594,10 @@ local function CB_BuildIconBrowser()
         hl:SetAllPoints()
         hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
         hl:SetBlendMode("ADD")
-        btn:SetScript("OnEnter", function(self)
-            if not self.rawTex then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(CB_IconFullPath(self.rawTex), 1, 1, 1)
-            GameTooltip:Show()
+        NS.CB_AttachTooltip(btn, function(tt, self)
+            if not self.rawTex then return false end
+            tt:AddLine(CB_IconFullPath(self.rawTex), 1, 1, 1)
         end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         btn:SetScript("OnClick", function(self)
             if self.rawTex then print("|cff66ccffCleanBot icon:|r " .. CB_IconFullPath(self.rawTex)) end
         end)

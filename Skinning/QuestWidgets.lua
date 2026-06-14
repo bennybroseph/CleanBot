@@ -164,15 +164,9 @@ NS.CB_CreateQuestRewardItem = function(parent, name)
         btn.qualityFrame = qf
     end
 
-    btn:SetScript("OnEnter", function(self)
-        if self.itemLink then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(self.itemLink)
-            GameTooltip:Show()
-        end
-    end)
-    btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
+    NS.CB_AttachTooltip(btn, function(tt, self)
+        if not self.itemLink then return false end
+        tt:SetHyperlink(self.itemLink)
     end)
 
     btn.marginTop    = 4

@@ -85,6 +85,70 @@ NS.CB_EndCapture = function()
 end
 
 -- ============================================================
+-- Tooltips — one place that owns the GameTooltip OnEnter/OnLeave boilerplate
+-- (SetOwner + anchor, Show, and Hide), so call sites only describe content.
+-- ============================================================
+
+-- Runs fn(frame) for a single frame or each frame in an array. Lets the tooltip
+-- helpers attach the same tooltip to, e.g., a checkbox and its label hit-area.
+---@param frameOrList table  A frame (has :SetScript) or an array of frames.
+---@param fn          fun(frame:table)
+local function CB_ForEachFrame(frameOrList, fn)
+    if frameOrList.SetScript then
+        fn(frameOrList)
+    else
+        for _, f in ipairs(frameOrList) do fn(f) end
+    end
+end
+
+-- Attaches a GameTooltip to a frame (or list of frames). `populate(GameTooltip, self)` fills the
+-- tooltip's content on hover; the helper owns SetOwner/Show and the OnLeave Hide. Return false
+-- from `populate` to suppress the tooltip (e.g. an item slot with nothing in it). `onLeave(self)`
+-- is an optional cleanup run on mouse-out (after Hide) for sites that also drive a hover highlight.
+---@param frame    table                              A frame, or an array of frames sharing the tip.
+---@param populate fun(tt:table, self:table):boolean? Fills the tooltip; return false to suppress.
+---@param anchor   string?                            GameTooltip anchor point (default "ANCHOR_RIGHT").
+---@param onLeave  fun(self:table)?                   Optional mouse-out cleanup (e.g. clear a highlight).
+NS.CB_AttachTooltip = function(frame, populate, anchor, onLeave)
+    CB_ForEachFrame(frame, function(f)
+        f:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+            if populate(GameTooltip, self) == false then
+                GameTooltip:Hide()
+            else
+                GameTooltip:Show()
+            end
+        end)
+        f:SetScript("OnLeave", function(self)
+            GameTooltip:Hide()
+            if onLeave then onLeave(self) end
+        end)
+    end)
+end
+
+-- Convenience over CB_AttachTooltip for text tooltips. `title` and `desc` may each be a string,
+-- a fn()->string (for state-dependent text), or nil. Both → white title + gray wrapped body;
+-- one → a single white wrapped line; neither → no tooltip.
+---@param frame  table              A frame, or an array of frames sharing the tip.
+---@param title  string|fun():string|nil  Bold header line (short).
+---@param desc   string|fun():string|nil  Wrapped body line.
+---@param anchor string?           GameTooltip anchor point (default "ANCHOR_RIGHT").
+NS.CB_SetTooltip = function(frame, title, desc, anchor)
+    NS.CB_AttachTooltip(frame, function(tt)
+        local t = type(title) == "function" and title() or title
+        local d = type(desc)  == "function" and desc()  or desc
+        if t and d then
+            tt:AddLine(t, 1, 1, 1)
+            tt:AddLine(d, 0.8, 0.8, 0.8, true)
+        elseif t or d then
+            tt:AddLine(t or d, 1, 1, 1, true)
+        else
+            return false
+        end
+    end, anchor)
+end
+
+-- ============================================================
 -- Group iteration (party OR raid)
 -- ============================================================
 -- WoW addresses group members differently depending on group type: "partyN"
