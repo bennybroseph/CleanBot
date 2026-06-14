@@ -231,18 +231,12 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
     headerLabel:SetTextColor(info.r, info.g, info.b)
     headerLabel:SetText(info.label .. " (" .. #quests .. ")")
 
-    -- Toggle collapse state and re-render the full list.
-    -- Hover brightens the label to white; leave restores the status color.
-    headerBtn:SetScript("OnClick", function()
+    -- Collapse toggle + the shared hover/click feedback (white-on-hover label, arrow highlight),
+    -- so quest headers match the Manage-tab expanders. Resting color is the group's status color.
+    NS.CB_WireCollapseHeader(headerBtn, headerLabel, function()
         questGroupCollapsed[collapseKey] = not questGroupCollapsed[collapseKey]
         NS.CB_RenderQuests(key)
-    end)
-    headerBtn:SetScript("OnEnter", function()
-        headerLabel:SetTextColor(1, 1, 1)
-    end)
-    headerBtn:SetScript("OnLeave", function()
-        headerLabel:SetTextColor(info.r, info.g, info.b)
-    end)
+    end, { r = info.r, g = info.g, b = info.b }, arrow)
 
     framePool[#framePool + 1] = headerBtn
     yOffset = yOffset - QUEST_HEADER_H - QUEST_GAP

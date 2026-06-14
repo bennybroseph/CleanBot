@@ -61,15 +61,17 @@ NS.CB_CreateHeader = function(parent, text, fontObj)
     return hdr
 end
 
--- Creates a standalone collapse/expand button using the native Blizzard +/−
--- circle textures. ElvUI is applied via HandleCollapseExpandButton when present.
--- Size defaults to 16×16 to match the quest list header row height.
----@param parent      table   Parent frame.
----@param isCollapsed boolean Initial collapsed state (drives + vs − texture).
----@return table              The created Button.
-NS.CB_CreateCollapseButton = function(parent, isCollapsed)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(16, 16)
+-- Creates a collapse/expand button using the native Blizzard +/− circle textures, with the
+-- highlight and ElvUI skinning applied. The single source for these toggles — used by the quest
+-- list headers and the Manage-tab sections. Call btn:SetCollapsed(bool) to flip the art later.
+---@param parent      table    Parent frame.
+---@param isCollapsed boolean  Initial collapsed state (drives + vs − texture).
+---@param size        number?  Width/height in px (default 16).
+---@param name        string?  Optional global frame name (for debugging).
+---@return table               The created Button with a SetCollapsed(bool) method.
+NS.CB_CreateCollapseButton = function(parent, isCollapsed, size, name)
+    local btn = CreateFrame("Button", name, parent)
+    btn:SetSize(size or 16, size or 16)
     CB_SetCollapseTexture(btn, isCollapsed)
     btn:SetHighlightTexture(COLLAPSE_PLUS_HL, "ADD")
 
@@ -77,7 +79,34 @@ NS.CB_CreateCollapseButton = function(parent, isCollapsed)
         NS.ElvUI_S:HandleCollapseExpandButton(btn, isCollapsed and "+" or "-")
     end
 
+    -- Re-textures to the +/- art for a new collapsed state. ElvUI's HandleCollapseExpandButton
+    -- hooks SetNormalTexture, so re-texturing here still drives its skinned +/- swap.
+    btn.SetCollapsed = function(self, collapsed) CB_SetCollapseTexture(self, collapsed) end
+
     return btn
+end
+
+-- Wires the standard collapse-header hover/click feedback so every expander behaves the same
+-- (the look the quest headers introduced): hovering `hit` brightens `label` to white and lights
+-- the `toggle` button's +/- highlight; leaving restores `label` to `baseColor` and clears the
+-- highlight; clicking `hit` runs `onToggle`. Centralizes this so the Manage sections and the
+-- quest category headers stay consistent.
+---@param hit       table   The mouse-enabled Button covering the header (its label, or the whole row).
+---@param label     table   The header label FontString to brighten on hover.
+---@param onToggle  fun()   Called when the header is clicked.
+---@param baseColor table?  {r,g,b} the label's resting color (default the gold NORMAL_FONT_COLOR).
+---@param toggle    table?  Optional +/- button whose highlight is locked while hovering.
+NS.CB_WireCollapseHeader = function(hit, label, onToggle, baseColor, toggle)
+    local c = baseColor or NORMAL_FONT_COLOR
+    hit:SetScript("OnEnter", function()
+        label:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
+        if toggle then toggle:LockHighlight() end
+    end)
+    hit:SetScript("OnLeave", function()
+        label:SetTextColor(c.r, c.g, c.b)
+        if toggle then toggle:UnlockHighlight() end
+    end)
+    hit:SetScript("OnClick", function() onToggle() end)
 end
 
 -- Creates a collapsible section for the Manage tab.
@@ -108,32 +137,21 @@ end
 NS.CB_CreateSection = function(parent, key, title, nestLevel)
     local section = {}
 
-    -- Toggle button using the native Blizzard gold +/- circle textures — the same
-    -- art used by the Reputation, Skills, TradeSkill, and Trainer panels since vanilla.
-    local toggleBtn = CreateFrame("Button", "CleanBotSection_" .. key .. "_Toggle", parent)
-    toggleBtn:SetSize(14, 14)
+    -- Load saved collapse state up front so the toggle starts on the correct +/- art.
+    local saved = CleanBot_SavedVars and CleanBot_SavedVars.collapsedSections
+    section.collapsed = saved and saved[key] == true or false
+    section.key       = key
 
-    CB_SetCollapseTexture(toggleBtn, false)  -- start expanded (−)
-    toggleBtn:SetHighlightTexture(COLLAPSE_PLUS_HL, "ADD")
-
-    -- ElvUI hooks SetNormalTexture internally to swap in its own Plus/Minus textures,
-    -- so our SetText override (which calls SetNormalTexture) still drives the state.
-    if NS.ElvUI_S then NS.ElvUI_S:HandleCollapseExpandButton(toggleBtn, "-") end
-
-    -- Swap between + (collapsed) and − (expanded) by swapping normal/pushed textures.
-    toggleBtn.SetText = function(self, text)
-        CB_SetCollapseTexture(self, text == "+")
-    end
+    -- Toggle button via the shared factory — the native gold +/- art, highlight, ElvUI skinning,
+    -- and the SetCollapsed contract all live in CB_CreateCollapseButton (14px to match the header row).
+    local toggleBtn = NS.CB_CreateCollapseButton(parent, section.collapsed, 14, "CleanBotSection_" .. key .. "_Toggle")
 
     -- Title label: FontString on parent, to the right of the toggle button.
     local titleLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     titleLabel:SetText(title)
     titleLabel:SetPoint("LEFT", toggleBtn, "RIGHT", 4, 0)
+    section.titleLabel = titleLabel
 
-    -- Load saved collapse state.
-    local saved = CleanBot_SavedVars and CleanBot_SavedVars.collapsedSections
-    section.collapsed  = saved and saved[key] == true or false
-    section.key        = key
     section.toggleBtn  = toggleBtn   -- always the section header; never hidden
     section.lastWidget = nil         -- set by Finalize; deepest content widget
     section.frame      = toggleBtn   -- updated to lastWidget in Finalize
@@ -172,7 +190,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
             self.bg:SetHeight(2000)  -- corrected by UpdateBackground after first render
             self.bg:Show()
         end
-        toggleBtn:SetText(self.collapsed and "+" or "-")
+        toggleBtn:SetCollapsed(self.collapsed)
     end
 
     -- Re-sync bg width whenever the parent (scroll child) changes size — e.g. when
@@ -208,6 +226,16 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     end
 
     toggleBtn:SetScript("OnClick", function() section:Toggle() end)
+
+    -- The title is a FontString (no mouse input), so an invisible button spanning the whole header
+    -- (toggle + label) makes it one control like standard WoW collapsible headers: clicking anywhere
+    -- toggles, and hovering brightens the label to white + lights the toggle (via CB_WireCollapseHeader).
+    local labelHit = CreateFrame("Button", nil, parent)
+    labelHit:SetPoint("LEFT",  toggleBtn,  "LEFT",  0, 0)
+    labelHit:SetPoint("RIGHT", titleLabel, "RIGHT", 0, 0)
+    labelHit:SetHeight(14)
+    NS.CB_WireCollapseHeader(labelHit, titleLabel, function() section:Toggle() end, nil, toggleBtn)
+    section.labelHit = labelHit
 
     -- Match label margins so CB_AnchorBelow spacing is consistent with the
     -- old plain-label style that sections replace.
