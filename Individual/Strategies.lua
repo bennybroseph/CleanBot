@@ -374,10 +374,10 @@ NS.NC_STRATEGIES = {
         cmd     = "ll",
         field   = "lootStrategy",
         options = {
-            { value = "normal",     name = "Normal",     desc = "Loot items with a use or sell value — includes most gray junk (Default)" },
-            { value = "gray",       name = "Gray",       desc = "Loot useful items and every gray, even worthless ones" },
             { value = "all",        name = "All",        desc = "Loot everything on the corpse" },
+            { value = "normal",     name = "Normal",     desc = "Loot items with a use or sell value — includes most gray junk (Default)" },
             { value = "disenchant", name = "Disenchant", desc = "Loot useful items plus disenchantable gear (uncommon+ weapons/armor)" },
+            { value = "gray",       name = "Gray",       desc = "Loot useful items and every gray, even worthless ones" },
         },
     },
 }
