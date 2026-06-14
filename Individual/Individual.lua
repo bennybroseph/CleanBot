@@ -47,17 +47,17 @@ NS.CleanBot_BuildIndividualTab = function()
          NS.individualPanel.paddingBottom)
 
     -- ── Two-column panel structure ────────────────────────────────
-    -- Compute model panel width from frame height (decoupled from frame width).
-    -- This means the model area never changes size when the frame expands/collapses.
-    -- modelW factor (0.7) approximates the original contentW/3 at 850px width.
-    -- Adjust in-game via this multiplier if the model looks too wide or narrow.
+    -- The model column is a FIXED width (NS.MODEL_WIDTH), decoupled from both the frame width
+    -- (so expand/collapse never resizes it) and the frame height (so changing FRAME_HEIGHT can't
+    -- steal width from the strategy panel). The model still fills the column height; only its
+    -- width and the equip-icon size are pinned. panelW is therefore a constant.
     local panelH  = NS.individualContent:GetHeight()
     if panelH == 0 then
         panelH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H
                  - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom)
     end
     local modelH  = panelH - NS.EQUIP_WEAPON_PAD
-    local modelW  = math.floor(modelH * 0.7)
+    local modelW  = NS.MODEL_WIDTH
     local g       = NS.CB_SlotGeometry(modelW, modelH)
     local panelW  = g.colW + modelW + g.colW
 
@@ -160,10 +160,10 @@ local function CB_GetGeometry()
     if contentW == 0 then contentW = NS.EXPANDED_WIDTH - NS.PADDING.frame.left - NS.PADDING.frame.right end
     if contentH == 0 then contentH = NS.FRAME_HEIGHT - NS.TITLE_H - NS.TOP_BAR_H - NS.BOT_BAR_H - (CleanBotFrame.paddingBottom or NS.PADDING.frame.bottom) end
 
-    -- modelW is derived from modelH, not contentW, so the model panel width is
-    -- stable regardless of whether the frame is expanded or collapsed.
+    -- modelW is a fixed constant (NS.MODEL_WIDTH), independent of both contentW and contentH, so
+    -- the model panel width is static regardless of frame width (expand/collapse) or height.
     local modelH = contentH - NS.EQUIP_WEAPON_PAD
-    local modelW = math.floor(modelH * 0.7)
+    local modelW = NS.MODEL_WIDTH
     local g      = NS.CB_SlotGeometry(modelW, modelH)
     return contentW, contentH, modelH, g.colW, modelW
 end

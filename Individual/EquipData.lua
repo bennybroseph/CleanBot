@@ -6,21 +6,23 @@
 -- ============================================================
 local NS = CleanBotNS
 
--- Proportional paperdoll slot geometry derived from the live model size.
+-- Proportional paperdoll slot geometry derived from the model size.
 -- Single source of truth shared by the equip-column layout (Individual.lua's
 -- CB_GetGeometry) and the slot-button creation (Equip.lua's
 -- CB_CreateEquipSlots) so the two layouts never drift.
---   step    = modelH / 8    (8 slots distributed down the model height)
---   slot    = step * 0.88   (12% gap between consecutive slots)
---   gapX    = modelW * 0.03 (column separation from the model edge)
---   gapYBot = modelH * 0.02 (weapon-row clearance below the model)
---   colW    = slot + gapX   (full width of one equip column)
----@param modelW number  Live model width.
+--   step    = modelH / 8           (8 slots distributed down the model height)
+--   slot    = min(modelW*0.16, step) (icon size keyed to the FIXED model width so colW — and
+--                                    thus the strategy-panel width — never changes with frame
+--                                    height; capped at step so icons never overlap on short frames)
+--   gapX    = modelW * 0.03        (column separation from the model edge)
+--   gapYBot = modelH * 0.02        (weapon-row clearance below the model)
+--   colW    = slot + gapX          (full width of one equip column; width-only → static)
+---@param modelW number  Model width (a fixed constant; see NS.MODEL_WIDTH).
 ---@param modelH number  Live model height.
 ---@return table         { step, slot, gapX, gapYBot, colW } slot geometry.
 NS.CB_SlotGeometry = function(modelW, modelH)
     local step = math.floor(modelH / 8)
-    local slot = math.floor(step * 0.88)
+    local slot = math.min(math.floor(modelW * 0.16), step)
     local gapX = math.max(2, math.floor(modelW * 0.03))
     return {
         step    = step,
