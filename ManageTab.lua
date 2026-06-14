@@ -432,7 +432,8 @@ NS.CleanBot_BuildManageTab = function()
                 local e = name and CleanBot_PartyBots[strlower(name)]
                 if e then e.combat = e.combat or {}; e.combat.passive = on end
             end)
-        end)
+        end,
+        function() return NS.desiredBots end)   -- gear commands refetch any roster bot with a live model
     partyRaidSection:Finalize(partyRaidDeepest)
 
     -- ── Favorites/Presets section ─────────────────────────

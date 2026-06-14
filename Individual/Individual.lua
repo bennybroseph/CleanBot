@@ -317,19 +317,10 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
             }
             yOffset = yOffset + consumed
         else
-            local cb = NS.CB_CreateCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag)
-            cb:SetSize(20, 20)
+            -- cb.labelFS / cb.labelBase (stamped by the helper) let CB_SyncRegistry compose group
+            -- suffixes (" (?)" mixed, " (*)" partially supported) and reset to the base label.
+            local cb, lbl = NS.CB_CreateLabeledCheckBox(section, "CleanBotCB_" .. s.field .. "_" .. tag, s.name, s.desc)
             cb:SetPoint("TOPLEFT", section, "TOPLEFT", NS.PADDING.section.left + NS.MARGIN.checkbox.left, -yOffset)
-
-            local lbl = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-            lbl:SetText(s.name)
-            -- Stamped so CB_SyncRegistry can compose group suffixes (" (?)" mixed,
-            -- " (*)" partially supported) and reset to the base label afterwards.
-            cb.labelFS   = lbl
-            cb.labelBase = s.name
-
-            NS.CB_SetTooltip(cb, s.name, s.desc)
 
             cb:SetChecked(sourceTable and sourceTable[s.field] == true)
 
@@ -354,11 +345,12 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
 
             controls[s.field] = cb
             local cHeight = NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom
-            -- The label is anchored to cb (so re-pinning cb carries it along) but is parented to
-            -- the section, not cb — so it must be shown/hidden explicitly alongside cb, else a
-            -- hidden row's label floats over the rows that repack into its place.
+            -- The label and its hover/click hit frame are anchored to cb (so re-pinning cb carries
+            -- them along) but are parented to the section, not cb — so they must be shown/hidden
+            -- explicitly alongside cb, else a hidden row's label floats over the rows that repack
+            -- into its place (and its hit frame leaves a ghost hover target).
             layoutItems[#layoutItems + 1] = {
-                strat = s, frames = { cb, lbl }, height = cHeight,
+                strat = s, frames = { cb, lbl, cb.labelHit }, height = cHeight,
                 place = function(y) cb:SetPoint("TOPLEFT", section, "TOPLEFT",
                     NS.PADDING.section.left + NS.MARGIN.checkbox.left, -y) end,
             }
@@ -1482,7 +1474,8 @@ local function CB_BuildBotContent(container, slot, class, tag)
         function() local e = CleanBot_PartyBots[slot.key]; return e and e.formation end,
         function(t) local e = CleanBot_PartyBots[slot.key]; if e then e.formation = t end end,
         function() local e = CleanBot_PartyBots[slot.key]; return e and e.combat and e.combat.passive end,
-        function(b) local e = CleanBot_PartyBots[slot.key]; if e then e.combat = e.combat or {}; e.combat.passive = b end end)
+        function(b) local e = CleanBot_PartyBots[slot.key]; if e then e.combat = e.combat or {}; e.combat.passive = b end end,
+        function() return { slot } end)   -- gear commands refetch the open bot's equipment
 
     CB_BuildTwoColumnContent(combatContent,    NS.STRATEGIES,    "co", slot, tag, allFrames, function(e) return e and e.combat    end)
     CB_BuildTwoColumnContent(nonCombatContent, NS.NC_STRATEGIES, "nc", slot, tag, allFrames, function(e) return e and e.nonCombat end)

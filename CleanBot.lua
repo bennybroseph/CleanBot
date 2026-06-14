@@ -126,25 +126,20 @@ NS.CB_AttachTooltip = function(frame, populate, anchor, onLeave)
     end)
 end
 
--- Convenience over CB_AttachTooltip for text tooltips. `title` and `desc` may each be a string,
--- a fn()->string (for state-dependent text), or nil. Both → white title + gray wrapped body;
--- one → a single white wrapped line; neither → no tooltip.
+-- Convenience over CB_AttachTooltip for text tooltips, in the standard WoW style: a gold `title`
+-- header and a white wrapped `desc` body. Each may be a string, a fn()->string (for state-
+-- dependent text), or nil — pass a short header as `title` and explanatory/status text as `desc`.
 ---@param frame  table              A frame, or an array of frames sharing the tip.
----@param title  string|fun():string|nil  Bold header line (short).
----@param desc   string|fun():string|nil  Wrapped body line.
+---@param title  string|fun():string|nil  Gold header line (short).
+---@param desc   string|fun():string|nil  White wrapped body line.
 ---@param anchor string?           GameTooltip anchor point (default "ANCHOR_RIGHT").
 NS.CB_SetTooltip = function(frame, title, desc, anchor)
     NS.CB_AttachTooltip(frame, function(tt)
         local t = type(title) == "function" and title() or title
         local d = type(desc)  == "function" and desc()  or desc
-        if t and d then
-            tt:AddLine(t, 1, 1, 1)
-            tt:AddLine(d, 0.8, 0.8, 0.8, true)
-        elseif t or d then
-            tt:AddLine(t or d, 1, 1, 1, true)
-        else
-            return false
-        end
+        if not t and not d then return false end
+        if t then tt:AddLine(t, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b) end          -- gold header
+        if d then tt:AddLine(d, HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b, true) end  -- white body
     end, anchor)
 end
 

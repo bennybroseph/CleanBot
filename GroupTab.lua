@@ -1150,7 +1150,8 @@ NS.CleanBot_BuildGroupTab = function()
                 local e = CleanBot_PartyBots[m.key]
                 if e then e.combat = e.combat or {}; e.combat.passive = b end
             end
-        end)
+        end,
+        function() return NS.groupSlot.members end)   -- gear commands refetch the selected members
 
     CB_SelectGroupInnerTab("commands")
 

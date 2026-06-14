@@ -749,23 +749,10 @@ NS.CleanBot_BuildSettingsTab = function()
         (otherPanel.paddingLeft or 0) + (botEmotesHeader.marginLeft or 0),
         -((otherPanel.paddingTop or 0) + (botEmotesHeader.marginTop  or 0)))
 
-    local botEmotesCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotBotEmotesCB")
+    local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
+    local botEmotesCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotBotEmotesCB", "Enable Bot Emotes", EMOTE_TOOLTIP)
     botEmotesCB:SetChecked(NS.botEmotes)
     NS.CB_AnchorBelow(botEmotesCB, botEmotesHeader)
-
-    -- A small invisible frame over the label text catches mouse events for the tooltip.
-    local botEmotesCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Bot Emotes")
-    botEmotesCBLbl:SetPoint("LEFT", botEmotesCB, "RIGHT", 2, 0)
-
-    local botEmotesCBLblHit = CreateFrame("Frame", nil, otherPanel)
-    botEmotesCBLblHit:SetPoint("LEFT",  botEmotesCBLbl, "LEFT",  0,  0)
-    botEmotesCBLblHit:SetPoint("RIGHT", botEmotesCBLbl, "RIGHT", 0,  0)
-    botEmotesCBLblHit:SetHeight(20)
-    botEmotesCBLblHit:EnableMouse(true)
-
-    -- Tooltip on hover over the checkbox or its label.
-    local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
-    NS.CB_SetTooltip({ botEmotesCB, botEmotesCBLblHit }, nil, EMOTE_TOOLTIP)
 
     botEmotesCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -780,7 +767,8 @@ NS.CleanBot_BuildSettingsTab = function()
     -- session (the command is a server toggle and the character spawns off, so re-sending
     -- mid-session / on reload would flip it the wrong way). Live state is tracked from the
     -- server's "Enable/Disable player botAI" messages instead. Not ElvUI-gated.
-    local selfBotCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotSelfBotCB")
+    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
+    local selfBotCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotSelfBotCB", "Auto-Enable Self as Bot", SELF_BOT_TOOLTIP)
     selfBotCB:SetChecked(NS.manageSelf == true)
     NS.CB_AnchorBelow(selfBotCB, botEmotesCB)
     -- Exposed so the first-time popup can tick the box when it enables the preference.
@@ -789,18 +777,6 @@ NS.CleanBot_BuildSettingsTab = function()
     -- Tracks the last Behavior checkbox so the next one anchors below it regardless of
     -- whether the ElvUI-gated Item Glow box exists. Reassigned as more boxes are added.
     local lastBehaviorCB = selfBotCB
-
-    local selfBotCBLbl = NS.CB_CreateLabel(otherPanel, "Auto-Enable Self as Bot")
-    selfBotCBLbl:SetPoint("LEFT", selfBotCB, "RIGHT", 2, 0)
-
-    local selfBotCBLblHit = CreateFrame("Frame", nil, otherPanel)
-    selfBotCBLblHit:SetPoint("LEFT",  selfBotCBLbl, "LEFT",  0, 0)
-    selfBotCBLblHit:SetPoint("RIGHT", selfBotCBLbl, "RIGHT", 0, 0)
-    selfBotCBLblHit:SetHeight(20)
-    selfBotCBLblHit:EnableMouse(true)
-
-    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
-    NS.CB_SetTooltip({ selfBotCB, selfBotCBLblHit }, nil, SELF_BOT_TOOLTIP)
 
     selfBotCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -829,22 +805,11 @@ NS.CleanBot_BuildSettingsTab = function()
     -- The rarity overlay only exists on the Blizz path, so the toggle is created only
     -- there; ElvUI shows item quality through its own button border.
     if not NS.ElvUI_S then
-        local itemGlowCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotItemGlowCB")
+        local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-colored glow."
+        local itemGlowCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotItemGlowCB", "Enable Item Glow", ITEM_GLOW_TOOLTIP)
         itemGlowCB:SetChecked(NS.itemGlow ~= false)
         NS.CB_AnchorBelow(itemGlowCB, selfBotCB)
         lastBehaviorCB = itemGlowCB
-
-        local itemGlowCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Item Glow")
-        itemGlowCBLbl:SetPoint("LEFT", itemGlowCB, "RIGHT", 2, 0)
-
-        local itemGlowCBLblHit = CreateFrame("Frame", nil, otherPanel)
-        itemGlowCBLblHit:SetPoint("LEFT",  itemGlowCBLbl, "LEFT",  0, 0)
-        itemGlowCBLblHit:SetPoint("RIGHT", itemGlowCBLbl, "RIGHT", 0, 0)
-        itemGlowCBLblHit:SetHeight(20)
-        itemGlowCBLblHit:EnableMouse(true)
-
-        local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-colored glow."
-        NS.CB_SetTooltip({ itemGlowCB, itemGlowCBLblHit }, nil, ITEM_GLOW_TOOLTIP)
 
         itemGlowCB:SetScript("OnClick", function(self)
             local checked = self:GetChecked() and true or false
@@ -859,21 +824,10 @@ NS.CleanBot_BuildSettingsTab = function()
     -- Filters CleanBot's own whisper commands, the expected bot replies, and the
     -- server command output it triggers out of the chat window (see ChatFilter.lua).
     -- The filters read NS.hideBotChatter live, so toggling here applies immediately.
-    local hideChatterCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotHideChatterCB")
+    local HIDE_CHATTER_TOOLTIP = "When enabled, CleanBot hides its own whispered commands, the bot replies it requests (stats, strategies, inventory, quests), and the server output it triggers from your chat window. Turn off to see the raw traffic for testing."
+    local hideChatterCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotHideChatterCB", "Hide Bot Chatter", HIDE_CHATTER_TOOLTIP)
     hideChatterCB:SetChecked(NS.hideBotChatter ~= false)
     NS.CB_AnchorBelow(hideChatterCB, lastBehaviorCB)
-
-    local hideChatterCBLbl = NS.CB_CreateLabel(otherPanel, "Hide Bot Chatter")
-    hideChatterCBLbl:SetPoint("LEFT", hideChatterCB, "RIGHT", 2, 0)
-
-    local hideChatterCBLblHit = CreateFrame("Frame", nil, otherPanel)
-    hideChatterCBLblHit:SetPoint("LEFT",  hideChatterCBLbl, "LEFT",  0, 0)
-    hideChatterCBLblHit:SetPoint("RIGHT", hideChatterCBLbl, "RIGHT", 0, 0)
-    hideChatterCBLblHit:SetHeight(20)
-    hideChatterCBLblHit:EnableMouse(true)
-
-    local HIDE_CHATTER_TOOLTIP = "When enabled, CleanBot hides its own whispered commands, the bot replies it requests (stats, strategies, inventory, quests), and the server output it triggers from your chat window. Turn off to see the raw traffic for testing."
-    NS.CB_SetTooltip({ hideChatterCB, hideChatterCBLblHit }, nil, HIDE_CHATTER_TOOLTIP)
 
     hideChatterCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
@@ -889,14 +843,10 @@ NS.CleanBot_BuildSettingsTab = function()
     -- and this UI always agree. Setter references are late-bound closures
     -- because Debug.lua loads after this file.
 
-    -- Checkbox + label + tooltip helper (debug panel only).
+    -- Debug-panel checkbox: label + hover/click tooltip via the shared labeled-checkbox helper.
     local function CB_MakeDebugCheck(name, labelText, tooltip, anchor, onClick)
-        local cb = NS.CB_CreateCheckBox(debugPanel, name)
-        cb:SetSize(20, 20)
+        local cb = NS.CB_CreateLabeledCheckBox(debugPanel, name, labelText, tooltip)
         NS.CB_AnchorBelow(cb, anchor)
-        local lbl = NS.CB_CreateLabel(debugPanel, labelText)
-        lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-        NS.CB_SetTooltip(cb, nil, tooltip)
         cb:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
         return cb
     end

@@ -78,8 +78,10 @@ end
 ---                                          = the open bot; Group = all-agree-or-MIXED; Manage = OR
 ---                                          ("any bot passive" → on, a global toggle). nil = no getter.
 ---@param passiveSet     fun(on:boolean)?   Optimistically caches the picked passive state on the host's bot(s).
+---@param scopeBots      fun():table?       Returns the bots this host's commands target (each has a
+---                                          `.key`). Used to refetch equipment after the gear commands.
 ---@return table                            The deepest widget built (for section Finalize / anchor chains).
-NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, formationGet, formationSet, passiveGet, passiveSet)
+NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, formationGet, formationSet, passiveGet, passiveSet, scopeBots)
     -- Register the Auto Equip confirmation popup once (lazily — CB_RegisterConfirmPopup
     -- is defined in a file that loads after this one, but the builder only runs at
     -- event time, by which point it exists). Context (which bots to gear) is passed
@@ -93,6 +95,25 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     local function mkBtn(suffix, label, cmd)
         return NS.CB_CreateButton(parent, "CleanBotCmd" .. suffix .. "Btn_" .. tag,
             label, 120, 24, function() send(cmd) end)
+    end
+
+    -- After a gear-changing command (equip upgrade / autogear), the bot's equipment may have changed
+    -- server-side. Refetch it for any targeted bot that has a bound model/paperdoll (NS.tabList — the
+    -- only bots whose gear is on screen), after a delay so the server has applied the change. The live
+    -- unit comes from the slot; CB_RefreshEquipSlots then re-snapshots the model only if gear changed.
+    local function queueEquipRefresh()
+        if not (scopeBots and NS.CB_QueueEquipRefresh) then return end
+        local affected = {}
+        for _, b in ipairs(scopeBots() or {}) do affected[b.key] = true end
+        NS.CB_After(1.5, function()
+            local toRefresh = {}
+            for _, slot in ipairs(NS.tabList or {}) do
+                if affected[slot.key] and slot.unit and UnitExists(slot.unit) then
+                    toRefresh[#toRefresh + 1] = { key = slot.key, unit = slot.unit }
+                end
+            end
+            if #toRefresh > 0 then NS.CB_QueueEquipRefresh(toRefresh) end
+        end)
     end
 
     -- Title-cases a formation token for display ("arrow" → "Arrow"); the lowercase
@@ -165,7 +186,9 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
 
     -- Equip Upgrades ("equip upgrade"): equips stat upgrades found in the bot's bags. Non-destructive
     -- (only swaps in improvements), so no confirmation — unlike Auto Gear which re-gears wholesale.
-    local autoEquipBtn = mkBtn("AutoEquip", "Equip Upgrades", "equip upgrade")
+    -- Changes gear, so refetch equipment afterward (queueEquipRefresh) to update the paperdoll/model.
+    local autoEquipBtn = NS.CB_CreateButton(parent, "CleanBotCmdAutoEquipBtn_" .. tag,
+        "Equip Upgrades", 120, 24, function() send("equip upgrade"); queueEquipRefresh() end)
     NS.CB_SetTooltip(autoEquipBtn, "Equip Upgrades",
         "Equips stat upgrades found in the bot's bags. Only swaps in improvements — never downgrades or unequips, so it's safe to use any time.")
     NS.CB_AnchorBelow(autoEquipBtn, maintenanceBtn)
@@ -176,7 +199,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
         "Auto Gear", 120, 24, function()
             StaticPopup_Show("CLEANBOT_AUTO_GEAR",
                 (describeTarget and describeTarget()) or "this bot's", nil,
-                { onConfirm = function() send("autogear") end })
+                { onConfirm = function() send("autogear"); queueEquipRefresh() end })
         end)
     NS.CB_SetTooltip(autoGearBtn, "Auto Gear",
         "Replaces the bot's entire equipment with an auto-selected gear set, re-gearing from scratch. Destructive — you'll be asked to confirm first.")
@@ -199,15 +222,9 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     -- "co +passive"/"co -passive" to the host's scope and reflects the host's current state
     -- (true / false / NS.MIXED → " (?)"). When passiveGet is nil (Manage is action-only) the
     -- checkbox just reflects its last click. Refreshed via NS.commandRefreshers like formation.
-    local passiveCB = NS.CB_CreateCheckBox(parent, "CleanBotCmdPassiveCB_" .. tag)
-    passiveCB:SetSize(20, 20)
+    local passiveCB, passiveLbl = NS.CB_CreateLabeledCheckBox(parent, "CleanBotCmdPassiveCB_" .. tag,
+        "Passive", "Stand down — do nothing in combat")
     NS.CB_AnchorBelow(passiveCB, autoGearBtn)
-
-    local passiveLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    passiveLbl:SetPoint("LEFT", passiveCB, "RIGHT", 4, 0)
-    passiveLbl:SetText("Passive")
-
-    NS.CB_SetTooltip(passiveCB, "Passive", "Stand down — do nothing in combat")
 
     passiveCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false

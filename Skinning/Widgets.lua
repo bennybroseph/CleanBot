@@ -773,6 +773,41 @@ NS.CB_CreateCheckBox = function(parent, name)
     return cb
 end
 
+-- A checkbox plus its right-side label as one control: hovering EITHER the box or the label shows
+-- the tooltip, and clicking the label toggles the box (matching standard WoW options behavior).
+-- The caller still wires cb:SetScript("OnClick", …) and any state refresh. Returns (cb, label);
+-- cb is stamped with .labelFS / .labelBase (for label-suffix updates) and .labelHit.
+---@param parent    table   Parent frame.
+---@param name      string? Optional global frame name for the checkbox.
+---@param labelText string  Label shown to the right; also the tooltip's gold header.
+---@param desc      string|fun():string|nil  Tooltip body (white). nil → header-only tooltip.
+---@return table cb     The created CheckButton.
+---@return table label  The label FontString.
+NS.CB_CreateLabeledCheckBox = function(parent, name, labelText, desc)
+    local cb = NS.CB_CreateCheckBox(parent, name)
+    cb:SetSize(20, 20)
+
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    lbl:SetText(labelText)
+    cb.labelFS   = lbl
+    cb.labelBase = labelText
+
+    -- FontStrings take no mouse input, so an invisible frame over the label is the hover/click
+    -- target: hovering shows the tooltip (below) and clicking toggles the box, so the whole row
+    -- behaves as one control.
+    local hit = CreateFrame("Frame", nil, parent)
+    hit:SetPoint("LEFT",  lbl, "LEFT",  0, 0)
+    hit:SetPoint("RIGHT", lbl, "RIGHT", 0, 0)
+    hit:SetHeight(20)
+    hit:EnableMouse(true)
+    hit:SetScript("OnMouseUp", function() cb:Click() end)
+    cb.labelHit = hit
+
+    NS.CB_SetTooltip({ cb, hit }, labelText, desc)
+    return cb, lbl
+end
+
 -- Tab button built on UIPanelButtonTemplate, with the active/inactive state layered
 -- on top. The native TabButtonTemplate was tried but ElvUI's HandleTab insets its
 -- backdrop 10px per side (tuned for full-size frame tabs), which renders this addon's
@@ -1296,7 +1331,7 @@ NS.CB_CreateXPBar = function(parent)
     -- Tooltip — text is filled in by CB_RefreshXPBar (xp.tooltipText). The bar
     -- lives on the (interactive) paperdoll model, so it can take mouse events.
     xp:EnableMouse(true)
-    NS.CB_SetTooltip(xp, function() return xp.tooltipText end, nil, "ANCHOR_TOP")
+    NS.CB_SetTooltip(xp, nil, function() return xp.tooltipText end, "ANCHOR_TOP")
 
     xp.fill   = fill
     xp.rested = rested
