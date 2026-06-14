@@ -28,7 +28,7 @@ end
 -- TradeRecipientItem frames are plain Frames (not Buttons) so HookScript
 -- "OnClick" is unavailable. Instead we lay invisible Buttons on top of each
 -- slot that capture right-clicks and forward give commands to the bot.
--- Left-clicks are intentionally not consumed so normal trade UI behaviour
+-- Left-clicks are intentionally not consumed so normal trade UI behavior
 -- (tooltip on hover, etc.) is unaffected.
 -- Slots to cover: 6 regular trade slots + the no-trade enchant slot (index 7).
 -- GetTradeTargetItemLink(7) corresponds to the enchant/no-trade slot.
@@ -55,7 +55,7 @@ local function CB_CreateTradeSlotOverlays()
             local slotIndex = entry.index
             -- The slot frame is 153x37 (icon + name text). The 37x37 icon child is
             -- named TradeRecipientItem{i}ItemButton — anchor the overlay to that so
-            -- the highlight covers only the icon, matching native hover behaviour.
+            -- the highlight covers only the icon, matching native hover behavior.
             local iconBtn = _G[entry.frame .. "ItemButton"] or slot
             local overlay = CreateFrame("Button", "CleanBotTradeOverlay" .. slotIndex, UIParent)
             overlay:SetFrameStrata("HIGH")

@@ -358,6 +358,28 @@ NS.NC_STRATEGIES = {
             { cmd = "gather", field = "autoGather", name = "Auto Gather", desc = "Automatically gather nearby nodes after combat", default = true },
         },
     },
+    {
+        -- Loot-quality policy (the "ll" command — a per-bot setting queried via "ll ?", NOT an
+        -- nc on/off strategy). type="settingDropdown" sends "ll <value>" to the slot's targets and
+        -- reflects entry.lootStrategy (parsed from the "Loot strategy:" reply). It carries `options`
+        -- (value/name/desc) rather than `strategies`, so the nc map/default builders skip it.
+        -- Mode meanings verified from each strategy's CanLoot() (LootStrategyValue.cpp) + the
+        -- ItemUsage classification (ItemUsageValue.cpp): gray items with a sell price resolve to
+        -- ITEM_USAGE_VENDOR, so "normal" already loots gray vendor-trash. Default is "normal"
+        -- (LootStrategyValue's ManualSetValue base is seeded with `normal`).
+        header  = "Loot Quality",
+        group   = "lootQuality",
+        column  = "right",
+        type    = "settingDropdown",
+        cmd     = "ll",
+        field   = "lootStrategy",
+        options = {
+            { value = "normal",     name = "Normal",     desc = "Loot items with a use or sell value — includes most gray junk (Default)" },
+            { value = "gray",       name = "Gray",       desc = "Loot useful items and every gray, even worthless ones" },
+            { value = "all",        name = "All",        desc = "Loot everything on the corpse" },
+            { value = "disenchant", name = "Disenchant", desc = "Loot useful items plus disenchantable gear (uncommon+ weapons/armor)" },
+        },
+    },
 }
 
 NS.NC_STRATEGY_MAP      = {}
@@ -367,10 +389,14 @@ do
         general      = NS.NC_GENERAL_STRATEGIES,
     }
     for _, grp in ipairs(NS.NC_STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do
-            NS.NC_STRATEGY_MAP[s.cmd] = s.field
-            local t = groupToTable[grp.group]
-            if t then t[#t + 1] = s end
+        -- settingDropdown groups carry `options`, not `strategies` (and their options are command
+        -- values, not nc tokens) — skip them so nothing maps a nil cmd into NC_STRATEGY_MAP.
+        if grp.strategies then
+            for _, s in ipairs(grp.strategies) do
+                NS.NC_STRATEGY_MAP[s.cmd] = s.field
+                local t = groupToTable[grp.group]
+                if t then t[#t + 1] = s end
+            end
         end
     end
 end
@@ -405,7 +431,9 @@ end
 NS.CB_DefaultNonCombat = function()
     local t = {}
     for _, grp in ipairs(NS.NC_STRATEGIES) do
-        for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        if grp.strategies then  -- settingDropdown groups carry `options`, not seedable strategies
+            for _, s in ipairs(grp.strategies) do t[s.field] = s.default or nil end
+        end
         if grp.defaultField then t[grp.defaultField] = true end
     end
     return t

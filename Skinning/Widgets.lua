@@ -269,10 +269,10 @@ end
 -- A bordered, scrollable list of selectable rows.
 --
 -- Items are plain strings, or tables for decorated rows:
---   { text = "Label", value = "key", class = "WARRIOR"|nil, grey = boolean|nil,
+--   { text = "Label", value = "key", class = "WARRIOR"|nil, gray = boolean|nil,
 --     rightIcon = { texture = path, coords = {l,r,t,b} }|nil }
 -- class colors the label (RAID_CLASS_COLORS) and shows the class icon (left);
--- grey renders the label 50% grey with no icon (e.g. a bot missing from the
+-- gray renders the label 50% gray with no icon (e.g. a bot missing from the
 -- party/raid); rightIcon shows a texture right-aligned in the row (e.g. a role
 -- icon). String rows keep the template's default look.
 --
@@ -310,7 +310,7 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
     local numVisible = math.max(1, math.floor((height - 4) / ROW_H))
 
     -- Outer bordered container. CB_ApplyInnerSkin gives it the panel-inset look
-    -- without registering it for theme-refresh (the list colour is fixed art).
+    -- without registering it for theme-refresh (the list color is fixed art).
     local container = CreateFrame("Frame", name, parent)
     -- width is the content area; add 20px (2px left inset + 18px scrollbar) for the container.
     container:SetSize(width + 20, height)
@@ -369,8 +369,8 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
                 row.value = itemValue(item)
                 row.label:SetText(isTable and item.text or item)
 
-                -- Class icon only for class-decorated, present (non-grey) rows.
-                local showIcon = isTable and item.class and not item.grey
+                -- Class icon only for class-decorated, present (non-gray) rows.
+                local showIcon = isTable and item.class and not item.gray
                 if showIcon then
                     local coords = NS.CLASS_ICON_COORDS and NS.CLASS_ICON_COORDS[item.class]
                     if coords then row.icon:SetTexCoord(unpack(coords)) end
@@ -399,7 +399,7 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
 
                 local classColor = isTable and item.class and RAID_CLASS_COLORS
                                    and RAID_CLASS_COLORS[item.class]
-                if isTable and item.grey then
+                if isTable and item.gray then
                     row.curR, row.curG, row.curB = 0.5, 0.5, 0.5
                 elseif classColor then
                     row.curR, row.curG, row.curB = classColor.r, classColor.g, classColor.b
@@ -453,7 +453,7 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         lbl:SetJustifyH(justifyH or "LEFT")
         row.label = lbl
         -- Snapshot the template's text color so refresh() can reset a recycled
-        -- row after a class-colored or greyed table item occupied it.
+        -- row after a class-colored or grayed table item occupied it.
         row.defR, row.defG, row.defB = lbl:GetTextColor()
 
         -- Class icon for decorated table items; hidden for plain string rows.
@@ -932,7 +932,7 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     if lowLabel  then lowLabel:SetText(lowText  or tostring(softMin)) end
     if highLabel then highLabel:SetText(highText or tostring(softMax)) end
 
-    -- EditBox sits centred between the low/high labels, directly below the slider bar.
+    -- EditBox sits centered between the low/high labels, directly below the slider bar.
     -- Created directly (not via CB_CreateEditBox) so we can apply CB_SkinEditBoxSafe
     -- instead of HandleEditBox — see CB_SkinEditBoxSafe for the full explanation.
     local box = CreateFrame("EditBox", name .. "EditBox", wrapper, "InputBoxTemplate")
@@ -1011,7 +1011,7 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     local highR, highG, highB
     if highLabel then highR, highG, highB = highLabel:GetTextColor() end
     local boxR,   boxG,   boxB        = box:GetTextColor()
-    local GREY                        = 0.5
+    local GRAY                        = 0.5
 
     -- Sets the slider's text color (title, endpoints, value box) and makes it
     -- the color Enable() restores — so a Disable/Enable cycle can't resurrect
@@ -1031,11 +1031,11 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     end
 
     wrapper.Disable = function(self)
-        if label    then label:SetTextColor(GREY, GREY, GREY) end
-        if lowLabel  then lowLabel:SetTextColor(GREY, GREY, GREY) end
-        if highLabel then highLabel:SetTextColor(GREY, GREY, GREY) end
-        box:SetTextColor(GREY, GREY, GREY)
-        thumbTex:SetVertexColor(GREY, GREY, GREY)
+        if label    then label:SetTextColor(GRAY, GRAY, GRAY) end
+        if lowLabel  then lowLabel:SetTextColor(GRAY, GRAY, GRAY) end
+        if highLabel then highLabel:SetTextColor(GRAY, GRAY, GRAY) end
+        box:SetTextColor(GRAY, GRAY, GRAY)
+        thumbTex:SetVertexColor(GRAY, GRAY, GRAY)
         s:EnableMouse(false)
         box:EnableMouse(false)
     end
@@ -1068,7 +1068,7 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
 end
 
 -- Wrapper containing a 20×20 colored swatch button on the left and an optional
--- text label to its right, aligned to the same vertical centre.
+-- text label to its right, aligned to the same vertical center.
 -- Clicking the swatch opens the WoW ColorPickerFrame.
 --
 -- showAlpha (optional bool): when true, the picker shows an opacity slider and
@@ -1085,7 +1085,7 @@ end
 ---@param initR     number?  Initial red 0–1 (default 1).
 ---@param initG     number?  Initial green 0–1 (default 1).
 ---@param initB     number?  Initial blue 0–1 (default 1).
----@param onChange  fun(r:number,g:number,b:number,a:number?)? Fires on colour change.
+---@param onChange  fun(r:number,g:number,b:number,a:number?)? Fires on color change.
 ---@param showAlpha boolean? When true, the picker exposes an opacity slider.
 ---@param initA     number?  Initial alpha 0–1 when showAlpha (default 1).
 ---@return table             Wrapper frame with :setColor and .swatch.
@@ -1111,7 +1111,7 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     if text then
         local lbl = wrapper:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         lbl:SetText(text)
-        -- "LEFT" is the middle-left anchor point, so this centres the label
+        -- "LEFT" is the middle-left anchor point, so this centers the label
         -- vertically with the swatch button without extra math.
         lbl:SetPoint("LEFT", btn, "RIGHT", 4, 0)
     end
@@ -1121,7 +1121,7 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
 
         -- Fires when the user moves the RGB sliders.
         -- Intentionally does NOT read OpacitySliderFrame — SetColorRGB triggers this
-        -- callback immediately (before ShowUIPanel initialises the opacity slider),
+        -- callback immediately (before ShowUIPanel initializes the opacity slider),
         -- so reading the slider here would clobber alpha with a stale value.
         local function applyRGB()
             r, g, b = ColorPickerFrame:GetColorRGB()
@@ -1177,7 +1177,7 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
 end
 
 -- ============================================================
--- XP bar — a thin experience bar (fill + rested overlay + centred label).
+-- XP bar — a thin experience bar (fill + rested overlay + centered label).
 -- Used by the paperdoll under the weapon row. The returned frame is a bordered
 -- container; callers anchor it and feed it via NS.CB_RefreshXPBar (Equip.lua),
 -- reading .fill / .rested / .label off it.
@@ -1186,8 +1186,8 @@ end
 -- behind the main fill, which sits behind the label. Both bars share the 0–100
 -- range so values are percentages straight from the bot's "stats" reply.
 -- ============================================================
--- Exact Blizzard default XP-bar colours (FrameXML MainMenuBar.lua): the blue it
--- uses while rested for the earned fill, and the purple normal-XP colour for the
+-- Exact Blizzard default XP-bar colors (FrameXML MainMenuBar.lua): the blue it
+-- uses while rested for the earned fill, and the purple normal-XP color for the
 -- rested-bonus overlay behind it.
 local XP_FILL_COLOR   = { 0.0,  0.39, 0.88 }
 local XP_RESTED_COLOR = { 0.58, 0.0,  0.55 }
@@ -1210,7 +1210,7 @@ NS.CB_CreateXPBar = function(parent)
     -- A flat 1px border drawn on the container itself (mirrors CB_SkinEditBoxSafe —
     -- no child .backdrop frame, so no level-stacking issues). PANEL_BACKDROP's 12px
     -- tooltip border is far too chunky for a ~9px bar, so a thin solid edge is used
-    -- on both paths; only the border colour differs (ElvUI's theme vs a neutral grey).
+    -- on both paths; only the border color differs (ElvUI's theme vs a neutral gray).
     local borderTex = NS.ElvUI_S and barTex or "Interface\\BUTTONS\\WHITE8X8"
     xp:SetBackdrop({
         bgFile   = borderTex,
@@ -1257,12 +1257,12 @@ NS.CB_CreateXPBar = function(parent)
     overlay:SetPoint("BOTTOMRIGHT", xp, "BOTTOMRIGHT", -inset,  inset)
     overlay:SetFrameLevel(fill:GetFrameLevel() + 1)
 
-    -- The default XP bar's grey tick/divider overlay is stored in the racial
+    -- The default XP bar's gray tick/divider overlay is stored in the racial
     -- main-menu-bar art as four stacked 256-wide rows, each one quarter of the full
     -- 1024-wide overlay. We reassemble them left→right across the bar (relative
     -- quarters via OnSizeChanged) so the segments scale to any width. The XP-bar rows
     -- are identical across racial files, so a fixed file is fine.
-    -- ElvUI path: skip the grey divider art entirely for a clean flat bar.
+    -- ElvUI path: skip the gray divider art entirely for a clean flat bar.
     if not NS.ElvUI_S then
         local OVERLAY_FILE = "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf"
         local OVERLAY_ROWS = {
@@ -1288,7 +1288,7 @@ NS.CB_CreateXPBar = function(parent)
         end)
     end
 
-    -- Centred label on top of everything.
+    -- Centered label on top of everything.
     local label = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("CENTER", xp, "CENTER", 0, 0)
     label:SetText("")

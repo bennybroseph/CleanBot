@@ -150,29 +150,37 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     NS.commandRefreshers[#NS.commandRefreshers + 1] = refresh
 
     -- Command grid below the formation row.
-    -- Column 1: Summon / Maintenance / Auto Gear.
+    -- Column 1: Summon / Maintenance / Auto-Equip / Auto Gear.
     local summonBtn = mkBtn("Summon", "Summon", "summon")
     NS.CB_AnchorBelow(summonBtn, formationDD)
 
     local maintenanceBtn = mkBtn("Maintenance", "Maintenance", "maintenance")
     NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
 
-    -- Auto Gear (col 1, row 3): auto-equip a fresh gear set ("autogear"). Destructive
-    -- (replaces all equipment), so it's gated behind a Yes/No confirmation naming the target.
+    -- Auto-Equip ("equip upgrade"): equips stat upgrades found in the bot's bags. Non-destructive
+    -- (only swaps in improvements), so no confirmation — unlike Auto Gear which re-gears wholesale.
+    local autoEquipBtn = mkBtn("AutoEquip", "Auto-Equip", "equip upgrade")
+    NS.CB_AnchorBelow(autoEquipBtn, maintenanceBtn)
+
+    -- Auto Gear (col 1): auto-equip a fresh gear set ("autogear"). Destructive (replaces all
+    -- equipment), so it's gated behind a Yes/No confirmation naming the target.
     local autoGearBtn = NS.CB_CreateButton(parent, "CleanBotCmdAutoGearBtn_" .. tag,
         "Auto Gear", 120, 24, function()
             StaticPopup_Show("CLEANBOT_AUTO_GEAR",
                 (describeTarget and describeTarget()) or "this bot's", nil,
                 { onConfirm = function() send("autogear") end })
         end)
-    NS.CB_AnchorBelow(autoGearBtn, maintenanceBtn)
+    NS.CB_AnchorBelow(autoGearBtn, autoEquipBtn)
 
-    -- Column 2: Revive / Release / Eat-Drink.
+    -- Column 2: Roll / Revive / Release / Eat-Drink.
+    local rollBtn = mkBtn("Roll", "Roll", "roll")   -- bot does a /random 0-100
+    NS.CB_AnchorAhead(rollBtn, summonBtn)
+
     local reviveBtn = mkBtn("Revive", "Revive", "revive")
-    NS.CB_AnchorAhead(reviveBtn, summonBtn)
+    NS.CB_AnchorAhead(reviveBtn, maintenanceBtn)
 
     local releaseBtn = mkBtn("Release", "Release", "release")
-    NS.CB_AnchorAhead(releaseBtn, maintenanceBtn)
+    NS.CB_AnchorAhead(releaseBtn, autoEquipBtn)
 
     local eatDrinkBtn = mkBtn("EatDrink", "Eat/Drink", "drink")
     NS.CB_AnchorAhead(eatDrinkBtn, autoGearBtn)

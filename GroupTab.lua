@@ -202,7 +202,7 @@ end
 
 -- Items for the groups list: the managed "All" group, then class groups
 -- (alphabetical, class-colored + icon), then role groups, then custom groups
--- sorted by name. A custom group greys when ANY stored member is missing from
+-- sorted by name. A custom group grays when ANY stored member is missing from
 -- the party/raid.
 ---@return table  Array of select-list item tables.
 local function CB_GroupItems()
@@ -243,7 +243,7 @@ local function CB_GroupItems()
         for _, botName in ipairs(groups[name]) do
             if not live[strlower(botName)] then missing = true break end
         end
-        items[#items + 1] = { text = name, value = "custom:" .. name, grey = missing }
+        items[#items + 1] = { text = name, value = "custom:" .. name, gray = missing }
     end
     return items
 end
@@ -251,14 +251,14 @@ end
 -- Appends one group's LIVE members (send/aggregate targets) and member-list
 -- items into the accumulators, deduping across groups (a bot in several selected
 -- groups appears once). Live member/item values are the bot KEY for every kind;
--- a stored custom-group member missing from the roster gets a grey item keyed by
+-- a stored custom-group member missing from the roster gets a gray item keyed by
 -- its stored name (selectable so it can still be removed).
 ---@param value     string  "all:all" | "class:CLASS" | "role:..." | "custom:Name".
 ---@param members   table   Accumulator: array of {key,name,class,value}.
 ---@param items     table   Accumulator: select-list item tables.
 ---@param seenLive  table   key → true (dedup across groups).
----@param seenGrey  table   strlower(stored name) → true (dedup across groups).
-local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+---@param seenGray  table   strlower(stored name) → true (dedup across groups).
+local function CB_CollectGroupMembers(value, members, items, seenLive, seenGray)
     -- Adds one live roster bot (if not already collected).
     local function addLive(d)
         if seenLive[d.key] then return end
@@ -292,9 +292,9 @@ local function CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
             local d = live[strlower(botName)]
             if d then
                 addLive(d)
-            elseif not seenGrey[strlower(botName)] then
-                seenGrey[strlower(botName)] = true
-                items[#items + 1] = { text = botName, value = botName, grey = true }
+            elseif not seenGray[strlower(botName)] then
+                seenGray[strlower(botName)] = true
+                items[#items + 1] = { text = botName, value = botName, gray = true }
             end
         end
     end
@@ -303,15 +303,15 @@ end
 -- Resolves the SELECTED group set into the union of their members + items,
 -- sorted. Sort rule: a single selected group keeps its kind-specific order
 -- ("all" → Class → Role → Name; one class → Role → Name; role/custom → Class →
--- Name); several groups use the "all" rule. Greyed items sort last.
+-- Name); several groups use the "all" rule. Grayed items sort last.
 ---@param values table  Selected group values, in list order.
 ---@return table members  Array of {key,name,class,value}.
 ---@return table items    Select-list item tables for the member list.
 local function CB_ResolveSelectedMembers(values)
     local members, items = {}, {}
-    local seenLive, seenGrey = {}, {}
+    local seenLive, seenGray = {}, {}
     for _, value in ipairs(values) do
-        CB_CollectGroupMembers(value, members, items, seenLive, seenGrey)
+        CB_CollectGroupMembers(value, members, items, seenLive, seenGray)
     end
 
     local kind = #values == 1 and values[1]:match("^(%a+):") or "all"
@@ -332,9 +332,9 @@ local function CB_ResolveSelectedMembers(values)
         return cmp(a.class, a.key, a.name or "", b.class, b.key, b.name or "")
     end)
     table.sort(items, function(a, b)
-        local ag, bg = a.grey and 1 or 0, b.grey and 1 or 0
+        local ag, bg = a.gray and 1 or 0, b.gray and 1 or 0
         if ag ~= bg then return ag < bg end
-        if a.grey then return (a.text or "") < (b.text or "") end
+        if a.gray then return (a.text or "") < (b.text or "") end
         return cmp(a.class, a.botKey, a.text or "", b.class, b.botKey, b.text or "")
     end)
 
@@ -354,6 +354,7 @@ end
 ---@param getMemberSource fun(entry:table?):table?  Extracts a member's state table.
 ---@param aggTable        table  The aggregate table to write into (mutated in place).
 local function CB_AggregateStrategyList(slot, list, getMemberSource, aggTable)
+    if not list then return end   -- e.g. a settingDropdown group has `options`, not `strategies`
     local total = #slot.members
     local function aggregateOne(s)
         local result = nil
@@ -421,7 +422,10 @@ local function CB_AggregateGroups(slot, groups, prefix, getMemberSource, aggTabl
     end
 
     for _, grp in ipairs(groups) do
-        if not grp.whisper then
+        -- Skip whisper (talent-spec) groups and settingDropdown groups: the latter carry `options`
+        -- (a queried command setting like loot quality), not aggregatable `strategies` — they
+        -- self-refresh via NS.commandRefreshers, outside the registry aggregation.
+        if not grp.whisper and grp.strategies then
             CB_AggregateStrategyList(slot, grp.strategies, getMemberSource, aggTable)
             -- Inline exclusive dropdowns at the top level (e.g. Positioning's "Distance") carry
             -- their own none-state, same as those nested in a subgroup below.
@@ -677,7 +681,7 @@ local function CB_ManagingText(managed)
 end
 
 -- Applies the member list's current selection as the managed set: the strategy
--- panel aggregates over and fans out to only the selected (live) bots. Greys map
+-- panel aggregates over and fans out to only the selected (live) bots. Grays map
 -- to no member and are filtered out. No selection → the empty state.
 local function CB_ApplyMemberSelection()
     local byValue = {}
@@ -734,6 +738,7 @@ local function CB_ApplyMemberSelection()
     for _, m in ipairs(managed) do
         local e = CleanBot_PartyBots[m.key]
         if e and NS.CB_FetchFormation then NS.CB_FetchFormation(e) end
+        if e and NS.CB_FetchLootStrategy then NS.CB_FetchLootStrategy(e) end
     end
     if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 end
@@ -773,7 +778,7 @@ local function CB_RebuildGroupListOnly()
     if selectedGroupValues then groupList:SetSelectedValues(selectedGroupValues) end
 end
 
--- Rebuilds the Group tab from the current roster: group items, grey states,
+-- Rebuilds the Group tab from the current roster: group items, gray states,
 -- selection restore, and the empty state. Hooked from CleanBot_RefreshTabs
 -- (both exits), so every roster change flows through here.
 NS.CB_RefreshGroupTab = function()
@@ -1300,7 +1305,7 @@ NS.CleanBot_BuildGroupTab = function()
             return
         end
         -- Member values are bot KEYS for live members; map back to display/stored
-        -- names for removal (greys carry their stored name as the value).
+        -- names for removal (grays carry their stored name as the value).
         local byValue = {}
         for _, m in ipairs(currentMembers) do byValue[m.value] = m end
         local bots = {}

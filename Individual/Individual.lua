@@ -921,6 +921,70 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             end
             prevBottom = dd
 
+        elseif group.type == "settingDropdown" then
+            -- A queried command SETTING (e.g. loot quality via "ll"), not a co/nc strategy: it reads
+            -- a TOP-LEVEL entry field (group.field, e.g. entry.lootStrategy — set from the bot's
+            -- "Loot strategy:" reply) and sends "<group.cmd> <value>" to the slot's targets. It
+            -- self-refreshes via NS.commandRefreshers (driven by CB_RefreshCommands), NOT the
+            -- strategy registry/sync. Renders for Individual and Group alike via CB_SlotTargets.
+            local options = group.options
+            local field   = group.field
+            local nameByValue = {}
+            for _, o in ipairs(options) do nameByValue[o.value] = o.name end
+
+            local header = NS.CB_CreateLabel(col, group.header)
+            if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
+            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
+                (col.paddingLeft or 0) + (header.marginLeft or 0),
+                -((col.paddingTop or 0) + (header.marginTop  or 0))) end
+
+            local dd = NS.CB_CreateDropdown(col, "CleanBotSetDD_" .. cmd .. tag .. "_" .. (group.group or gi), 160)
+            NS.CB_AnchorBelow(dd, header)
+
+            UIDropDownMenu_Initialize(dd, function(self)
+                for _, o in ipairs(options) do
+                    local info           = UIDropDownMenu_CreateInfo()
+                    info.text            = o.name
+                    info.value           = o.value
+                    info.tooltipTitle    = o.name
+                    info.tooltipText     = o.desc
+                    info.tooltipOnButton = 1
+                    info.func            = function()
+                        UIDropDownMenu_SetText(self, o.name)        -- immediate feedback
+                        for _, m in ipairs(CB_SlotTargets(slot)) do
+                            NS.CB_SendBotCommand(m.name, group.cmd .. " " .. o.value)
+                            local e = CleanBot_PartyBots[m.key]
+                            if e then e[field] = o.value end         -- optimistic cache
+                        end
+                        if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+                    end
+                    UIDropDownMenu_AddButton(info)
+                end
+            end)
+
+            -- Reflect the slot's current value: all targets agree → that option; differ → "Mixed";
+            -- any unknown (not yet queried) → "Select…".
+            local function refresh()
+                local result
+                for _, m in ipairs(CB_SlotTargets(slot)) do
+                    local e = CleanBot_PartyBots[m.key]
+                    local v = e and e[field]
+                    if not v then result = nil break end
+                    if result == nil then result = v
+                    elseif result ~= v then result = NS.MIXED break end
+                end
+                if result == NS.MIXED then
+                    UIDropDownMenu_SetText(dd, "Mixed")
+                elseif result then
+                    UIDropDownMenu_SetText(dd, nameByValue[result] or result)
+                else
+                    UIDropDownMenu_SetText(dd, "Select\226\128\166")  -- "Select…"
+                end
+            end
+            refresh()
+            NS.commandRefreshers[#NS.commandRefreshers + 1] = refresh
+            prevBottom = dd
+
         else
             -- Checkbox group — drop entries the bot's class doesn't register
             -- (e.g. cc/boost on a warrior).
@@ -1449,6 +1513,7 @@ SelectBot = function(key, silent)
     -- (reply repaints via CB_RefreshCommands) and repaint now so the cached value
     -- shows immediately on selection.
     if entry and NS.CB_FetchFormation then NS.CB_FetchFormation(entry) end
+    if entry and NS.CB_FetchLootStrategy then NS.CB_FetchLootStrategy(entry) end
     if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
 
     NS.lruClock = NS.lruClock + 1
@@ -1649,7 +1714,7 @@ NS.CleanBot_RefreshTabs = function()
     SelectBot(selKey, true)
 
     -- ── 5. Mirror the roster change into the Group tab ──────────
-    -- (group list contents, grey states, selected group's member set).
+    -- (group list contents, gray states, selected group's member set).
     if NS.CB_RefreshGroupTab then NS.CB_RefreshGroupTab() end
 end
 

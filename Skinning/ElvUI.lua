@@ -38,9 +38,9 @@ NS.PLAIN_BACKDROP = {
 }
 
 -- Panel backdrop using a pure-white bgFile so that SetBackdropColor(r,g,b,a) maps
--- directly to the displayed colour. UI-DialogBox-Background is dark (~20% brightness),
--- which means vertex-colour multiplication makes every brightness value look near-black.
--- WHITE8X8 has full (1,1,1) pixel values so brightness = displayed colour exactly.
+-- directly to the displayed color. UI-DialogBox-Background is dark (~20% brightness),
+-- which means vertex-color multiplication makes every brightness value look near-black.
+-- WHITE8X8 has full (1,1,1) pixel values so brightness = displayed color exactly.
 NS.PANEL_BACKDROP = {
     bgFile   = "Interface\\BUTTONS\\WHITE8X8",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -97,9 +97,9 @@ local function CB_LevelAlpha(baseAlpha, level)
     return baseAlpha * factor
 end
 
--- Re-applies accent colour to every registered skinned frame.
+-- Re-applies accent color to every registered skinned frame.
 -- a defaults to 1 (fully opaque) when omitted.
---- Re-applies the accent border colour to every registered skinned frame.
+--- Re-applies the accent border color to every registered skinned frame.
 ---@param r number  Red 0–1.
 ---@param g number  Green 0–1.
 ---@param b number  Blue 0–1.
@@ -164,7 +164,7 @@ end
 --   elevated 12px so it overlaps the border) and a compact GameFontNormal label
 --   nudged to sit in the ornament's visual band.
 -- ElvUI: skips the ornament (SetTemplate handles the chrome) and uses the larger
---   GameFontNormalLarge centred in the title area, matching ElvUI frame conventions.
+--   GameFontNormalLarge centered in the title area, matching ElvUI frame conventions.
 ---@param frame     table   The outer frame to add the title bar to.
 ---@param titleText string? Title string to display (e.g. "CleanBot").
 NS.CB_ApplyTitleBar = function(frame, titleText)
@@ -188,11 +188,11 @@ NS.CB_ApplyTitleBar = function(frame, titleText)
     lbl:SetJustifyH("CENTER")
 end
 
--- Places a centred title label for a ContainerFrame-style window (Blizz path only).
+-- Places a centered title label for a ContainerFrame-style window (Blizz path only).
 -- Reusable for any frame built with CB_ApplyContainerFrameSkin.
 -- CONTAINER_TITLE_OFFSET controls how far below the top edge the label sits.
 local CONTAINER_TITLE_OFFSET = 2
---- Places a centred title label for a ContainerFrame-style window.
+--- Places a centered title label for a ContainerFrame-style window.
 ---@param frame table   The container-style frame.
 ---@param text  string? Title string to display.
 NS.CB_ApplyContainerTitleLabel = function(frame, text)
@@ -203,8 +203,8 @@ NS.CB_ApplyContainerTitleLabel = function(frame, text)
 end
 
 -- Applies the inventory window title bar label.
--- Blizz: plain centred label via CB_ApplyContainerTitleLabel.
--- ElvUI: centred label using GameFontNormalLarge.
+-- Blizz: plain centered label via CB_ApplyContainerTitleLabel.
+-- ElvUI: centered label using GameFontNormalLarge.
 ---@param frame   table   The grid frame.
 ---@param botName string  Bot's display name (label reads "<botName>'s <noun>").
 ---@param class   string? Bot class (unused for the label; kept for signature parity).
@@ -224,7 +224,7 @@ end
 
 -- Assembles the Blizzard ContainerFrame-style backdrop for the inventory frame from
 -- sliced pieces of UI-BackpackBackground. Call once when the frame is created.
--- Unlike CB_ApplyFrameSkin, this does NOT register for accent-colour or transparency
+-- Unlike CB_ApplyFrameSkin, this does NOT register for accent-color or transparency
 -- refresh — the ContainerFrame look is fixed art, not theme-driven. Edges and fill
 -- are added in CB_UpdateContainerTiles once the frame is sized by CB_RenderInventory.
 --
@@ -369,7 +369,7 @@ end
 --
 -- ElvUI:     level 0 → 0.10 brightness, each additional level subtracts 0.05 → max 0
 -- Non-ElvUI: level 0 → 0.00 brightness, each level adds 0.05
---   SetBackdropColor is a vertex-colour multiply; small steps look near-black so
+--   SetBackdropColor is a vertex-color multiply; small steps look near-black so
 --   0.05 per level keeps contrast visible across at least four nesting levels.
 --
 -- Registers every frame in CB_skinnedFrames so CB_RefreshAccentColor and
@@ -380,7 +380,7 @@ NS.CB_ApplyFrameSkin = function(frame, nestLevel)
     local level = nestLevel or 1
 
     if level == 0 then
-        -- Outermost window: accent colour has no tint by default (a=0 on Blizzard).
+        -- Outermost window: accent color has no tint by default (a=0 on Blizzard).
         local ac         = NS.accentColor or { r = 0.0, g = 0.0, b = 0.0, a = 0 }
         local alpha      = (NS.transparency or 100) / 100
         local brightness = NS.ElvUI_S and 0.10 or 0.0

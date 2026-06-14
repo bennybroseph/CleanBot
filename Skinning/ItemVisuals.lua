@@ -69,14 +69,14 @@ NS.CB_GetQualityColor = function(quality)
 end
 
 -- Persistent rarity overlay (Blizz UI path only). Draws the action-button border art
--- over an item/equip button, tinted to the item's quality colour, and shown at all
--- times (not just on hover) so the rarity reads at a glance. The art is greyscale
--- (Blizzard tints it green in code via SetVertexColor), so it recolours cleanly to any
--- quality. Created once and cached on btn.cbRarityOverlay; shown/coloured per item and
+-- over an item/equip button, tinted to the item's quality color, and shown at all
+-- times (not just on hover) so the rarity reads at a glance. The art is grayscale
+-- (Blizzard tints it green in code via SetVertexColor), so it recolors cleanly to any
+-- quality. Created once and cached on btn.cbRarityOverlay; shown/colored per item and
 -- hidden on empty slots. No-op on ElvUI, which shows quality via its own border.
 local RARITY_OVERLAY_TEX = "Interface\\Buttons\\UI-ActionButton-Border"
 
--- Gold for quest items — they carry no quality colour of their own, so we give them
+-- Gold for quest items — they carry no quality color of their own, so we give them
 -- the standard quest yellow for both their border and their glow to stand out.
 local QUEST_BORDER_COLOR = { 1.0, 0.82, 0.0 }
 
@@ -85,7 +85,7 @@ local QUEST_BORDER_COLOR = { 1.0, 0.82, 0.0 }
 -- registry never needs pruning.
 local rarityOverlayBtns = {}
 
---- Shows/updates a persistent rarity-coloured overlay on an item or equip button.
+--- Shows/updates a persistent rarity-colored overlay on an item or equip button.
 ---@param btn     table    The item/equip button.
 ---@param quality number?  Item quality 0–6, or nil/empty to hide the overlay.
 ---@param colorOverride number[]? Explicit {r,g,b} that forces the glow on regardless of
@@ -108,7 +108,7 @@ NS.CB_SetRarityOverlay = function(btn, quality, colorOverride)
         btn.cbRarityOverlay = ov
         rarityOverlayBtns[#rarityOverlayBtns + 1] = btn
     end
-    -- Gated by the "Enable Item Glow" setting (default on). A colour override forces the
+    -- Gated by the "Enable Item Glow" setting (default on). A color override forces the
     -- glow on (quest items); otherwise only uncommon (green, quality 2) and above glow —
     -- poor/common/empty/disabled get no overlay.
     if NS.itemGlow ~= false and (colorOverride or (quality and quality >= 2)) then
@@ -138,10 +138,10 @@ NS.CB_RefreshRarityOverlays = function()
     end
 end
 
--- Creates a rounded quality-colour border on an item button for the Blizz UI path
+-- Creates a rounded quality-color border on an item button for the Blizz UI path
 -- using a child frame with Interface\Tooltips\UI-Tooltip-Border as the edgeFile.
 -- The child frame renders above the parent's texture layers so the border is visible
--- over the icon. Border is hidden (alpha 0) until coloured by CB_SetQualityBorder.
+-- over the icon. Border is hidden (alpha 0) until colored by CB_SetQualityBorder.
 -- Equip slots use this; inventory cells fall back to normTex which is always visible.
 -- No-op on ElvUI — SetTemplate's iborder/oborder child frames handle this.
 ---@param btn table  The item button to add the quality border frame to (stores btn.qualityFrame).
@@ -159,10 +159,10 @@ NS.CB_ApplyQualityBackdrop = function(btn)
     btn.qualityFrame = f
 end
 
--- Applies an explicit colour to an item button's border, dispatching by path.
+-- Applies an explicit color to an item button's border, dispatching by path.
 -- ElvUI: SetBackdropBorderColor (targets SetTemplate's iborder/oborder frames).
 -- Blizz with qualityFrame (equip slots): SetBackdropBorderColor on the child frame.
--- Blizz with normTex only (inventory cells): vertex-colours normTex (already visible).
+-- Blizz with normTex only (inventory cells): vertex-colors normTex (already visible).
 ---@param btn table   The item button.
 ---@param r   number  Red 0–1.
 ---@param g   number  Green 0–1.
@@ -208,7 +208,7 @@ NS.CB_ApplyItemVisuals = function(btn, link)
     NS.CB_SetRarityOverlay(btn, quality, glowOverride)
 end
 
--- Resets the border of an item button to its uncoloured state.
+-- Resets the border of an item button to its uncolored state.
 -- ElvUI: restores db.general.bordercolor.
 -- Blizz with qualityFrame: hides the border (alpha 0) on empty slots.
 -- Blizz with normTex only: resets to white (no tint; normTex stays visible).

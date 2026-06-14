@@ -2,7 +2,7 @@
 -- SettingsTab.lua  —  Settings tab panel construction and content
 --
 -- Two nested sub-tabs inside the Settings panel:
---   • Theme   — scale, transparency, accent colour
+--   • Theme   — scale, transparency, accent color
 --   • Layout  — margin tuning and the Sample Layout launcher
 --
 -- The Sample Layout window is a standalone singleton floating
@@ -410,7 +410,7 @@ NS.CleanBot_BuildSettingsTab = function()
         NS.CB_RefreshTransparency(NS.transparency)
         CleanBot_SavedVars.transparency = NS.transparency
 
-        -- Accent Color (border colour on all skinned frames, ElvUI and non-ElvUI)
+        -- Accent Color (border color on all skinned frames, ElvUI and non-ElvUI)
         NS.accentColor.r = pendingAccentR
         NS.accentColor.g = pendingAccentG
         NS.accentColor.b = pendingAccentB
@@ -744,7 +744,7 @@ NS.CleanBot_BuildSettingsTab = function()
     end
 
     -- ── Other tab: Bot Emotes ──────────────────────────────────
-    local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behaviour")
+    local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behavior")
     botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT",
         (otherPanel.paddingLeft or 0) + (botEmotesHeader.marginLeft or 0),
         -((otherPanel.paddingTop or 0) + (botEmotesHeader.marginTop  or 0)))
@@ -794,9 +794,9 @@ NS.CleanBot_BuildSettingsTab = function()
     -- Exposed so the first-time popup can tick the box when it enables the preference.
     NS.CB_RefreshSelfBotCheckbox = function() selfBotCB:SetChecked(NS.manageSelf == true) end
 
-    -- Tracks the last Behaviour checkbox so the next one anchors below it regardless of
+    -- Tracks the last Behavior checkbox so the next one anchors below it regardless of
     -- whether the ElvUI-gated Item Glow box exists. Reassigned as more boxes are added.
-    local lastBehaviourCB = selfBotCB
+    local lastBehaviorCB = selfBotCB
 
     local selfBotCBLbl = NS.CB_CreateLabel(otherPanel, "Auto-Enable Self as Bot")
     selfBotCBLbl:SetPoint("LEFT", selfBotCB, "RIGHT", 2, 0)
@@ -848,7 +848,7 @@ NS.CleanBot_BuildSettingsTab = function()
         local itemGlowCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotItemGlowCB")
         itemGlowCB:SetChecked(NS.itemGlow ~= false)
         NS.CB_AnchorBelow(itemGlowCB, selfBotCB)
-        lastBehaviourCB = itemGlowCB
+        lastBehaviorCB = itemGlowCB
 
         local itemGlowCBLbl = NS.CB_CreateLabel(otherPanel, "Enable Item Glow")
         itemGlowCBLbl:SetPoint("LEFT", itemGlowCB, "RIGHT", 2, 0)
@@ -859,7 +859,7 @@ NS.CleanBot_BuildSettingsTab = function()
         itemGlowCBLblHit:SetHeight(20)
         itemGlowCBLblHit:EnableMouse(true)
 
-        local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-coloured glow."
+        local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-colored glow."
         local function showItemGlowTooltip(anchor)
             GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
             GameTooltip:SetText(ITEM_GLOW_TOOLTIP, nil, nil, nil, nil, true)
@@ -885,7 +885,7 @@ NS.CleanBot_BuildSettingsTab = function()
     -- The filters read NS.hideBotChatter live, so toggling here applies immediately.
     local hideChatterCB = NS.CB_CreateCheckBox(otherPanel, "CleanBotHideChatterCB")
     hideChatterCB:SetChecked(NS.hideBotChatter ~= false)
-    NS.CB_AnchorBelow(hideChatterCB, lastBehaviourCB)
+    NS.CB_AnchorBelow(hideChatterCB, lastBehaviorCB)
 
     local hideChatterCBLbl = NS.CB_CreateLabel(otherPanel, "Hide Bot Chatter")
     hideChatterCBLbl:SetPoint("LEFT", hideChatterCB, "RIGHT", 2, 0)

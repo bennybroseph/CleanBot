@@ -173,7 +173,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
             btn:SetPoint("TOPRIGHT", model, "TOPLEFT", -gapX, yOff)
         elseif eqdef.side == "right" then
             btn:SetPoint("TOPLEFT", model, "TOPRIGHT", gapX, yOff)
-        else  -- "bottom" — three weapon slots centred below the model
+        else  -- "bottom" — three weapon slots centered below the model
             local totalW = 3 * slotSize + 2 * gapX
             local xOff   = math.floor((modelW - totalW) / 2)
                          + (eqdef.order - 1) * (slotSize + gapX)
@@ -346,7 +346,7 @@ end
 -- In WoW 3.3.5a the relevant event is INSPECT_TALENT_READY (NOT "INSPECT_READY",
 -- which does not exist in this client). Per the NotifyInspect docs, equipment is
 -- readable immediately via the Inventory APIs once the inspect packet arrives, and
--- that packet's arrival is signalled by INSPECT_TALENT_READY — so the event is the
+-- that packet's arrival is signaled by INSPECT_TALENT_READY — so the event is the
 -- PRIMARY, event-driven completion path: gear shows as soon as the data lands,
 -- with no fixed delay. (Bridge.lua routes the event here via CB_OnInspectReady.)
 --
@@ -483,7 +483,7 @@ NS.CB_RefreshEquipSlots = function(key, unit)
                 btn.itemLink = itemLink
                 if itemLink ~= hadLink then gearChanged = true end
                 -- Clear on unknown quality rather than skipping, so a GetItemInfo
-                -- cache miss can't leave the previous item's border colour behind.
+                -- cache miss can't leave the previous item's border color behind.
                 local quality = select(3, GetItemInfo(itemLink))
                 if quality then
                     NS.CB_SetQualityBorder(btn, quality)

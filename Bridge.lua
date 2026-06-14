@@ -17,7 +17,7 @@ local function CB_UrlDecode(s)
     return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
 end
 
--- Returns the clean API item link for a raw item link (which may carry colour
+-- Returns the clean API item link for a raw item link (which may carry color
 -- codes and extra enchant/gem fields that confuse the server-side parser).
 -- Strips to the item ID and re-fetches a canonical link from the client cache via
 -- GetItemInfo, falling back to the raw link on a cache miss.
@@ -561,7 +561,7 @@ end
 -- How long a whisper collection waits in SILENCE before declaring itself done.
 -- The clock resets on every line received, so this must cover (a) the bot's
 -- time-to-first-reply after our query and (b) the max gap between burst lines —
--- NOT the total reply length. Bots reply fast on a healthy server; favour snappy
+-- NOT the total reply length. Bots reply fast on a healthy server; favor snappy
 -- UX when things run smoothly over graceful degradation under lag.
 -- Tune with /cbtiming (measures both first-reply latency and inter-line gaps).
 -- 0.5 chosen from /cbtiming measurements on a healthy server (2026-06).
@@ -823,6 +823,18 @@ NS.CB_FetchFormation = function(entry, force)
     if not entry or not entry.name then return end
     if entry.formation and not force then return end
     NS.CB_SendBotCommand(entry.name, "formation ?")
+end
+
+-- Queries a bot's current loot-quality strategy ("ll ?"). The reply
+-- ("Loot strategy: <mode>") is parsed in the CHAT_MSG_WHISPER handler into entry.lootStrategy.
+-- Cached: skips when entry.lootStrategy is already known unless `force` is set. Routes through
+-- CB_SendBotCommand so it serializes and the reply is hidden (same as CB_FetchFormation).
+---@param entry table   The CleanBot_PartyBots entry to query.
+---@param force boolean? Re-query even when a loot strategy is already cached.
+NS.CB_FetchLootStrategy = function(entry, force)
+    if not entry or not entry.name then return end
+    if entry.lootStrategy and not force then return end
+    NS.CB_SendBotCommand(entry.name, "ll ?")
 end
 
 -- Fetches a bot's bank contents. Whisper-only — bank has no bridge packet, and the
@@ -1104,7 +1116,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Money/stats capture (whisper path): reply from "stats" whisper.
-        -- The real reply is laced with WoW colour/hyperlink escape codes, e.g.
+        -- The real reply is laced with WoW color/hyperlink escape codes, e.g.
         --   "2g 34s 56c, |h|cff20ff2012/16|h|cffffffff Bag, |cff...87% (5g 24s)|cffffffff Dur, |cff...45/67%|cffffffff XP"
         -- so we strip the |c / |h / |r escapes first, then parse the cleaned text.
         -- The bag count is FREE/TOTAL (not used/total); convert to used to match
@@ -1179,13 +1191,26 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Current-formation reply: "formation ?" / no-arg answers "Formation: |cff00ff00<name>"
-        -- (SetFormationAction → TellMaster). Strip colour codes, cache the token, refresh the
+        -- (SetFormationAction → TellMaster). Strip color codes, cache the token, refresh the
         -- Commands-tab dropdowns that display it.
         if entry and strsub(msg, 1, 11) == "Formation: " then
             local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
             local name  = clean:match("Formation:%s*(%a+)")
             if name then
                 entry.formation = strlower(name)
+                if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+            end
+            return
+        end
+
+        -- Current-loot-strategy reply: "ll ?" answers "Loot strategy: <mode>" (normal/gray/all/
+        -- disenchant). Strip color codes, cache the lowercase token, refresh the Loot Quality
+        -- dropdowns that display it.
+        if entry and strsub(msg, 1, 15) == "Loot strategy: " then
+            local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
+            local mode  = clean:match("Loot strategy:%s*(%a+)")
+            if mode then
+                entry.lootStrategy = strlower(mode)
                 if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
             end
             return

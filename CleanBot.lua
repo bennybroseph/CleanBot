@@ -389,7 +389,7 @@ NS.CB_BuildFrames = function()
 end
 
 -- ============================================================
--- Initialise at login (ElvUI is ready by PLAYER_LOGIN)
+-- Initialize at login (ElvUI is ready by PLAYER_LOGIN)
 -- ============================================================
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -407,7 +407,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         NS.THEME_DEFAULTS.transparency  = defaultTransparency
         NS.transparency                 = defaultTransparency
 
-        -- Initialise saved variables, preserving any existing data
+        -- Initialize saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end
         if type(CleanBot_SavedVars.collapsedSections)   ~= "table" then CleanBot_SavedVars.collapsedSections   = {} end
         if type(CleanBot_SavedVars.presets)             ~= "table" then CleanBot_SavedVars.presets             = {} end
@@ -514,7 +514,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
         NS.CB_RefreshScale(NS.scale)
         NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent colour is baked in during CB_ApplyFrameSkin calls inside
+        -- Accent color is baked in during CB_ApplyFrameSkin calls inside
         -- NS.CB_BuildFrames, which read NS.accentColor at build time.
         self:UnregisterEvent("PLAYER_LOGIN")
     end

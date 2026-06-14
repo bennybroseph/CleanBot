@@ -113,7 +113,7 @@ end
 ---@param itemName string   Item name to display.
 ---@param count    number   Stack count (count > 1 shows the count text).
 ---@param link     string   Item link for the hover tooltip.
----@param quality  number   Item quality 0–6 (drives name/border colour).
+---@param quality  number   Item quality 0–6 (drives name/border color).
 local function CB_PopulateRewardSlot(slot, tex, itemName, count, link, quality)
     local bName   = slot:GetName()
     local iconTex = bName and _G[bName .. "IconTexture"]
@@ -207,7 +207,7 @@ end
 ---@param framePool table   Frame pool the created header/rows are appended to.
 ---@param key       string  Bot name-key (for the collapse-state key).
 ---@param statusKey string  Status group key ("I"/"C"/"F").
----@param info      table   Status display metadata (label, colour).
+---@param info      table   Status display metadata (label, color).
 ---@param quests    table   Array of quests in this status group.
 ---@param yOffset   number  Current vertical offset within the scroll child.
 ---@return number           The new yOffset after the group's rows.
@@ -232,7 +232,7 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
     headerLabel:SetText(info.label .. " (" .. #quests .. ")")
 
     -- Toggle collapse state and re-render the full list.
-    -- Hover brightens the label to white; leave restores the status colour.
+    -- Hover brightens the label to white; leave restores the status color.
     headerBtn:SetScript("OnClick", function()
         questGroupCollapsed[collapseKey] = not questGroupCollapsed[collapseKey]
         NS.CB_RenderQuests(key)
@@ -261,7 +261,7 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
             rowBtn:SetPoint("TOPLEFT",  sc, "TOPLEFT",  QUEST_INDENT, yOffset)
             rowBtn:SetPoint("TOPRIGHT", sc, "TOPRIGHT", 0, yOffset)
             -- Selection highlight: persistent texture shown on the active row.
-            -- Tinted to the quest's status colour so the selection reads as
+            -- Tinted to the quest's status color so the selection reads as
             -- part of the status group rather than a neutral highlight.
             -- Hidden by default; shown and re-tinted on click.
             local selTex = rowBtn:CreateTexture(nil, "BACKGROUND")
@@ -286,7 +286,7 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
 
             -- Click selects this quest and renders its details in the right pane.
             -- Deselects the previous row by hiding its selection texture and
-            -- restoring its status colour. Hover brightens the label to white.
+            -- restoring its status color. Hover brightens the label to white.
             rowBtn:SetScript("OnClick", function()
                 local f = NS.botQuestFrames and NS.botQuestFrames[key]
                 if f and f.selectedRowText and f.selectedRowText ~= nameText then
@@ -315,7 +315,7 @@ local function CB_RenderQuestGroup(sc, framePool, key, statusKey, info, quests, 
             rowBtn:SetScript("OnLeave", function()
                 local f = NS.botQuestFrames and NS.botQuestFrames[key]
                 if not (f and f.selectedRowText == nameText) then
-                    nameText:SetTextColor(statusR, statusG, statusB)  -- restore status colour
+                    nameText:SetTextColor(statusR, statusG, statusB)  -- restore status color
                 end
                 GameTooltip:Hide()
             end)
@@ -483,7 +483,7 @@ NS.CB_RenderQuestDetail = function(key, questID)
     -- which is misleading for a bot. By default we render generically and drive
     -- completion off the BOT's quest status (botComplete): incomplete shows just the
     -- requirement ("Name x N"), complete shows "Name: N/N (Complete)". The existing
-    -- gold/gray colours are unchanged — botComplete just selects between them.
+    -- gold/gray colors are unchanged — botComplete just selects between them.
     -- SHOW_OBJECTIVE_PROGRESS restores the raw player progress for the future case
     -- where a real per-bot objective-progress source exists.
     local botComplete = false
@@ -805,7 +805,7 @@ NS.CB_GetQuestFrame = function(key, botName)
     end
 
     -- ── Action buttons ────────────────────────────────────────────────────
-    -- Creation and positioning differ per skin; behaviour is shared after.
+    -- Creation and positioning differ per skin; behavior is shared after.
     -- ElvUI: CB_CreateButton; Abandon at BOTTOMLEFT, chain via CB_AnchorAhead,
     --        Close independent at BOTTOMRIGHT.
     -- Blizz: UIPanelButtonTemplate, fixed BLIZZ_BTN_* positions.
@@ -911,7 +911,7 @@ NS.CB_CreateQuestButton = function(slot, model, slotSize)
 
     -- Blizzard-style slot border. The book icon has no border baked in (unlike the bag's
     -- backpack art), so add the standard UI-Quickslot2 border on top, sized like
-    -- ItemButtonTemplate's normal texture (64px art over a 37px button, centred with a -1 y
+    -- ItemButtonTemplate's normal texture (64px art over a 37px button, centered with a -1 y
     -- offset) so it overhangs the icon as a beveled frame. Blizz path only — ElvUI's skin
     -- already frames the button.
     if not NS.ElvUI_S then

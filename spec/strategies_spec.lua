@@ -46,6 +46,17 @@ describe("Strategy token map", function()
     end)
 end)
 
+describe("Non-combat strategy map", function()
+    it("maps real nc tokens but skips a settingDropdown group's command options", function()
+        assert.equals("autoLoot",   NS.NC_STRATEGY_MAP["loot"])   -- normal nc strategy
+        assert.equals("autoGather", NS.NC_STRATEGY_MAP["gather"])
+        -- The Loot Quality settingDropdown carries `options` (ll command values), not nc tokens,
+        -- so none of its values leak into the map (and the build doesn't choke on a nil cmd).
+        assert.is_nil(NS.NC_STRATEGY_MAP["normal"])
+        assert.is_nil(NS.NC_STRATEGY_MAP["disenchant"])
+    end)
+end)
+
 describe("Combat strategy defaults", function()
     it("seeds unconditional defaults and skips the dropdown bundle", function()
         local t = NS.CB_DefaultCombat()
