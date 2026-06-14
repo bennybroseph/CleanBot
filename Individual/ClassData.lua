@@ -126,6 +126,7 @@ NS.CLASS_STRATEGIES = {
                 header    = "Blessings (Combat)",
                 type      = "dropdown",
                 noneLabel = "None",   -- clears all blessings (no upkeep — saves mana)
+                noneDesc  = "Maintain no blessing — saves mana",
                 strategies = {
                     { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },
@@ -166,6 +167,7 @@ NS.CLASS_STRATEGIES = {
                 header    = "Blessings (Out of Combat)",
                 type      = "dropdown",
                 noneLabel = "None",
+                noneDesc  = "Maintain no blessing — saves mana",
                 strategies = {
                     { cmd = "bmight",  field = "bmight",  name = "Blessing of Might",
                       desc = "Apply Blessing of Might to party members" },

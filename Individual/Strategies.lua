@@ -32,7 +32,7 @@ NS.MOVEMENT_STRATEGIES = {
     { cmd = "stay",           field = "mStay",     name = "Stay",           desc = "Hold current position; return to it if moved" },
     { cmd = "guard",          field = "mGuard",    name = "Guard",          desc = "Guard this spot — engage what approaches, then return" },
     { cmd = "runaway",        field = "mRunaway",  name = "Run Away",       desc = "Keep distance from enemies" },
-    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat specifically from add packs" },
+    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat from add packs" },
 }
 
 NS.STRATEGIES = {
@@ -49,6 +49,7 @@ NS.STRATEGIES = {
         column     = "left",
         type       = "roleDropdown",
         noneLabel  = "DPS",
+        noneDesc   = "Runs the talent spec's own damage rotation — no tank or heal strategy",
         -- Render the role sub-sections below the "assist" group so the Role and Assist Target
         -- dropdowns sit one after the other (see CB_BuildColumnGroups' deferred sub-section).
         subAfter   = "assist",
@@ -63,16 +64,16 @@ NS.STRATEGIES = {
             -- cmdByClass: classes that implement the role under a different token.
             -- Druid/DK have no literal "tank" rotation token — they tank via their
             -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
-            { cmd = "tank", field = "isTank",   name = "Tank",   desc = "Use threat-generating abilities",
+            { cmd = "tank", field = "isTank",   name = "Tank",   desc = "Hold threat so enemies don't attack the group",
               cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
-            { cmd = "heal", field = "isHealer", name = "Healer", desc = "Focus on party healing",
+            { cmd = "heal", field = "isHealer", name = "Healer", desc = "Focus on healing the group",
               cmdByClass = { DRUID = "resto", SHAMAN = "resto" } },
             -- Paladin's offheal IS a sibling of tank/dps/heal (OffhealRetPaladinStrategy =
             -- full ret damage + emergency heals, replacing the plain ret rotation), so it
             -- belongs in this exclusive list — but only Paladin registers it that way.
             -- Druid's offheal is independent and lives in its own ClassData "Support" group.
             { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "PALADIN",
-              desc = "Retribution damage plus emergency party heals (Holy Shock / Flash / Holy Light)" },
+              desc = "Retribution DPS that also throws emergency party heals" },
         },
         subGroups = {
             -- none/DPS section: shown when no rotation token is set (the "DPS" default) and for
@@ -82,6 +83,7 @@ NS.STRATEGIES = {
             -- hard-conflict engine-side (focus vetoes AoE), hence one exclusive selector.
             { none = true, roles = { "offheal" }, header = "DPS", strategies = {
                 { type = "dropdown", group = "dpsRotation", header = "Rotation", noneLabel = "Balanced",
+                  noneDesc = "Default rotation — neither AoE cleave nor single-target priority",
                   strategies = {
                       { cmd = "focus", field = "focusFire",  name = "Focus Fire",
                         desc = "Focus on single target spells — no AoE or debuffs (healing is unaffected)" },
@@ -120,11 +122,12 @@ NS.STRATEGIES = {
         column     = "left",
         type       = "dropdown",
         noneLabel  = "None",
+        noneDesc   = "No coordinated focus — the bot picks its own targets",
         strategies = {
             { cmd = "dps assist", field = "assistSingle", name = "Focus Down",
-              desc = "Target as a group and focus down one enemy at a time" },
+              desc = "Focus the group's kill target, one enemy at a time" },
             { cmd = "dps aoe",    field = "assistAoe",    name = "Cleave Anchor",
-              desc = "Anchor on the toughest attacker to best set up to cleave using AoE" },
+              desc = "Target the toughest attacker so AoE/Cleave hits the whole pack" },
             { cmd = "tank assist", field = "assistTank",  name = "Peel",
               desc = "Target mobs attacking non-tank party members" },
         },
@@ -137,7 +140,7 @@ NS.STRATEGIES = {
             { cmd = "potions",   field = "usePotions",      name = "Use Potions",           desc = "Use healing and mana potions in combat", default = true },
             { cmd = "boost",     field = "useCooldowns",    name = "Use Cooldowns",         desc = "Use major cooldowns", default = true },
             { cmd = "racials",   field = "useRacials",      name = "Use Racials",           desc = "Use racial abilities in combat", default = true },
-            { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Use crowd-control abilities on Raid Target Icon (RTI) Moon" },
+            { cmd = "cc",        field = "useCC",           name = "Crowd Control",         desc = "Crowd-control the enemy marked with the Moon icon" },
             { cmd = "passive",   field = "passive",         name = "Passive",               desc = "Stand down — do nothing in combat" },
         },
     },
@@ -150,6 +153,7 @@ NS.STRATEGIES = {
         column     = "right",
         type       = "dropdown",
         noneLabel  = "Free Roam",
+        noneDesc   = "No pinned position — combat positioning decides where to stand",
         strategies = NS.MOVEMENT_STRATEGIES,
     },
     {
@@ -161,11 +165,12 @@ NS.STRATEGIES = {
         column     = "right",
         type       = "dropdown",
         noneLabel  = "Default",
+        noneDesc   = "Use the spec's normal engagement range",
         strategies = {
             { cmd = "close",  field = "posClose",  name = "Close (Melee)",
-              desc = "Close to melee range of the target." },
+              desc = "Close to melee range of the target" },
             { cmd = "ranged", field = "posRanged", name = "Ranged (Caster)",
-              desc = "Hold caster distance — back away when a target gets too close to cast." },
+              desc = "Hold caster distance — back away when a target gets too close to cast" },
         },
     },
     {
@@ -184,7 +189,7 @@ NS.STRATEGIES = {
         column = "right",
         strategies = {
             { cmd = "cast time", field = "castTime", name = "Smart Cast Time",
-              desc = "Skips casts too slow to land before the target dies — favors faster spells on dying mobs.",
+              desc = "Skips casts too slow to land before the target dies — favors faster spells on dying mobs",
               default = true },
             { cmd = "wait for attack",      field = "waitAttack",    name = "Enable Wait to Attack", desc = "Wait a set time before attacking or healing" },
             { cmd = "wait for attack time", field = "waitAttackTime", name = "Delay",
@@ -197,9 +202,9 @@ NS.STRATEGIES = {
         group  = "other",
         column = "right",
         strategies = {
-            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Automatically mark unmarked combat attackers" },
-            { cmd = "grind",      field = "grindMobs",  name = "Grind Mobs", desc = "Attack any visible target" },
-            { cmd = "aggressive", field = "aggressive", name = "Aggressive", desc = "Auto-attack any nearby hostile, even without a target" },
+            { cmd = "mark rti",        field = "markTargets", name = "Mark Targets",   desc = "Mark attackers with raid target icons" },
+            { cmd = "grind",      field = "grindMobs",  name = "Grind Mobs", desc = "Roam and attack anything to farm, resting between fights" },
+            { cmd = "aggressive", field = "aggressive", name = "Aggressive", desc = "Attack any hostile that comes near" },
         },
     },
 }
@@ -329,7 +334,7 @@ NS.NC_STRATEGIES = {
         column = "left",
         strategies = {
             { cmd = "food", field = "useFood",   name = "Eat & Drink", desc = "Automatically eat and drink when low on health or mana", default = true },
-            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Enable PvP mode — bot will flag for PvP and engage enemy players", default = true },
+            { cmd = "pvp",  field = "enablePVP", name = "Enable PvP",  desc = "Flag for PvP and engage enemy players", default = true },
         },
     },
     {
@@ -340,6 +345,7 @@ NS.NC_STRATEGIES = {
         column       = "left",
         type         = "dropdown",
         noneLabel    = "Free Roam",
+        noneDesc     = "No follow or hold — the bot isn't tethered to you or a spot",
         defaultField = "mFollow",
         strategies   = NS.MOVEMENT_STRATEGIES,
     },

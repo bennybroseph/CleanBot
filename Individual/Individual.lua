@@ -612,6 +612,7 @@ end
 function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, registry)
     local nested    = CB_ShownStrategies(s.strategies, slot.class)
     local noneLabel = s.noneLabel
+    local noneDesc  = s.noneDesc
     local key       = s.group or s.field or "dd"
 
     local hdr = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -628,6 +629,11 @@ function CB_BuildInlineDropdown(section, s, yOffset, slot, tag, cmd, getSource, 
         if noneLabel then
             local info = UIDropDownMenu_CreateInfo()
             info.text = noneLabel
+            if noneDesc then
+                info.tooltipTitle    = noneLabel
+                info.tooltipText     = noneDesc
+                info.tooltipOnButton = 1
+            end
             local anyActive = false
             for _, ns in ipairs(nested) do
                 if cd[ns.field] == true or cd[ns.field] == NS.MIXED then anyActive = true break end
@@ -774,9 +780,11 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 if group.noneLabel then
                     local info           = UIDropDownMenu_CreateInfo()
                     info.text            = group.noneLabel
-                    info.tooltipTitle    = group.noneLabel
-                    info.tooltipText     = "Damage role — runs the talent spec's own rotation (no tank or heal strategy)."
-                    info.tooltipOnButton = 1
+                    if group.noneDesc then
+                        info.tooltipTitle    = group.noneLabel
+                        info.tooltipText     = group.noneDesc
+                        info.tooltipOnButton = 1
+                    end
                     info.func            = function()
                         UIDropDownMenu_SetText(self, group.noneLabel)
                         -- Re-add the bot's detected-spec DPS rotation (preserve intent),
@@ -852,6 +860,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             -- all "-".
             local strategies = group.strategies
             local noneLabel  = group.noneLabel
+            local noneDesc   = group.noneDesc
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
             else header:SetPoint("TOPLEFT", col, "TOPLEFT",
@@ -870,6 +879,11 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                 if noneLabel then
                     local info        = UIDropDownMenu_CreateInfo()
                     info.text         = noneLabel
+                    if noneDesc then
+                        info.tooltipTitle    = noneLabel
+                        info.tooltipText     = noneDesc
+                        info.tooltipOnButton = 1
+                    end
                     -- NS.MIXED counts as active: members disagree, so "None"
                     -- must not show as the settled choice.
                     local anyActive = false
