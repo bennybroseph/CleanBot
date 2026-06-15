@@ -575,10 +575,10 @@ initFrame:SetScript("OnEvent", function(self, event)
         if NS.individualExpandBtn then
             NS.individualExpandBtn:SetText(NS.individualExpanded and "<" or ">")
         end
-        NS.CB_RefreshScale(NS.scale)
-        NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent color is baked in during CB_ApplyFrameSkin calls inside
-        -- NS.CB_BuildFrames, which read NS.accentColor at build time.
+        -- One apply path shared with Settings Apply: emit the display-setting events so the
+        -- theme subscribers re-apply scale/transparency/accent. (Accent is also baked in during
+        -- the CB_ApplyFrameSkin calls inside CB_BuildFrames; emitting it again is harmless.)
+        NS.CB_EmitDisplaySettings()
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

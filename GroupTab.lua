@@ -848,11 +848,11 @@ local function CB_UpdateMemberRoleIcons(key)
     if dirty then memberList:RefreshDisplay() end
 end
 
--- Hooked from CB_UpdateTabData (Individual.lua): when a member of the
--- selected group gets fresh data (STATE~ packet, whisper reconcile), the
--- aggregate view refreshes too — even for members not bound to a slot.
+-- Group-tab reaction to BOT_STATE_CHANGED: when a member of the selected group gets fresh
+-- data (STATE~ packet, whisper reconcile, overheard command), the aggregate view refreshes
+-- too — even for members not bound to an Individual slot.
 ---@param key string  Bot name-key whose entry just changed.
-NS.CB_OnMemberDataChanged = function(key)
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function(key)
     if not NS.groupPanel then return end
 
     -- Role-group presence depends on every bot's role state, not just the
@@ -872,7 +872,7 @@ NS.CB_OnMemberDataChanged = function(key)
         if #cs.members > 0 then NS.CB_RefreshGroupAggregate(cs) end
     end
     CB_SyncGroupViews()
-end
+end)
 
 -- Hooked from the fan-out write helpers (Individual.lua) after a group-slot
 -- control sends: folds the optimistic per-member writes back into the

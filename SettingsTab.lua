@@ -400,23 +400,17 @@ NS.CleanBot_BuildSettingsTab = function()
 
     local applyBtn
     applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
-        -- Scale
-        NS.scale = pendingScale
-        NS.CB_RefreshScale(NS.scale)
-        CleanBot_SavedVars.scale = NS.scale
-
-        -- Transparency (backdrop alpha only — does not cascade to children)
+        -- Set NS values + persist, then emit once (CB_EmitDisplaySettings) so the theme/layout
+        -- subscribers re-apply. No refresher is called directly here.
+        NS.scale       = pendingScale
         NS.transparency = pendingTransparency
-        NS.CB_RefreshTransparency(NS.transparency)
-        CleanBot_SavedVars.transparency = NS.transparency
-
-        -- Accent Color (border color on all skinned frames, ElvUI and non-ElvUI)
         NS.accentColor.r = pendingAccentR
         NS.accentColor.g = pendingAccentG
         NS.accentColor.b = pendingAccentB
         NS.accentColor.a = pendingAccentA
-        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
-        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
+        CleanBot_SavedVars.scale        = NS.scale
+        CleanBot_SavedVars.transparency = NS.transparency
+        CleanBot_SavedVars.accentColor  = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
 
         -- Margins
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
@@ -441,8 +435,12 @@ NS.CleanBot_BuildSettingsTab = function()
         if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
             buildSampleContent(sampleLayoutFrame._panel)
         end
+        -- One emit applies scale/transparency/accent live via their subscribers.
+        -- LAYOUT_CHANGED currently has no subscriber, so layout still needs a reload until the
+        -- live-layout work lands.
+        NS.CB_EmitDisplaySettings()
         applyBtn:Disable()
-        NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
+        NS.CB_Print("Settings applied. Layout (margins/padding) changes apply on reload.")
     end)
     applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
         -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)

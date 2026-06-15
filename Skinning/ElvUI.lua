@@ -157,6 +157,24 @@ NS.CB_RefreshScale = function(s)
     end
 end
 
+-- The three theme refreshers are reactive: they re-apply to whole frame registries, so they
+-- subscribe once to their display-setting event. Producers (Settings Apply, login restore) just
+-- emit via CB_EmitDisplaySettings; nothing calls the refreshers directly anymore.
+NS.CB_On(NS.EV.SCALE_CHANGED,        NS.CB_RefreshScale)
+NS.CB_On(NS.EV.TRANSPARENCY_CHANGED, NS.CB_RefreshTransparency)
+NS.CB_On(NS.EV.ACCENT_CHANGED,       NS.CB_RefreshAccentColor)
+
+-- Emits all four display-setting events from the current NS.* values. The single apply path
+-- shared by Settings Apply and the PLAYER_LOGIN restore. LAYOUT_CHANGED has no subscriber until
+-- the live-layout work lands, so it's a harmless no-op for now.
+NS.CB_EmitDisplaySettings = function()
+    local c = NS.accentColor or {}
+    NS.CB_Emit(NS.EV.SCALE_CHANGED,        NS.scale)
+    NS.CB_Emit(NS.EV.TRANSPARENCY_CHANGED, NS.transparency)
+    NS.CB_Emit(NS.EV.ACCENT_CHANGED,       c.r, c.g, c.b, c.a)
+    NS.CB_Emit(NS.EV.LAYOUT_CHANGED)
+end
+
 -- Applies the title bar ornament and creates the title FontString for an outer frame.
 -- Must be called AFTER CB_ApplyFrameSkin (i.e. after any StripTextures call).
 --

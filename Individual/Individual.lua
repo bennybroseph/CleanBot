@@ -2073,31 +2073,31 @@ NS.CB_SyncRegistry = function(frames, entry, groupCtx)
 end
 
 -- ============================================================
--- NS.CB_UpdateTabData — refreshes all UI elements for one tab
--- from CleanBot_PartyBots[key] without touching layout.
--- Call after any code that modifies a bot's combat/nonCombat data.
+-- NS.CB_UpdateTabData — announces that a bot's cached data changed.
+-- Emit-only: it just fires BOT_STATE_CHANGED. The UI regions that care
+-- (this tab's registry, the Commands controls, the Group aggregate)
+-- subscribe and re-read CleanBot_PartyBots[key] for themselves.
+-- Call after any code that modifies a bot's combat/nonCombat/formation/loot data.
 -- ============================================================
----@param key string  Bot name-key whose bound slot should refresh its displayed data.
-NS.CB_UpdateTabData = function(key)
+---@param key     string  Bot name-key whose data changed.
+---@param changed table?  Optional hint of which fields changed (e.g. { formation = true }); subscribers may ignore it and re-read everything.
+NS.CB_UpdateTabData = function(key, changed)
+    if not CleanBot_PartyBots[key] then return end
+    NS.CB_Emit(NS.EV.BOT_STATE_CHANGED, key, changed)
+end
+
+-- Individual-tab reaction: repaint the bound slot's star + strategy registry from live data.
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function(key)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
-
     if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
-
-    -- Group hook BEFORE the botFrames guard: a member that isn't bound to an
-    -- Individual slot must still refresh the Group tab's aggregate view.
-    if NS.CB_OnMemberDataChanged then NS.CB_OnMemberDataChanged(key) end
-
-    -- Repaint the Commands-tab controls (e.g. the Passive checkbox reads entry.combat.passive,
-    -- which a co? reply just updated). Also before the guard so the Group host's aggregate
-    -- reflects members not bound to an Individual slot.
-    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
-
     local frames = NS.botFrames[key]
-    if not frames then return end
+    if frames then NS.CB_SyncRegistry(frames, entry, nil) end
+end)
 
-    NS.CB_SyncRegistry(frames, entry, nil)
-end
+-- Commands-tab reaction: the formation dropdown / passive checkbox read live entry fields
+-- (e.g. entry.combat.passive a co? reply just updated). Repaint all command controls.
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function() NS.CB_RefreshCommands() end)
 
 -- ============================================================
 -- NS.CB_SyncTalentSpec — sets the talent-spec dropdown from the bot's REAL
