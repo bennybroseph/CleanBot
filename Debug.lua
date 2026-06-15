@@ -637,3 +637,91 @@ end
 
 SLASH_CBICONS1 = "/cbicons"
 SlashCmdList["CBICONS"] = function() NS.CB_ToggleIconBrowser() end
+
+-- ============================================================
+-- Layout test buttons  —  dev tool for spam-testing live margin/padding re-flow.
+--
+-- Two centered buttons: "Randomize Layout" sets every NS.MARGIN/NS.PADDING side to a
+-- random value; "Reset Layout" restores the defaults. Both persist to SavedVars and
+-- apply immediately via the live system (CB_EmitDisplaySettings), exactly like
+-- Settings → Apply. Visibility is the "Layout Test Buttons" checkbox in Settings →
+-- Debug (persisted in CleanBot_SavedVars.layoutTestButtons; hidden by default).
+-- ============================================================
+local layoutTestFrame           -- centered button container (built at PLAYER_ENTERING_WORLD)
+NS.layoutTestButtons = false    -- hidden by default; enable via Settings → Debug (persisted)
+
+-- Mirrors the Settings Apply persistence, then emits the live re-flow.
+local function CB_LayoutTestPersistApply()
+    if not CleanBot_SavedVars then return end
+    CleanBot_SavedVars.margins = CleanBot_SavedVars.margins or {}
+    CleanBot_SavedVars.padding = CleanBot_SavedVars.padding or {}
+    for k, v in pairs(NS.MARGIN) do
+        CleanBot_SavedVars.margins[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+    end
+    for k, v in pairs(NS.PADDING) do
+        CleanBot_SavedVars.padding[k] = { top = v.top, bottom = v.bottom, left = v.left, right = v.right }
+    end
+    if NS.CB_EmitDisplaySettings then NS.CB_EmitDisplaySettings(true) end
+end
+
+local function CB_LayoutTestRandomize()
+    for _, v in pairs(NS.MARGIN) do
+        v.top, v.bottom, v.left, v.right =
+            math.random(0, 16), math.random(0, 16), math.random(0, 16), math.random(0, 16)
+    end
+    for _, v in pairs(NS.PADDING) do
+        v.top, v.bottom, v.left, v.right =
+            math.random(0, 30), math.random(0, 30), math.random(0, 30), math.random(0, 30)
+    end
+    CB_LayoutTestPersistApply()
+    NS.CB_Print("Layout randomized.")
+end
+
+local function CB_LayoutTestReset()
+    for k, v in pairs(NS.MARGIN) do
+        local d = NS.MARGIN_DEFAULTS[k]
+        if d then v.top, v.bottom, v.left, v.right = d.top, d.bottom, d.left, d.right end
+    end
+    for k, v in pairs(NS.PADDING) do
+        local d = NS.PADDING_DEFAULTS[k]
+        if d then v.top, v.bottom, v.left, v.right = d.top, d.bottom, d.left, d.right end
+    end
+    CB_LayoutTestPersistApply()
+    NS.CB_Print("Layout reset to defaults.")
+end
+
+--- Shows/hides the centered test buttons and persists the choice. Toggled from Settings → Debug.
+---@param on boolean
+NS.CB_SetLayoutTestButtons = function(on)
+    NS.layoutTestButtons = on and true or false
+    if CleanBot_SavedVars then CleanBot_SavedVars.layoutTestButtons = NS.layoutTestButtons end
+    if layoutTestFrame then
+        if NS.layoutTestButtons then layoutTestFrame:Show() else layoutTestFrame:Hide() end
+    end
+    if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
+end
+
+-- Built at PLAYER_ENTERING_WORLD (ElvUI + widget factories fully initialized), like the action bar.
+local layoutTestLoader = CreateFrame("Frame")
+layoutTestLoader:RegisterEvent("PLAYER_ENTERING_WORLD")
+layoutTestLoader:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+
+    layoutTestFrame = CreateFrame("Frame", "CleanBotLayoutTestFrame", UIParent)
+    layoutTestFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    layoutTestFrame:SetSize(252, 28)
+    layoutTestFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+    local rnd = NS.CB_CreateButton(layoutTestFrame, "CleanBotLayoutTestRandom", "Randomize Layout", 140, 24, CB_LayoutTestRandomize)
+    rnd:SetPoint("LEFT", layoutTestFrame, "LEFT", 0, 0)
+
+    local rst = NS.CB_CreateButton(layoutTestFrame, "CleanBotLayoutTestReset", "Reset Layout", 104, 24, CB_LayoutTestReset)
+    rst:SetPoint("LEFT", rnd, "RIGHT", 8, 0)
+
+    -- Restore saved visibility (hidden unless explicitly turned on) and sync the Debug checkbox.
+    if CleanBot_SavedVars and CleanBot_SavedVars.layoutTestButtons == true then
+        NS.layoutTestButtons = true
+    end
+    if not NS.layoutTestButtons then layoutTestFrame:Hide() end
+    if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
+end)

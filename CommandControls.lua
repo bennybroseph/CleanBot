@@ -153,9 +153,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
 
     -- Formation (top of the section): pick a formation → send "formation <name>".
     local formationLabel = NS.CB_CreateLabel(parent, "Formation")
-    formationLabel:SetPoint("TOPLEFT", parent, "TOPLEFT",
-        (parent.paddingLeft or 0) + (formationLabel.marginLeft or 0),
-      -((parent.paddingTop  or 0) + (formationLabel.marginTop  or 0)))
+    NS.CB_AnchorWall(formationLabel, parent, "TOPLEFT")
 
     local formationDD = NS.CB_CreateDropdown(parent, "CleanBotCmdFormation_" .. tag, 140)
     NS.CB_AnchorBelow(formationDD, formationLabel)

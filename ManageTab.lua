@@ -334,9 +334,7 @@ NS.CleanBot_BuildManageTab = function()
                 popup.text:SetWidth(380)
             end
         end)
-    inviteByNameBtn:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        (panel.paddingLeft or 0) + (inviteByNameBtn.marginLeft or 0),
-      -((panel.paddingTop  or 0) + (inviteByNameBtn.marginTop  or 0)))
+    NS.CB_AnchorWall(inviteByNameBtn, panel, "TOPLEFT")
 
     -- ── Target section ────────────────────────────────────
     local targetSection = NS.CB_CreateSection(panel, "target", "Target", 3)
@@ -949,4 +947,8 @@ NS.CleanBot_BuildManageTab = function()
 
     reflow()
     scheduleUpdate()  -- initial deferred pass: backgrounds + height after first render
+
+    -- Live: re-anchor the section toggles + recompute backgrounds/scroll height on a layout change
+    -- (reflow reads live panel padding + margins; scheduleUpdate defers the GetBottom-dependent work).
+    NS.CB_RegisterRelayout(reflow)
 end

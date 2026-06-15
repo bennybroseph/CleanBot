@@ -15,5 +15,6 @@ dofile("spec/bridge_spec.lua")
 dofile("spec/strategies_spec.lua")
 dofile("spec/overhear_spec.lua")
 dofile("spec/overhear_appliers_spec.lua")
+dofile("spec/layout_spec.lua")
 
 _RUN_FINISH()
