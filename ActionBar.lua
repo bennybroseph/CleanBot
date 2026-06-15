@@ -17,34 +17,63 @@ local NS = CleanBotNS
 local BTN   = 32   -- button size
 local PAD   = 6    -- bar inner padding
 local GAP   = 4    -- gap between buttons
-local SNAP_DIST = 20  -- px: how close an edge must be to a frame to snap
-local SNAP_GAP  = 2   -- px gap left when snapped flush to a frame's edge
+local SNAP_DIST    = 20  -- px: how close an edge must be to a frame to ACQUIRE a snap
+local SNAP_RELEASE = 40  -- px: how far past the snap the bar must move to RELEASE it (hysteresis)
+local SNAP_GAP     = 2   -- px gap left when snapped flush to a frame's edge
 
 -- State (assigned by the build; setters guard on `bar` so they're safe pre-build).
-local bar, overlay, passiveBtn
+local bar, overlay, passiveBtn, snapHighlight
 
--- Calls fn(frame, name) for each snap-candidate: a named, visible, reasonably-sized direct child
--- of UIParent or ElvUIParent (ElvUI reparents its unit frames — e.g. ElvUF_Player — there, which
--- is why a fixed list missed them). Named so the chosen anchor survives a reload (re-found via
--- _G[name]); size-bounded to skip full-screen containers; the bar itself is excluded.
+-- Effective on-screen opacity: the product of the frame's own alpha and all its ancestors'. A frame
+-- can be IsVisible() (shown, in a shown parent chain) yet faded to nothing — ElvUI does this to its
+-- action bars on mouseover-fade — so we treat near-zero effective alpha as "not really shown".
+local function CB_EffectiveAlpha(f)
+    local a = 1
+    while f and f.GetAlpha do
+        a = a * (f:GetAlpha() or 1)
+        if a <= 0.05 then return a end
+        f = f:GetParent()
+    end
+    return a
+end
+
+-- Calls fn(frame, name) for each snap-candidate: a named, visible (shown AND not faded out),
+-- reasonably-sized frame. Two sources: direct children of UIParent / ElvUIParent, plus oUF's spawned
+-- unit frames (ElvUF_Player, target, party/raid, …). The latter are reparented under their movers —
+-- grandchildren of UIParent — so a child scan misses them; oUF tracks them all in ElvUF.objects.
+-- Named so the chosen anchor survives a reload (re-found via _G[name]); size-bounded to skip
+-- full-screen containers; the bar and its own highlight are excluded.
 local function CB_ForEachSnapCandidate(fn)
+    local maxW, maxH = UIParent:GetWidth() * 0.9, UIParent:GetHeight() * 0.9
+    local seen = {}
+    local function tryFrame(f)
+        if not f or seen[f] then return end
+        local name = f.GetName and f:GetName()
+        -- Skip tooltips: they're transient, and GameTooltip is anchored to the bar while its edit
+        -- tooltip shows (SetOwner), so snapping TO it would be a dependency cycle.
+        if not (name and f ~= bar and f ~= snapHighlight and not name:find("Tooltip")) then return end
+        if not (f.IsVisible and f:IsVisible() and f.GetLeft and f:GetLeft()) then return end
+        if CB_EffectiveAlpha(f) <= 0.05 then return end
+        local w, h = f:GetWidth(), f:GetHeight()
+        if not (w and h and w >= 16 and h >= 16 and w <= maxW and h <= maxH) then return end
+        seen[f] = true
+        fn(f, name)
+    end
+
     local roots = { UIParent }
     if _G.ElvUIParent then roots[#roots + 1] = _G.ElvUIParent end
-    local maxW, maxH = UIParent:GetWidth() * 0.9, UIParent:GetHeight() * 0.9
     for _, root in ipairs(roots) do
-        for _, f in ipairs({ root:GetChildren() }) do
-            local name = f.GetName and f:GetName()
-            -- Skip tooltips: they're transient, and GameTooltip is anchored to the bar while its
-            -- edit tooltip shows (SetOwner), so snapping TO it would be a dependency cycle.
-            if name and f ~= bar and not name:find("Tooltip")
-               and f.IsVisible and f:IsVisible() and f.GetLeft and f:GetLeft() then
-                local w, h = f:GetWidth(), f:GetHeight()
-                if w and h and w >= 16 and h >= 16 and w <= maxW and h <= maxH then
-                    fn(f, name)
-                end
-            end
+        for _, f in ipairs({ root:GetChildren() }) do tryFrame(f) end
+    end
+    -- oUF unit frames (ElvUI's instance is ElvUF; bare oUF as a fallback). seen[] dedups any that are
+    -- also direct children so they aren't considered twice.
+    local function addOUF(ouf)
+        if type(ouf) == "table" and type(ouf.objects) == "table" then
+            for _, f in ipairs(ouf.objects) do tryFrame(f) end
         end
     end
+    addOUF(_G.ElvUF)
+    addOUF(_G.oUF)
 end
 NS.actionBarShown    = false   -- persisted in CleanBot_SavedVars.actionBarShown
 NS.actionBarEditMode = false   -- session-only
@@ -68,50 +97,108 @@ end
 -- following the cursor — so the bar slides along the frame's edge. On release it anchors to whatever
 -- frame it ended up snapped to (so it follows that frame), else to UIParent. Position is preserved.
 local dragGrabX, dragGrabY  -- cursor offset from the bar's bottom-left, captured on mouse-down
-local dragSnapFrame         -- name of the frame the bar is currently snapped to (nil = free)
+local dragSnap              -- current snap { frame, edge, axis, value, dist } (nil = free)
 local dragging              -- true while a drag is in progress (guards double mouse-up)
 
--- Best single-axis snap for a proposed bottom-left: { axis = "x"|"y", value, dist, frame }, or nil.
-local function CB_BestSnap(newLeft, newBottom)
+-- Each snap edge-key maps to the side of the candidate frame it touches — used to draw the blue edge
+-- strip. Both the flush ("left↔left") and the abutting ("bar left ↔ frame right") snaps share a side.
+local EDGE_SIDE = {
+    xLeft  = "LEFT",   xAbutLeft  = "LEFT",
+    xRight = "RIGHT",  xAbutRight = "RIGHT",
+    yBottom = "BOTTOM", yAbutBelow = "BOTTOM",
+    yTop    = "TOP",    yAbutAbove = "TOP",
+}
+
+-- Best single-axis snap for a proposed bottom-left, within `maxDist`: { axis, edge, value, dist, frame },
+-- or nil. When `onlyFrame`/`onlyEdge` are set, only that exact candidate edge is considered (sticky
+-- release check) so a held snap stays on the same edge instead of jumping sides near a corner.
+local function CB_BestSnap(newLeft, newBottom, maxDist, onlyFrame, onlyEdge)
     local w, h = bar:GetWidth(), bar:GetHeight()
     local bl, br, bb, bt = newLeft, newLeft + w, newBottom, newBottom + h
     local best
     CB_ForEachSnapCandidate(function(f, name)
+        if onlyFrame and name ~= onlyFrame then return end
         local cl, cr, ct, cb = f:GetLeft(), f:GetRight(), f:GetTop(), f:GetBottom()
         -- X-axis (vertical-edge) snaps require the bar to be vertically near the frame; Y the reverse.
-        local vNear = bb <= ct + SNAP_DIST and bt >= cb - SNAP_DIST
-        local hNear = bl <= cr + SNAP_DIST and br >= cl - SNAP_DIST
-        local function consider(axis, value, dist, near)
-            if near and dist <= SNAP_DIST and (not best or dist < best.dist) then
-                best = { axis = axis, value = value, dist = dist, frame = name }
+        local vNear = bb <= ct + maxDist and bt >= cb - maxDist
+        local hNear = bl <= cr + maxDist and br >= cl - maxDist
+        -- True extent overlap on the PERPENDICULAR axis marks the edge the bar is sliding along: an
+        -- x-edge whose vertical ranges overlap, or a y-edge whose horizontal ranges overlap. Preferred
+        -- over a merely-nearer edge so dragging in from the side of a short, wide frame catches its
+        -- left/right edge instead of its nearby top/bottom.
+        local vOverlap = bb < ct and bt > cb
+        local hOverlap = bl < cr and br > cl
+        local function consider(axis, edge, value, dist, near, overlap)
+            if onlyEdge and edge ~= onlyEdge then return end
+            if not (near and dist <= maxDist) then return end
+            if not best
+               or (overlap and not best.overlap)
+               or (overlap == best.overlap and dist < best.dist) then
+                best = { axis = axis, edge = edge, value = value, dist = dist, frame = name, overlap = overlap }
             end
         end
-        consider("x", cl,                math.abs(bl - cl), vNear)  -- left ↔ left
-        consider("x", cr - w,            math.abs(br - cr), vNear)  -- right ↔ right
-        consider("x", cr + SNAP_GAP,     math.abs(bl - cr), vNear)  -- abut right of frame
-        consider("x", cl - w - SNAP_GAP, math.abs(br - cl), vNear)  -- abut left of frame
-        consider("y", cb,                math.abs(bb - cb), hNear)  -- bottom ↔ bottom
-        consider("y", ct - h,            math.abs(bt - ct), hNear)  -- top ↔ top
-        consider("y", ct + SNAP_GAP,     math.abs(bb - ct), hNear)  -- abut above frame
-        consider("y", cb - h - SNAP_GAP, math.abs(bt - cb), hNear)  -- abut below frame
+        consider("x", "xLeft",      cl,                math.abs(bl - cl), vNear, vOverlap)  -- left ↔ left
+        consider("x", "xRight",     cr - w,            math.abs(br - cr), vNear, vOverlap)  -- right ↔ right
+        consider("x", "xAbutRight", cr + SNAP_GAP,     math.abs(bl - cr), vNear, vOverlap)  -- abut right of frame
+        consider("x", "xAbutLeft",  cl - w - SNAP_GAP, math.abs(br - cl), vNear, vOverlap)  -- abut left of frame
+        consider("y", "yBottom",    cb,                math.abs(bb - cb), hNear, hOverlap)  -- bottom ↔ bottom
+        consider("y", "yTop",       ct - h,            math.abs(bt - ct), hNear, hOverlap)  -- top ↔ top
+        consider("y", "yAbutAbove", ct + SNAP_GAP,     math.abs(bb - ct), hNear, hOverlap)  -- abut above frame
+        consider("y", "yAbutBelow", cb - h - SNAP_GAP, math.abs(bt - cb), hNear, hOverlap)  -- abut below frame
     end)
     return best
 end
 
--- Per-frame drag tick: follow the cursor, then lock the one nearest snapping axis.
+-- Highlights the frame the bar is snapped to: a green wash over the whole frame, a brighter blue strip
+-- on the exact edge being snapped to, and the frame's name centered on it. Passing nil hides it all.
+local EDGE_THICK = 3
+local function CB_UpdateSnapHighlight(snap)
+    if not snapHighlight then return end
+    local f = snap and _G[snap.frame]
+    if not (f and f.GetLeft and f:GetLeft()) then snapHighlight:Hide() return end
+    snapHighlight:ClearAllPoints()
+    snapHighlight:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    snapHighlight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    snapHighlight.label:SetText(snap.frame)
+
+    local edge, side = snapHighlight.edge, EDGE_SIDE[snap.edge]
+    edge:ClearAllPoints()
+    if side == "LEFT" then
+        edge:SetPoint("TOPLEFT"); edge:SetPoint("BOTTOMLEFT"); edge:SetWidth(EDGE_THICK)
+    elseif side == "RIGHT" then
+        edge:SetPoint("TOPRIGHT"); edge:SetPoint("BOTTOMRIGHT"); edge:SetWidth(EDGE_THICK)
+    elseif side == "TOP" then
+        edge:SetPoint("TOPLEFT"); edge:SetPoint("TOPRIGHT"); edge:SetHeight(EDGE_THICK)
+    else -- BOTTOM
+        edge:SetPoint("BOTTOMLEFT"); edge:SetPoint("BOTTOMRIGHT"); edge:SetHeight(EDGE_THICK)
+    end
+    snapHighlight:Show()
+end
+
+-- Per-frame drag tick: follow the cursor, then lock the one nearest snapping edge.
+-- Hysteresis: while snapped, keep the SAME frame AND edge until the bar drifts past SNAP_RELEASE from
+-- it; only then is a fresh snap acquired within the tighter SNAP_DIST. This stops the bar from
+-- flickering between frames (or between the two edges of a corner) that sit close together.
 local function CB_DragUpdate()
     local scale = bar:GetEffectiveScale()
     if not scale or scale == 0 then return end
     local cx, cy = GetCursorPosition()
     local newLeft   = cx / scale - dragGrabX
     local newBottom = cy / scale - dragGrabY
-    local snap = CB_BestSnap(newLeft, newBottom)
-    dragSnapFrame = snap and snap.frame or nil
+    local snap
+    if dragSnap then
+        snap = CB_BestSnap(newLeft, newBottom, SNAP_RELEASE, dragSnap.frame, dragSnap.edge)
+    end
+    if not snap then
+        snap = CB_BestSnap(newLeft, newBottom, SNAP_DIST)
+    end
+    dragSnap = snap
     if snap then
         if snap.axis == "x" then newLeft = snap.value else newBottom = snap.value end
     end
     bar:ClearAllPoints()
     bar:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", newLeft, newBottom)
+    CB_UpdateSnapHighlight(snap)
 end
 
 -- Mouse-up: anchor to the snapped frame (so the bar follows it) or UIParent, keeping the on-screen
@@ -120,11 +207,13 @@ local function CB_FinishDrag()
     if not dragging then return end
     dragging = false
     NS.CB_EndCapture()
+    CB_UpdateSnapHighlight(nil)
     local bl, bb = bar:GetLeft(), bar:GetBottom()
     local relTo, x, y = "UIParent", bl, bb
-    local f = dragSnapFrame and _G[dragSnapFrame]
+    local snapFrame = dragSnap and dragSnap.frame
+    local f = snapFrame and _G[snapFrame]
     if f and f:GetLeft() then
-        relTo, x, y = dragSnapFrame, bl - f:GetLeft(), bb - f:GetBottom()
+        relTo, x, y = snapFrame, bl - f:GetLeft(), bb - f:GetBottom()
     end
     bar:ClearAllPoints()
     bar:SetPoint("BOTTOMLEFT", _G[relTo] or UIParent, "BOTTOMLEFT", x, y)
@@ -142,7 +231,7 @@ local function CB_BeginDrag()
     local cx, cy = GetCursorPosition()
     dragGrabX = cx / scale - bar:GetLeft()
     dragGrabY = cy / scale - bar:GetBottom()
-    dragSnapFrame = nil
+    dragSnap = nil
     dragging = true
     -- The capture frame catches the mouse-up when the cursor has moved off the overlay; the
     -- overlay's own OnMouseUp catches it when released in place (WoW delivers the button-up to
@@ -228,6 +317,21 @@ local function CB_BuildActionBar()
     overlay:SetScript("OnMouseUp", function(_, button)
         if button == "LeftButton" then CB_FinishDrag() end
     end)
+
+    -- Snap highlight: a green wash laid over whatever frame the bar is currently snapped to during a
+    -- drag, so the anchor target is obvious. High strata so it shows above the candidate frame.
+    snapHighlight = CreateFrame("Frame", "CleanBotSnapHighlightFrame", UIParent)
+    snapHighlight:SetFrameStrata("FULLSCREEN_DIALOG")
+    snapHighlight:Hide()
+    local hlTint = snapHighlight:CreateTexture(nil, "ARTWORK")
+    hlTint:SetAllPoints(snapHighlight)
+    hlTint:SetTexture(0.1, 1.0, 0.1, 0.25)   -- translucent green "snapped here" wash
+    local hlEdge = snapHighlight:CreateTexture(nil, "OVERLAY")
+    hlEdge:SetTexture(0.2, 0.6, 1.0, 0.9)    -- bright blue strip on the snapped edge
+    snapHighlight.edge = hlEdge
+    local hlLabel = snapHighlight:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hlLabel:SetPoint("CENTER", snapHighlight, "CENTER", 0, 0)
+    snapHighlight.label = hlLabel
 
     -- ── Restore position + shown state (edit mode always starts off). ──
     local a = CleanBot_SavedVars and CleanBot_SavedVars.actionBarAnchor
