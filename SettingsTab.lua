@@ -866,56 +866,39 @@ NS.CleanBot_BuildSettingsTab = function()
         actionBarEditCB:SetChecked(NS.actionBarEditMode == true)
     end
 
-    -- "Customize" collapsible section: per-button enable/disable. A checkbox per bar slot, with each
-    -- flyout's items indented beneath it. Toggling shows/hides that button (or flyout item) live,
-    -- persisted. Reordering is by shift-dragging the buttons on the bar, not here. Children use a
-    -- closure-anchor so the indent survives a live re-stamp (margin/padding changes).
+    -- "Customize" collapsible section: per-button enable/disable, laid out in LIVE BAR ORDER. Each slot
+    -- has a master checkbox (show/hide the whole button); multi-action slots also list a checkbox per
+    -- action (the bar button is the first enabled action; the rest are its flyout) indented beneath.
+    -- Toggling applies live + persisted; reordering is by shift-dragging the buttons on the bar — which
+    -- calls CB_RefreshActionBarButtonList to re-flow this list into the new order.
     local customSec = NS.CB_CreateSection(otherChild, "actionBarCustomize", "Customize", 4)
     NS.CB_AnchorBelow(customSec.toggleBtn, actionBarEditCB)
 
-    local buttonChecks, prevRow = {}, nil
+    -- Pre-create every checkbox once (positioned later by relayoutButtonRows). slotMasterCB[slotId];
+    -- actionCB[slotId][actionId] (multi-action slots only).
+    local slotMasterCB, actionCB = {}, {}
     for _, s in ipairs(NS.CB_actionSlots or {}) do
-        local scb = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABSlotSet_" .. s.id, s.title, s.desc)
-        if prevRow then NS.CB_AnchorBelow(scb, prevRow) else NS.CB_AnchorWall(scb, customSec.bg, "TOPLEFT") end
-        scb:SetScript("OnClick", function(self)
+        local master = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABSlotSet_" .. s.id, s.title,
+            "Show or hide the " .. s.title .. " button.")
+        master:SetScript("OnClick", function(self)
             if NS.CB_SetSlotEnabled then NS.CB_SetSlotEnabled(s.id, self:GetChecked() and true or false) end
         end)
-        buttonChecks[#buttonChecks + 1] = { cb = scb, slotId = s.id }
-        prevRow = scb
-        if s.children then
-            for _, c in ipairs(s.children) do
-                local ccb = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABChildSet_" .. s.id .. "_" .. c.id, c.title, c.desc)
-                local ref = prevRow
-                NS.CB_Anchor(ccb, function()
-                    ccb:ClearAllPoints()
-                    ccb:SetPoint("TOPLEFT", ref, "BOTTOMLEFT", (ref == scb) and 18 or 0, -4)
+        slotMasterCB[s.id] = master
+        if #s.actions > 1 then
+            actionCB[s.id] = {}
+            for _, a in ipairs(s.actions) do
+                local acb = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABActSet_" .. s.id .. "_" .. a.id, a.title, a.desc)
+                acb:SetScript("OnClick", function(self)
+                    if NS.CB_SetChildEnabled then NS.CB_SetChildEnabled(s.id, a.id, self:GetChecked() and true or false) end
                 end)
-                ccb:SetScript("OnClick", function(self)
-                    if NS.CB_SetChildEnabled then NS.CB_SetChildEnabled(s.id, c.id, self:GetChecked() and true or false) end
-                end)
-                buttonChecks[#buttonChecks + 1] = { cb = ccb, slotId = s.id, childId = c.id }
-                prevRow = ccb
+                actionCB[s.id][a.id] = acb
             end
         end
     end
-    customSec:Finalize(prevRow)
 
-    -- Syncs every checkbox from the live layout (ActionBar calls this once it has loaded SavedVars,
-    -- which can happen after this panel is built).
-    NS.CB_RefreshActionBarButtonList = function()
-        for _, r in ipairs(buttonChecks) do
-            local on
-            if r.childId then on = not NS.CB_IsChildEnabled or NS.CB_IsChildEnabled(r.slotId, r.childId)
-            else             on = not NS.CB_IsSlotEnabled  or NS.CB_IsSlotEnabled(r.slotId) end
-            r.cb:SetChecked(on)
-        end
-    end
-    NS.CB_RefreshActionBarButtonList()
-
-    -- Size the scroll child to fit the content (like the Manage tab) so the scrollbar range matches and
-    -- there's no empty scroll space. The bottommost visible widget is the Customize section's anchor (its
-    -- last checkbox when expanded, its header when collapsed). GetTop/GetBottom need one rendered frame,
-    -- so the height update is deferred via a one-shot OnUpdate; re-run on section toggle + relayout.
+    -- Size the scroll child to fit the content (like the Manage tab) so the scrollbar range matches.
+    -- The bottommost visible widget is the Customize section's anchor; GetTop/GetBottom need a rendered
+    -- frame, so the update is deferred via a one-shot OnUpdate.
     local function updateOtherHeight()
         local top, last = otherChild:GetTop(), customSec:GetAnchor()
         local bottom = last and last:GetBottom()
@@ -930,9 +913,59 @@ NS.CleanBot_BuildSettingsTab = function()
             updateOtherHeight()
         end)
     end
-    customSec.onToggle = scheduleOtherUpdate     -- recompute height after collapse/expand
-    scheduleOtherUpdate()                        -- initial pass (fires once the panel is shown)
-    NS.CB_RegisterRelayout(scheduleOtherUpdate)  -- recompute on a layout change
+
+    -- Lays out the checkboxes in live bar order: slot masters flush-left, their actions indented in
+    -- flyout order. Two-anchor (LEFT to bg for X, TOP to prev for Y) keeps masters flush regardless of
+    -- the indented action above. Sets the section's last widget so its bg + the scroll height track it.
+    local function relayoutButtonRows()
+        local lay  = NS.CB_actionBarLayout or {}
+        local padL = (customSec.bg.paddingLeft or 0)
+        local prev = nil
+        for _, sid in ipairs(lay.slotOrder or {}) do
+            local master = slotMasterCB[sid]
+            if master then
+                master:ClearAllPoints()
+                master:SetPoint("LEFT", customSec.bg, "LEFT", padL, 0)
+                if prev then master:SetPoint("TOP", prev, "BOTTOM", 0, -4)
+                else          master:SetPoint("TOP", customSec.bg, "TOP", 0, -(customSec.bg.paddingTop or 0)) end
+                prev = master
+                local order = lay.childOrder and lay.childOrder[sid]
+                if order and actionCB[sid] then
+                    for _, aid in ipairs(order) do
+                        local acb = actionCB[sid][aid]
+                        if acb then
+                            acb:ClearAllPoints()
+                            acb:SetPoint("LEFT", customSec.bg, "LEFT", padL + 18, 0)
+                            acb:SetPoint("TOP", prev, "BOTTOM", 0, -4)
+                            prev = acb
+                        end
+                    end
+                end
+            end
+        end
+        customSec.lastWidget, customSec.frame = prev, prev
+    end
+
+    -- Syncs checkbox states from the live layout AND re-flows the rows into the current bar order. Called
+    -- at build and by ActionBar after it loads SavedVars / after a shift-drag reorder.
+    NS.CB_RefreshActionBarButtonList = function()
+        for sid, master in pairs(slotMasterCB) do
+            master:SetChecked(not NS.CB_IsSlotEnabled or NS.CB_IsSlotEnabled(sid))
+        end
+        for sid, acts in pairs(actionCB) do
+            for aid, acb in pairs(acts) do
+                acb:SetChecked(not NS.CB_IsChildEnabled or NS.CB_IsChildEnabled(sid, aid))
+            end
+        end
+        relayoutButtonRows()
+        scheduleOtherUpdate()
+    end
+
+    relayoutButtonRows()
+    customSec:Apply()                            -- show/position the section bg
+    NS.CB_RefreshActionBarButtonList()
+    customSec.onToggle = scheduleOtherUpdate      -- recompute height after collapse/expand
+    NS.CB_RegisterRelayout(function() relayoutButtonRows(); scheduleOtherUpdate() end)
 
     -- ── Debug tab ──────────────────────────────────────────────
     -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:

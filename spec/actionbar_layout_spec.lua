@@ -53,3 +53,25 @@ describe("ActionBar CB_MoveInOrder", function()
         assert.same({ "a", "b", "c" }, NS.CB_MoveInOrder({ "a", "b", "c" }, "a", 1))
     end)
 end)
+
+describe("ActionBar CB_MoveToVisibleIndex", function()
+    local none = function() return false end
+    it("moves among all-enabled entries by visible position", function()
+        assert.same({ "a", "b", "c", "d" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, none, "a", 1))
+        assert.same({ "b", "a", "c", "d" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, none, "a", 2))
+        assert.same({ "b", "c", "a", "d" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, none, "a", 3))
+        assert.same({ "b", "c", "d", "a" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, none, "a", 4))
+    end)
+
+    it("clamps past the end to last", function()
+        assert.same({ "b", "c", "d", "a" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, none, "a", 99))
+    end)
+
+    it("counts only ENABLED entries for the visible position (disabled keep their spot)", function()
+        local cOff = function(x) return x == "c" end   -- c hidden; visible order is a, b, d
+        -- move "a" to visible position 2 → lands before the 2nd enabled (d), i.e. after the hidden c
+        assert.same({ "b", "c", "a", "d" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, cOff, "a", 2))
+        -- move "d" to visible position 1 → before the 1st enabled (a)
+        assert.same({ "d", "a", "b", "c" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, cOff, "d", 1))
+    end)
+end)

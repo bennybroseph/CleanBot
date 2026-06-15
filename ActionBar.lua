@@ -103,14 +103,21 @@ local function playerCombatSection()
     return UnitAffectingCombat("player") and "combat" or "nonCombat"
 end
 
+-- Desaturates the movement host (its current main action) and each visible flyout child by whether its
+-- action's movement strategy is the group's active value for the current combat context. Works whichever
+-- movement action is currently the main (they're promotable).
 local function refreshMoveBtns()
     local m = slotBtns.movement
-    if not m then return end
+    if not m or not m.childFrames then return end
     local section = playerCombatSection()
-    m.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mFollow"))
-    local kids = m.allChildren or {}
-    if kids.runaway then kids.runaway.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mRunaway")) end
-    if kids.stay    then kids.stay.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mStay")) end
+    if m._action and m._action.moveField then
+        m.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, m._action.moveField))
+    end
+    for _, cf in ipairs(m.childFrames) do
+        if cf:IsShown() and cf._action and cf._action.moveField then
+            cf.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, cf._action.moveField))
+        end
+    end
 end
 
 -- An explicit Follow/Stay choice supersedes a pending Runaway revert.
@@ -444,16 +451,18 @@ NS.CB_ToggleActionBarEditMode = function() NS.CB_SetActionBarEditMode(not NS.act
 -- discoverable. Kept as a constant so it's edited in one place.
 local FLYOUT_HINT = "|cFF80CCFFRight-Click to toggle this flyout|r"   -- light blue
 
--- A bar button whose left-click runs its own action and which reveals a stack of extra buttons —
--- on hover (auto-closes when the pointer leaves) or pinned open by right-click. The stack expands
--- AWAY from the frame the bar is anchored to (so it never grows back over it); when the bar is free
--- (anchored to UIParent) it defaults downward. Add children with btn:AddFlyout(icon, onClick, …).
-local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc)
-    local btn = NS.CB_CreateIconButton(parent, name, iconTex, BTN, nil)
+-- A bar button whose main (left-click) action is REASSIGNABLE, plus a stack of extra buttons revealed
+-- on hover (auto-closes when the pointer leaves) or pinned open by right-click. The host + its child
+-- frames are generic display surfaces: SetActiveOrder assigns the enabled actions to them (actions[1]
+-- → host, the rest → child frames), so reordering can change which action is the main. The stack
+-- expands AWAY from the frame the bar is anchored to (defaults downward when the bar is free).
+local function CB_CreateFlyoutButton(parent, name)
+    local btn = NS.CB_CreateIconButton(parent, name, nil, BTN, nil)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    if title then
-        NS.CB_SetTooltip(btn, title, desc and (desc .. "\n\n" .. FLYOUT_HINT) or FLYOUT_HINT)
-    end
+    -- Tooltip reads the CURRENT main action (btn._title/_desc, set by SetActiveOrder), plus the hint.
+    NS.CB_SetTooltip(btn,
+        function() return btn._title end,
+        function() return (btn._desc and (btn._desc .. "\n\n") or "") .. FLYOUT_HINT end)
 
     -- Child container. Parented to the button so it inherits MEDIUM strata (children stay interactive);
     -- raised a few levels so it draws above the bar. Anchored contiguous with the button (no gap
@@ -461,9 +470,9 @@ local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc
     local flyout = CreateFrame("Frame", name .. "Flyout", btn)
     flyout:SetFrameLevel(btn:GetFrameLevel() + 5)
     flyout:Hide()
-    -- allChildren = every child created (id → frame); childIds = registry/default order; children = the
-    -- currently ACTIVE ordered subset that layout() draws (set by SetActiveChildren from the saved order).
-    btn.flyout, btn.children, btn.allChildren, btn.childIds = flyout, {}, {}, {}
+    -- childFrames = the pool of generic flyout display surfaces (created by AddChildSlot); children = the
+    -- currently VISIBLE ones that layout() draws (set by SetActiveOrder). _actionsById set by the build.
+    btn.flyout, btn.children, btn.childFrames, btn._actionsById = flyout, {}, {}, {}
 
     -- Screen rect the flyout would occupy growing `dir` from the button, for `n` children.
     local function flyoutRect(dir, n)
@@ -507,6 +516,7 @@ local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc
     -- edge is flush with the button; children are inset by GAP, so the flyout's leading strip bridges
     -- the visible gap for hover detection.
     local function layout(dir)
+        flyout._dir = dir   -- remembered so shift-drag child reorder knows the flyout's flow axis
         local n = #btn.children
         if n == 0 then return end
         local vertical = (dir == "UP" or dir == "DOWN")
@@ -552,36 +562,47 @@ local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc
         if mouseButton == "RightButton" then       -- toggle pinned-open (survives the pointer leaving)
             flyout.pinned = not flyout.pinned
             if flyout.pinned then open() else flyout:Hide() end
-        elseif onClick then
-            onClick()
+        elseif btn._action and btn._action.onClick then
+            btn._action.onClick()
         end
     end)
 
-    -- Registers a child button into the master pool (does NOT make it active — CB_RebuildBar /
-    -- SetActiveChildren decides which children show and in what order). Positioning happens in layout()
-    -- at open time. Selecting a child also closes the flyout unless it's pinned.
-    function btn:AddFlyout(childId, childIcon, childOnClick, childTitle, childDesc)
-        local child = NS.CB_CreateIconButton(flyout, name .. "Fly_" .. childId, childIcon, BTN, function()
-            if childOnClick then childOnClick() end
-            if not flyout.pinned then flyout:Hide() end
-        end)
-        if childTitle then NS.CB_SetTooltip(child, childTitle, childDesc) end
-        child._childId = childId
-        self.allChildren[childId] = child
-        self.childIds[#self.childIds + 1] = childId
-        return child
+    -- Sets the host's displayed action (icon + click + tooltip + reorder identity).
+    function btn:SetMain(action)
+        self.icon:SetTexture(action and action.icon)
+        self._action, self._actionId = action, action and action.id
+        self._title, self._desc = action and action.title, action and action.desc
     end
 
-    -- Sets the active child set + order from a list of child ids: hides every child, then shows the
-    -- listed ones in order. `children` (what layout() draws) becomes those frames. Re-layouts if open.
-    function btn:SetActiveChildren(orderedIds)
-        for _, id in ipairs(self.childIds) do
-            local c = self.allChildren[id]; if c then c:Hide() end
-        end
+    -- Creates one generic flyout display surface (its displayed action is assigned by SetActiveOrder).
+    -- Returns the frame so the caller can wire shift-drag reorder onto it.
+    function btn:AddChildSlot(idx)
+        local cf   -- declared first so the click closure captures it as an upvalue (its action is dynamic)
+        cf = NS.CB_CreateIconButton(flyout, name .. "Fly" .. idx, nil, BTN, function()
+            if cf._action and cf._action.onClick then cf._action.onClick() end
+            if not flyout.pinned then flyout:Hide() end
+        end)
+        NS.CB_SetTooltip(cf, function() return cf._title end, function() return cf._desc end)
+        self.childFrames[#self.childFrames + 1] = cf
+        return cf
+    end
+
+    -- Assigns enabled action ids (in order) to the host + child frames: ids[1] → host, ids[2..] → child
+    -- frames (shown, in order), extra frames hidden. `children` (what layout() draws) becomes the shown
+    -- frames. Re-layouts if the flyout is open.
+    function btn:SetActiveOrder(enabledIds)
+        self:SetMain(enabledIds[1] and self._actionsById[enabledIds[1]] or nil)
         self.children = {}
-        for _, id in ipairs(orderedIds or {}) do
-            local c = self.allChildren[id]
-            if c then c:Show(); self.children[#self.children + 1] = c end
+        for i, cf in ipairs(self.childFrames) do
+            local a = enabledIds[i + 1] and self._actionsById[enabledIds[i + 1]]
+            if a then
+                cf.icon:SetTexture(a.icon)
+                cf._action, cf._actionId, cf._title, cf._desc = a, a.id, a.title, a.desc
+                cf:Show()
+                self.children[#self.children + 1] = cf
+            else
+                cf:Hide()
+            end
         end
         if flyout:IsShown() then layout(flyoutDir()) end
     end
@@ -841,58 +862,215 @@ NS.CB_MoveInOrder = function(order, id, newIndex)
     return out
 end
 
--- Declarative slot/action registry. Each slot = one bar button; `children` (optional) are its flyout
--- items. The slot's own `onClick` is the main (left-click) action and is FIXED — not reorderable or
--- separately disable-able; disabling a slot removes the whole button. Children are reorderable and
--- individually toggleable. `refresh` (optional) is a saturation refresher registered once.
+-- Declarative slot registry. Each slot = one bar button with an ordered list of `actions`. The FIRST
+-- ENABLED action is the main (left-click) bar button; the remaining enabled actions are its flyout, in
+-- order. Reordering the list (shift-drag) can promote a flyout item to the main and demote the old main
+-- into the flyout. A slot with a single action is a plain button (no flyout). `slot.refresh` (optional)
+-- is a saturation refresher registered once; `action.moveField` ties an action to a movement strategy.
 local ATK = "Interface\\AddOns\\CleanBot\\icons\\attack"
 local function attackCmd(qual)
     return function() NS.CB_SendGroupCommand((qual and (qual .. " ") or "") .. "do attack my target") end
 end
 local SLOTS = {
-    { id = "summon", frame = "CleanBotActionSummonBtn", icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
-      title = "Summon", desc = "Summon your party/raid bots to you.",
-      onClick = function() NS.CB_SendGroupCommand("summon") end },
+    { id = "summon", frame = "CleanBotActionSummonBtn", title = "Summon", actions = {
+        { id = "summon", icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind", title = "Summon",
+          desc = "Summon your party/raid bots to you.", onClick = function() NS.CB_SendGroupCommand("summon") end },
+    } },
 
-    { id = "attack", frame = "CleanBotActionAttackBtn", icon = ATK,
-      title = "Attack", desc = "Order all your bots to attack your target.", onClick = attackCmd(nil),
-      children = {
+    { id = "attack", frame = "CleanBotActionAttackBtn", title = "Attack", actions = {
+        { id = "all",    icon = ATK,             title = "Attack — All",     desc = "Order all your bots to attack your target.",    onClick = attackCmd(nil) },
         { id = "tank",   icon = ATK .. "_tank",   title = "Attack — Tanks",   desc = "Order your tank bots to attack your target.",   onClick = attackCmd("@tank") },
         { id = "healer", icon = ATK .. "_healer", title = "Attack — Healers", desc = "Order your healer bots to attack your target.", onClick = attackCmd("@heal") },
         { id = "dps",    icon = ATK .. "_dps",    title = "Attack — DPS",     desc = "Order your DPS bots to attack your target.",    onClick = attackCmd("@dps") },
         { id = "melee",  icon = ATK .. "_melee",  title = "Attack — Melee",   desc = "Order your melee bots to attack your target.",  onClick = attackCmd("@melee") },
         { id = "ranged", icon = ATK .. "_ranged", title = "Attack — Ranged",  desc = "Order your ranged bots to attack your target.", onClick = attackCmd("@ranged") },
-      } },
+    } },
 
-    { id = "pull", frame = "CleanBotActionPullBtn", icon = "Interface\\Icons\\Ability_Hunter_Misdirection",
-      title = "Pull", desc = "Order your tank bots to pull your current target. (Select a mob first.)",
-      onClick = function() NS.CB_SendGroupCommand("pull my target") end },
+    { id = "pull", frame = "CleanBotActionPullBtn", title = "Pull", actions = {
+        { id = "pull", icon = "Interface\\Icons\\Ability_Hunter_Misdirection", title = "Pull",
+          desc = "Order your tank bots to pull your current target. (Select a mob first.)",
+          onClick = function() NS.CB_SendGroupCommand("pull my target") end },
+    } },
 
-    { id = "passive", frame = "CleanBotActionPassiveBtn", icon = "Interface\\Icons\\Spell_Nature_Sleep",
-      title = "Passive", desc = "Toggle all bots passive — stand down and do nothing in combat.",
-      onClick = function() NS.CB_SetGroupPassive(not NS.CB_GetGroupPassive()); NS.CB_RefreshCommands() end,
-      refresh = refreshPassiveBtn },
+    { id = "passive", frame = "CleanBotActionPassiveBtn", title = "Passive", refresh = refreshPassiveBtn, actions = {
+        { id = "passive", icon = "Interface\\Icons\\Spell_Nature_Sleep", title = "Passive",
+          desc = "Toggle all bots passive — stand down and do nothing in combat.",
+          onClick = function() NS.CB_SetGroupPassive(not NS.CB_GetGroupPassive()); NS.CB_RefreshCommands() end },
+    } },
 
-    { id = "movement", frame = "CleanBotActionFollowBtn", icon = "Interface\\Icons\\Ability_Hunter_BeastSoothe",
-      title = "Follow", desc = "Order your bots to follow you.",
-      onClick = function() setMovement("mFollow") end, refresh = refreshMoveBtns,
-      children = {
+    { id = "movement", frame = "CleanBotActionFollowBtn", title = "Movement", refresh = refreshMoveBtns, actions = {
+        { id = "follow",  icon = "Interface\\Icons\\Ability_Hunter_BeastSoothe", title = "Follow",
+          desc = "Order your bots to follow you.", onClick = function() setMovement("mFollow") end, moveField = "mFollow" },
         { id = "stay",    icon = "Interface\\Icons\\Spell_Nature_TimeStop", title = "Stay",
-          desc = "Order your bots to hold position.", onClick = function() setMovement("mStay") end },
+          desc = "Order your bots to hold position.", onClick = function() setMovement("mStay") end, moveField = "mStay" },
         { id = "runaway", icon = "Interface\\Icons\\Ability_Rogue_Sprint", title = "Runaway",
           desc = "Order your bots to keep their distance from enemies. Reverts to their previous combat movement when combat ends.",
-          onClick = runawayMovement },
-      } },
+          onClick = runawayMovement, moveField = "mRunaway" },
+    } },
 
-    { id = "release", frame = "CleanBotActionReleaseBtn", icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit",
-      title = "Release", desc = "Release your bots' spirits when they die.",
-      onClick = function() NS.CB_SendGroupCommand("release") end,
-      children = {
-        { id = "revive", icon = "Interface\\Icons\\Spell_Holy_Resurrection", title = "Revive",
+    { id = "release", frame = "CleanBotActionReleaseBtn", title = "Release", actions = {
+        { id = "release", icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit", title = "Release",
+          desc = "Release your bots' spirits when they die.", onClick = function() NS.CB_SendGroupCommand("release") end },
+        { id = "revive",  icon = "Interface\\Icons\\Spell_Holy_Resurrection", title = "Revive",
           desc = "Revive your bots from their corpses.", onClick = function() NS.CB_SendGroupCommand("revive") end },
-      } },
+    } },
 }
-NS.CB_actionSlots = SLOTS   -- exposed so the config panel can render the enable/disable list
+NS.CB_actionSlots = SLOTS   -- exposed so the Settings panel can render the enable/disable list
+
+-- ── Shift-drag reorder (slots on the bar, children within an open flyout) ────
+-- Flow axis + direction sign per grow/flyout direction: which screen axis the buttons run along, and
+-- whether flow order increases (+1) or decreases (-1) that coordinate.
+local DIR_AXIS = { RIGHT = { "x", 1 }, LEFT = { "x", -1 }, DOWN = { "y", -1 }, UP = { "y", 1 } }
+
+-- Moves `id` within `order` so that, among ENABLED entries (isOff(x) == falsey), it lands at visible
+-- position `visIdx` (1-based). Disabled entries keep their relative spot. Pure (given isOff). Exposed
+-- for specs.
+local function CB_MoveToVisibleIndex(order, isOff, id, visIdx)
+    local rest = {}
+    for _, x in ipairs(order) do if x ~= id then rest[#rest + 1] = x end end
+    local enabledSeen, insertAt = 0, #rest + 1
+    for i, x in ipairs(rest) do
+        if not isOff(x) then
+            enabledSeen = enabledSeen + 1
+            if enabledSeen == visIdx then insertAt = i; break end
+        end
+    end
+    table.insert(rest, insertAt, id)
+    return rest
+end
+NS.CB_MoveToVisibleIndex = CB_MoveToVisibleIndex
+
+local reorderState           -- { kind, id, slotId?, axis, sign, buttons, dragged, flyoutBtn?, wasPinned?, vis }
+local reorderGhost, reorderLine
+
+local function ensureReorderFrames()
+    if reorderGhost then return end
+    reorderGhost = CreateFrame("Frame", "CleanBotReorderGhost", UIParent)
+    reorderGhost:SetFrameStrata("TOOLTIP")
+    reorderGhost:SetSize(BTN, BTN)
+    reorderGhost:SetAlpha(0.7)
+    reorderGhost.icon = reorderGhost:CreateTexture(nil, "OVERLAY")
+    reorderGhost.icon:SetAllPoints()
+    reorderGhost:Hide()
+
+    reorderLine = CreateFrame("Frame", "CleanBotReorderLine", UIParent)
+    reorderLine:SetFrameStrata("TOOLTIP")
+    local lt = reorderLine:CreateTexture(nil, "OVERLAY")
+    lt:SetAllPoints()
+    lt:SetTexture(0.2, 0.6, 1.0, 0.95)   -- blue insertion line
+    reorderLine:Hide()
+end
+
+-- Positions the insertion line in the gap before the vis-th remaining (non-dragged) button, or after
+-- the last one. Vertical line for a horizontal flow, horizontal line for a vertical flow.
+local function updateReorderLine(vis)
+    local rem = {}
+    for _, b in ipairs(reorderState.buttons) do
+        if b ~= reorderState.dragged and b:IsShown() and b:GetLeft() then rem[#rem + 1] = b end
+    end
+    if #rem == 0 then reorderLine:Hide() return end
+    local axis, sign = reorderState.axis, reorderState.sign
+    local before     = vis <= #rem
+    local ref        = before and rem[vis] or rem[#rem]
+    local nudge      = (GAP / 2) * (before and 1 or -1)
+    reorderLine:ClearAllPoints()
+    if axis == "x" then
+        local edge = before and ((sign > 0) and ref:GetLeft() or ref:GetRight())
+                            or  ((sign > 0) and ref:GetRight() or ref:GetLeft())
+        reorderLine:SetSize(2, BTN)
+        reorderLine:SetPoint("CENTER", UIParent, "BOTTOMLEFT", edge - sign * nudge, ref:GetBottom() + ref:GetHeight() / 2)
+    else
+        local edge = before and ((sign > 0) and ref:GetBottom() or ref:GetTop())
+                            or  ((sign > 0) and ref:GetTop() or ref:GetBottom())
+        reorderLine:SetSize(BTN, 2)
+        reorderLine:SetPoint("CENTER", UIParent, "BOTTOMLEFT", ref:GetLeft() + ref:GetWidth() / 2, edge - sign * nudge)
+    end
+    reorderLine:Show()
+end
+
+-- Per-frame while dragging: follow the cursor with the ghost, recompute the visible insertion index
+-- from the cursor's position along the flow axis, and move the indicator line.
+local function reorderUpdate()
+    if not reorderState then return end
+    local scale  = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / scale, cy / scale
+    reorderGhost:ClearAllPoints()
+    reorderGhost:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy)
+
+    local pos = (reorderState.axis == "x") and cx or cy
+    local vis = 1
+    for _, b in ipairs(reorderState.buttons) do
+        if b ~= reorderState.dragged and b:IsShown() and b:GetLeft() then
+            local c = (reorderState.axis == "x") and (b:GetLeft() + b:GetWidth() / 2)
+                                                  or  (b:GetBottom() + b:GetHeight() / 2)
+            if (reorderState.sign > 0 and pos > c) or (reorderState.sign < 0 and pos < c) then vis = vis + 1 end
+        end
+    end
+    reorderState.vis = vis
+    updateReorderLine(vis)
+end
+
+local function finishReorder()
+    if not reorderState then return end
+    local st = reorderState
+    reorderState = nil
+    reorderGhost:SetScript("OnUpdate", nil)
+    reorderGhost:Hide()
+    reorderLine:Hide()
+    st.dragged:SetAlpha(1)
+    if st.kind == "slot" then
+        barLayout.slotOrder = CB_MoveToVisibleIndex(barLayout.slotOrder,
+            function(x) return barLayout.slotOff[x] end, st.id, st.vis)
+    else
+        local sid = st.slotId
+        barLayout.childOrder[sid] = CB_MoveToVisibleIndex(barLayout.childOrder[sid] or {},
+            function(x) return barLayout.childOff[sid .. "." .. x] end, st.id, st.vis)
+        if st.flyoutBtn then st.flyoutBtn.flyout.pinned = st.wasPinned end
+    end
+    NS.CB_SaveLayout()
+    NS.CB_RebuildBar()
+    if NS.CB_RefreshActionBarButtonList then NS.CB_RefreshActionBarButtonList() end
+end
+
+-- Begins a reorder drag for `btn` (a slot button or a flyout child). buttons = the live ordered+visible
+-- set it moves within; axis/sign come from the bar's grow direction (slots) or the flyout's flow (children).
+local function beginReorder(btn, kind, slotId, childId)
+    if reorderState then return end
+    ensureReorderFrames()
+    local axis, sign, buttons, flyoutBtn, wasPinned
+    if kind == "slot" then
+        local da = DIR_AXIS[anchor.growDir] or DIR_AXIS.RIGHT
+        axis, sign, buttons = da[1], da[2], barButtons
+    else
+        flyoutBtn = slotBtns[slotId]
+        local da  = DIR_AXIS[flyoutBtn.flyout._dir or "DOWN"] or DIR_AXIS.DOWN
+        axis, sign = da[1], da[2]
+        -- Include the host as the first position so a child dragged to the front becomes the main.
+        buttons = { flyoutBtn }
+        for _, c in ipairs(flyoutBtn.children) do buttons[#buttons + 1] = c end
+        wasPinned = flyoutBtn.flyout.pinned
+        flyoutBtn.flyout.pinned = true   -- keep it open while dragging within it
+    end
+    reorderState = { kind = kind, id = childId or slotId, slotId = slotId, axis = axis, sign = sign,
+                     buttons = buttons, dragged = btn, flyoutBtn = flyoutBtn, wasPinned = wasPinned, vis = 1 }
+    btn:SetAlpha(0.3)
+    reorderGhost.icon:SetTexture(btn.icon and btn.icon:GetTexture())
+    reorderGhost:Show()
+    reorderGhost:SetScript("OnUpdate", reorderUpdate)
+    reorderUpdate()
+end
+
+-- Wires shift-drag reorder onto one button (a slot or a flyout child). Plain click still fires (a drag
+-- only starts past WoW's drag threshold); non-shift drags are ignored.
+local function wireReorder(btn, kind, slotId)
+    btn:RegisterForDrag("LeftButton")
+    btn:SetScript("OnDragStart", function(self)
+        -- For a child, its displayed action id (self._actionId) is read live (it changes on reorder).
+        if IsShiftKeyDown() then beginReorder(self, kind, slotId, self._actionId) end
+    end)
+    btn:SetScript("OnDragStop", finishReorder)
+end
 
 -- Creates every slot button + flyout child ONCE from the registry (no order/visibility logic — that's
 -- CB_RebuildBar). Frames can't be destroyed in 3.3.5a, so we pre-create the full set and only
@@ -900,15 +1078,19 @@ NS.CB_actionSlots = SLOTS   -- exposed so the config panel can render the enable
 local function CB_BuildButtons()
     for _, s in ipairs(SLOTS) do
         local btn
-        if s.children then
-            btn = CB_CreateFlyoutButton(bar, s.frame, s.icon, s.onClick, s.title, s.desc)
-            for _, c in ipairs(s.children) do
-                btn:AddFlyout(c.id, c.icon, c.onClick, c.title, c.desc)
+        if #s.actions > 1 then
+            btn = CB_CreateFlyoutButton(bar, s.frame)
+            for _, a in ipairs(s.actions) do btn._actionsById[a.id] = a end
+            -- One fewer child frame than actions (one action is always the main on the host).
+            for i = 1, #s.actions - 1 do
+                wireReorder(btn:AddChildSlot(i), "child", s.id)
             end
         else
-            btn = NS.CB_CreateIconButton(bar, s.frame, s.icon, BTN, s.onClick)
-            NS.CB_SetTooltip(btn, s.title, s.desc)
+            local a = s.actions[1]
+            btn = NS.CB_CreateIconButton(bar, s.frame, a.icon, BTN, a.onClick)
+            NS.CB_SetTooltip(btn, a.title, a.desc)
         end
+        wireReorder(btn, "slot", s.id)
         slotBtns[s.id] = btn
         if s.refresh then NS.commandRefreshers[#NS.commandRefreshers + 1] = s.refresh end
     end
@@ -922,10 +1104,15 @@ local function CB_LoadLayout()
     barLayout.slotOrder  = NS.CB_MergeOrder(defSlots, saved.slotOrder)
     barLayout.childOrder = {}
     for _, s in ipairs(SLOTS) do
-        if s.children then
-            local defChildren = {}
-            for _, c in ipairs(s.children) do defChildren[#defChildren + 1] = c.id end
-            barLayout.childOrder[s.id] = NS.CB_MergeOrder(defChildren, saved.childOrder and saved.childOrder[s.id])
+        if #s.actions > 1 then
+            local defActions = {}
+            for _, a in ipairs(s.actions) do defActions[#defActions + 1] = a.id end
+            local sc = saved.childOrder and saved.childOrder[s.id]
+            -- Migration: a pre-unification save lists only the flyout children (no main action id), which
+            -- would wrongly make a flyout item the main. If the save lacks the default main, reset to default.
+            local hasMain = false
+            if sc then for _, x in ipairs(sc) do if x == defActions[1] then hasMain = true break end end end
+            barLayout.childOrder[s.id] = hasMain and NS.CB_MergeOrder(defActions, sc) or defActions
         end
     end
     barLayout.slotOff, barLayout.childOff = {}, {}
@@ -952,17 +1139,16 @@ local function CB_RebuildBar()
     for _, id in ipairs(barLayout.slotOrder) do
         local b = slotBtns[id]
         if b then
-            if barLayout.slotOff[id] then b:Hide()
-            else b:Show(); barButtons[#barButtons + 1] = b end
-        end
-    end
-    for id, b in pairs(slotBtns) do
-        if b.SetActiveChildren then
-            local order, active = barLayout.childOrder[id] or b.childIds, {}
-            for _, cid in ipairs(order) do
-                if not barLayout.childOff[id .. "." .. cid] then active[#active + 1] = cid end
+            local visible = not barLayout.slotOff[id]
+            if b.SetActiveOrder then   -- multi-action flyout slot: assign enabled actions; hide if none
+                local enabled = {}
+                for _, aid in ipairs(barLayout.childOrder[id] or {}) do
+                    if not barLayout.childOff[id .. "." .. aid] then enabled[#enabled + 1] = aid end
+                end
+                b:SetActiveOrder(enabled)
+                visible = visible and #enabled > 0
             end
-            b:SetActiveChildren(active)
+            if visible then b:Show(); barButtons[#barButtons + 1] = b else b:Hide() end
         end
     end
     CB_LayoutBar()
