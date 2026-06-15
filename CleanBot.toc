@@ -7,12 +7,14 @@
 
 CleanBot.xml
 CleanBot.lua
+Events.lua
 Skinning\ElvUI.lua
 Skinning\Layout.lua
 Skinning\Widgets.lua
 Skinning\QuestWidgets.lua
 Skinning\ItemVisuals.lua
 Bridge.lua
+Overhear.lua
 CommandControls.lua
 ActionBar.lua
 ChatFilter.lua

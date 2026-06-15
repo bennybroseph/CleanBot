@@ -39,12 +39,15 @@ NS.CleanBot_BuildIndividualTab = function()
     -- Inset individualContent by individualPanel's stamped padding so all model/equip/strategy
     -- content respects the panel border. BOT_BAR_H is added to paddingTop because
     -- the bot tab bar sits above the content area and is intentionally edge-to-edge.
-    NS.individualContent:SetPoint("TOPLEFT",     NS.individualPanel, "TOPLEFT",
-         NS.individualPanel.paddingLeft,
-       -(NS.BOT_BAR_H + NS.individualPanel.paddingTop))
-    NS.individualContent:SetPoint("BOTTOMRIGHT", NS.individualPanel, "BOTTOMRIGHT",
-        -NS.individualPanel.paddingRight,
-         NS.individualPanel.paddingBottom)
+    NS.CB_Anchor(NS.individualContent, function()
+        NS.individualContent:ClearAllPoints()
+        NS.individualContent:SetPoint("TOPLEFT",     NS.individualPanel, "TOPLEFT",
+             NS.individualPanel.paddingLeft,
+           -(NS.BOT_BAR_H + NS.individualPanel.paddingTop))
+        NS.individualContent:SetPoint("BOTTOMRIGHT", NS.individualPanel, "BOTTOMRIGHT",
+            -NS.individualPanel.paddingRight,
+             NS.individualPanel.paddingBottom)
+    end)
 
     -- ── Two-column panel structure ────────────────────────────────
     -- The model column is a FIXED width (NS.MODEL_WIDTH), decoupled from both the frame width
@@ -75,10 +78,22 @@ NS.CleanBot_BuildIndividualTab = function()
     -- Collapsed width = model panel + frame padding + panel padding on both sides.
     -- MODEL_GAP is included so the collapsed frame visually absorbs the gap between
     -- the model panel and the strategy panel edge.
-    NS.COLLAPSED_WIDTH = panelW
-        + NS.PADDING.frame.left  + NS.PADDING.frame.right
-        + NS.individualPanel.paddingLeft + NS.individualPanel.paddingRight
-        + NS.MODEL_GAP
+    NS.individualPanelW = panelW   -- constant model-column width; reused by the live width recompute
+    local function recomputeCollapsedWidth()
+        NS.COLLAPSED_WIDTH = NS.individualPanelW
+            + NS.PADDING.frame.left  + NS.PADDING.frame.right
+            + (NS.individualPanel.paddingLeft or 0) + (NS.individualPanel.paddingRight or 0)
+            + NS.MODEL_GAP
+    end
+    recomputeCollapsedWidth()
+
+    -- Live: a frame/panel padding change shifts the collapsed width, so recompute it and re-apply
+    -- the current tab's target width (CB_ResizeFrame is a no-op-safe resize).
+    NS.CB_RegisterRelayout(function()
+        recomputeCollapsedWidth()
+        local w = NS.CB_CurrentTargetWidth and NS.CB_CurrentTargetWidth()
+        if w then NS.CB_ResizeFrame(w) end
+    end)
 
     -- ── Expand / collapse toggle button ─────────────────────────
     -- Parented to CleanBotFrame and anchored to its RIGHT edge.
@@ -253,7 +268,7 @@ local CB_BuildInlineDropdown
 local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onClickFn, sourceTable, cmd, getSource, registry)
     local section = CreateFrame("Frame", nil, ctrl)
     NS.CB_AnchorBelow(section, anchor)
-    section:SetPoint("RIGHT", ctrl, "RIGHT", -(ctrl.paddingRight or 0), 0)
+    NS.CB_AnchorWall(section, ctrl, "RIGHT")
     section:SetHeight(#strategies * (NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom))
     NS.CB_ApplyFrameSkin(section, 4)
 
@@ -306,6 +321,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                 strat = s, frames = { sl }, height = sHeight,
                 place = function(y) sl:SetPoint("TOPLEFT", section, "TOPLEFT",
                     NS.PADDING.section.left + NS.MARGIN.slider.left, -y) end,
+                measure = function() return NS.MARGIN.slider.top + 54 + NS.MARGIN.slider.bottom end,
             }
             yOffset = yOffset + sHeight
         elseif s.type == "dropdown" then
@@ -353,6 +369,7 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
                 strat = s, frames = { cb, lbl, cb.labelHit }, height = cHeight,
                 place = function(y) cb:SetPoint("TOPLEFT", section, "TOPLEFT",
                     NS.PADDING.section.left + NS.MARGIN.checkbox.left, -y) end,
+                measure = function() return NS.MARGIN.checkbox.top + 20 + NS.MARGIN.checkbox.bottom end,
             }
             yOffset = yOffset + cHeight
         end
@@ -360,6 +377,12 @@ local function CB_BuildStrategySection(ctrl, anchor, strategies, slot, tag, onCl
 
     section.layoutItems = layoutItems
     section:SetHeight(yOffset + NS.PADDING.section.bottom)
+
+    -- Track for live re-flow: on a layout change, CB_RelayoutSection re-pins rows + recomputes the
+    -- section height from the (now re-stamped) section padding / row margins.
+    section._slot = slot
+    NS.CB_sectionList = NS.CB_sectionList or {}
+    NS.CB_sectionList[#NS.CB_sectionList + 1] = section
 
     -- Wire dependsOn: patch the checkbox's OnClick to enable/disable the linked slider.
     for _, s in ipairs(strategies) do
@@ -414,7 +437,7 @@ local function CB_RelayoutSection(section, slot)
         if CB_LayoutItemShown(item, slot) then
             item.place(yOffset)
             for _, f in ipairs(item.frames) do f:Show() end
-            yOffset = yOffset + item.height
+            yOffset = yOffset + (item.measure and item.measure() or item.height)
         else
             for _, f in ipairs(item.frames) do f:Hide() end
         end
@@ -423,6 +446,15 @@ local function CB_RelayoutSection(section, slot)
     section:SetHeight(h)
     return h
 end
+
+-- Live: re-flow every built strategy section on a layout change (row gaps + section height track the
+-- re-stamped section padding / row margins). Elements anchored below a section follow its bottom edge
+-- automatically, so no ordering against the anchor replay is needed. Registered once.
+NS.CB_RegisterRelayout(function()
+    for _, section in ipairs(NS.CB_sectionList or {}) do
+        if section._slot then CB_RelayoutSection(section, section._slot) end
+    end
+end)
 
 -- Applies a mutually-exclusive strategy selection per target: each gets a
 -- single "cmd +sel,-other,-other..." toggle list built from ITS class tokens,
@@ -498,9 +530,7 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
     if prevBottom then
         NS.CB_AnchorBelow(header, prevBottom)
     else
-        header:SetPoint("TOPLEFT", parent, "TOPLEFT",
-            (parent.paddingLeft or 0) + (header.marginLeft or 0),
-            -((parent.paddingTop or 0) + (header.marginTop  or 0)))
+        NS.CB_AnchorWall(header, parent, "TOPLEFT")
     end
 
     -- "Show Talents" rides the single-unit inspect path, which has no group
@@ -804,9 +834,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local strategies = CB_ShownStrategies(group.strategies, slot.class)
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
-                (col.paddingLeft or 0) + (header.marginLeft or 0),
-                -((col.paddingTop or 0) + (header.marginTop  or 0))) end
+            else NS.CB_AnchorWall(header, col, "TOPLEFT") end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotRoleDD_" .. tag, 120)
             NS.CB_AnchorBelow(dd, header)
@@ -989,9 +1017,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local noneDesc   = group.noneDesc
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
-                (col.paddingLeft or 0) + (header.marginLeft or 0),
-                -((col.paddingTop or 0) + (header.marginTop  or 0))) end
+            else NS.CB_AnchorWall(header, col, "TOPLEFT") end
 
             -- Frame name keyed on the group's semantic key when present (generic groups
             -- like "movement"), else the group index (class groups have no `group` field).
@@ -1070,9 +1096,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
 
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
-                (col.paddingLeft or 0) + (header.marginLeft or 0),
-                -((col.paddingTop or 0) + (header.marginTop  or 0))) end
+            else NS.CB_AnchorWall(header, col, "TOPLEFT") end
 
             local dd = NS.CB_CreateDropdown(col, "CleanBotSetDD_" .. cmd .. tag .. "_" .. (group.group or gi), 160)
             NS.CB_AnchorBelow(dd, header)
@@ -1135,9 +1159,7 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
             local groupStrats = CB_ShownStrategies(group.strategies, slot.class)
             local header = NS.CB_CreateLabel(col, group.header)
             if prevBottom then NS.CB_AnchorBelow(header, prevBottom)
-            else header:SetPoint("TOPLEFT", col, "TOPLEFT",
-                (col.paddingLeft or 0) + (header.marginLeft or 0),
-                -((col.paddingTop or 0) + (header.marginTop  or 0))) end
+            else NS.CB_AnchorWall(header, col, "TOPLEFT") end
 
             local section, checkboxes = CB_BuildStrategySection(col, header, groupStrats, slot, tag,
                 function(s, checked)
@@ -1267,9 +1289,7 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
 
     if not cs or (not cs.combat and not cs.nonCombat) then
         local label = classContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", classContent, "TOPLEFT",
-            (classContent.paddingLeft or 0) + (label.marginLeft or 0),
-            -((classContent.paddingTop or 0) + (label.marginTop  or 0)))
+        NS.CB_AnchorWall(label, classContent, "TOPLEFT")
         label:SetText("No class-specific options.")
         return {}
     end
@@ -1298,6 +1318,8 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
     leftCol.paddingRight  = classContent.paddingRight
     leftCol.paddingTop    = classContent.paddingTop
     leftCol.paddingBottom = classContent.paddingBottom
+    leftCol._paddingRole  = classContent._paddingRole or "panel"
+    NS.CB_RegisterStampable(leftCol)
 
     local rightCol = CreateFrame("Frame", nil, classContent)
     rightCol:SetPoint("TOPLEFT",     colDivider,   "TOP",         NS.COLUMN_GAP,    0)
@@ -1306,6 +1328,8 @@ local function CB_BuildClassTabContent(classContent, class, slot, tag)
     rightCol.paddingRight  = classContent.paddingRight
     rightCol.paddingTop    = classContent.paddingTop
     rightCol.paddingBottom = classContent.paddingBottom
+    rightCol._paddingRole  = classContent._paddingRole or "panel"
+    NS.CB_RegisterStampable(rightCol)
 
     if cs.combat    then CB_BuildColumnGroups(leftCol,  cs.combat,    "co", slot, tag, combatStartGi, classRegistry, function(e) return e and e.classData and e.classData.combat    end) end
     if cs.nonCombat then CB_BuildColumnGroups(rightCol, cs.nonCombat, "nc", slot, tag, 1,            classRegistry, function(e) return e and e.classData and e.classData.nonCombat end) end
@@ -1342,6 +1366,8 @@ local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry
     leftCol.paddingRight  = parent.paddingRight
     leftCol.paddingTop    = parent.paddingTop
     leftCol.paddingBottom = parent.paddingBottom
+    leftCol._paddingRole  = parent._paddingRole or "panel"
+    NS.CB_RegisterStampable(leftCol)
 
     local rightCol = CreateFrame("Frame", nil, parent)
     rightCol:SetPoint("TOPLEFT",     parent, "TOP",         NS.COLUMN_GAP,  0)
@@ -1350,6 +1376,8 @@ local function CB_BuildTwoColumnContent(parent, groups, cmd, slot, tag, registry
     rightCol.paddingRight  = parent.paddingRight
     rightCol.paddingTop    = parent.paddingTop
     rightCol.paddingBottom = parent.paddingBottom
+    rightCol._paddingRole  = parent._paddingRole or "panel"
+    NS.CB_RegisterStampable(rightCol)
 
     CB_BuildColumnGroups(leftCol,  leftGroups,  cmd, slot, tag, 1, registry, getSource)
     CB_BuildColumnGroups(rightCol, rightGroups, cmd, slot, tag, 1, registry, getSource)
@@ -1397,6 +1425,8 @@ local function CB_BuildBotContent(container, slot, class, tag)
     commandsContent.paddingRight  = ctrl.paddingRight
     commandsContent.paddingTop    = ctrl.paddingTop
     commandsContent.paddingBottom = ctrl.paddingBottom
+    commandsContent._paddingRole  = ctrl._paddingRole or "panel"  -- re-stamped live on layout change
+    NS.CB_RegisterStampable(commandsContent)
 
     local combatContent = CreateFrame("Frame", nil, container)
     combatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -1406,6 +1436,8 @@ local function CB_BuildBotContent(container, slot, class, tag)
     combatContent.paddingRight  = ctrl.paddingRight
     combatContent.paddingTop    = ctrl.paddingTop
     combatContent.paddingBottom = ctrl.paddingBottom
+    combatContent._paddingRole  = ctrl._paddingRole or "panel"
+    NS.CB_RegisterStampable(combatContent)
 
     local nonCombatContent = CreateFrame("Frame", nil, container)
     nonCombatContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -1415,6 +1447,8 @@ local function CB_BuildBotContent(container, slot, class, tag)
     nonCombatContent.paddingRight  = ctrl.paddingRight
     nonCombatContent.paddingTop    = ctrl.paddingTop
     nonCombatContent.paddingBottom = ctrl.paddingBottom
+    nonCombatContent._paddingRole  = ctrl._paddingRole or "panel"
+    NS.CB_RegisterStampable(nonCombatContent)
 
     local classContent = CreateFrame("Frame", nil, container)
     classContent:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -1424,6 +1458,8 @@ local function CB_BuildBotContent(container, slot, class, tag)
     classContent.paddingRight  = ctrl.paddingRight
     classContent.paddingTop    = ctrl.paddingTop
     classContent.paddingBottom = ctrl.paddingBottom
+    classContent._paddingRole  = ctrl._paddingRole or "panel"
+    NS.CB_RegisterStampable(classContent)
 
     local innerTabBtns = {}
     local function selectInnerTab(idx)
@@ -1448,7 +1484,10 @@ local function CB_BuildBotContent(container, slot, class, tag)
         local itab = NS.CB_CreateTab(innerTabBar, "CleanBotInnerTab" .. tag .. "_" .. j,
                                      lbl, function() selectInnerTab(jj) end)
         if j == 1 then
-            itab:SetPoint("LEFT", innerTabBar, "LEFT", (ctrl.paddingLeft or 0) + (itab.marginLeft or 0), 0)
+            NS.CB_Anchor(itab, function()
+                itab:ClearAllPoints()
+                itab:SetPoint("LEFT", innerTabBar, "LEFT", (ctrl.paddingLeft or 0) + (itab.marginLeft or 0), 0)
+            end)
         else
             NS.CB_AnchorAhead(itab, innerTabBtns[j - 1])
         end
@@ -2073,31 +2112,31 @@ NS.CB_SyncRegistry = function(frames, entry, groupCtx)
 end
 
 -- ============================================================
--- NS.CB_UpdateTabData — refreshes all UI elements for one tab
--- from CleanBot_PartyBots[key] without touching layout.
--- Call after any code that modifies a bot's combat/nonCombat data.
+-- NS.CB_UpdateTabData — announces that a bot's cached data changed.
+-- Emit-only: it just fires BOT_STATE_CHANGED. The UI regions that care
+-- (this tab's registry, the Commands controls, the Group aggregate)
+-- subscribe and re-read CleanBot_PartyBots[key] for themselves.
+-- Call after any code that modifies a bot's combat/nonCombat/formation/loot data.
 -- ============================================================
----@param key string  Bot name-key whose bound slot should refresh its displayed data.
-NS.CB_UpdateTabData = function(key)
+---@param key     string  Bot name-key whose data changed.
+---@param changed table?  Optional hint of which fields changed (e.g. { formation = true }); subscribers may ignore it and re-read everything.
+NS.CB_UpdateTabData = function(key, changed)
+    if not CleanBot_PartyBots[key] then return end
+    NS.CB_Emit(NS.EV.BOT_STATE_CHANGED, key, changed)
+end
+
+-- Individual-tab reaction: repaint the bound slot's star + strategy registry from live data.
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function(key)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
-
     if NS.botStarUpdaters[key] then NS.botStarUpdaters[key]() end
-
-    -- Group hook BEFORE the botFrames guard: a member that isn't bound to an
-    -- Individual slot must still refresh the Group tab's aggregate view.
-    if NS.CB_OnMemberDataChanged then NS.CB_OnMemberDataChanged(key) end
-
-    -- Repaint the Commands-tab controls (e.g. the Passive checkbox reads entry.combat.passive,
-    -- which a co? reply just updated). Also before the guard so the Group host's aggregate
-    -- reflects members not bound to an Individual slot.
-    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
-
     local frames = NS.botFrames[key]
-    if not frames then return end
+    if frames then NS.CB_SyncRegistry(frames, entry, nil) end
+end)
 
-    NS.CB_SyncRegistry(frames, entry, nil)
-end
+-- Commands-tab reaction: the formation dropdown / passive checkbox read live entry fields
+-- (e.g. entry.combat.passive a co? reply just updated). Repaint all command controls.
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function() NS.CB_RefreshCommands() end)
 
 -- ============================================================
 -- NS.CB_SyncTalentSpec — sets the talent-spec dropdown from the bot's REAL

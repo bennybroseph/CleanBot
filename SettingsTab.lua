@@ -351,9 +351,7 @@ NS.CleanBot_BuildSettingsTab = function()
         end
         syncPendingToUI()
     end)
-    defaultsBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        (panel.paddingLeft   or 0) + (defaultsBtn.marginLeft   or 0),
-        (panel.paddingBottom or 0) + (defaultsBtn.marginBottom or 0))
+    NS.CB_AnchorWall(defaultsBtn, panel, "BOTTOMLEFT")
 
     local cancelBtn = NS.CB_CreateButton(panel, "CleanBotCancelSettings", "Cancel", 80, 22, function()
         pendingScale        = NS.scale
@@ -394,29 +392,21 @@ NS.CleanBot_BuildSettingsTab = function()
         end
         syncPendingToUI()
     end)
-    cancelBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -((panel.paddingRight  or 0) + (cancelBtn.marginRight  or 0)),
-        (panel.paddingBottom   or 0) + (cancelBtn.marginBottom or 0))
+    NS.CB_AnchorWall(cancelBtn, panel, "BOTTOMRIGHT")
 
     local applyBtn
     applyBtn = NS.CB_CreateButton(panel, "CleanBotApplySettings", "Apply", 80, 22, function()
-        -- Scale
-        NS.scale = pendingScale
-        NS.CB_RefreshScale(NS.scale)
-        CleanBot_SavedVars.scale = NS.scale
-
-        -- Transparency (backdrop alpha only — does not cascade to children)
+        -- Set NS values + persist, then emit once (CB_EmitDisplaySettings) so the theme/layout
+        -- subscribers re-apply. No refresher is called directly here.
+        NS.scale       = pendingScale
         NS.transparency = pendingTransparency
-        NS.CB_RefreshTransparency(NS.transparency)
-        CleanBot_SavedVars.transparency = NS.transparency
-
-        -- Accent Color (border color on all skinned frames, ElvUI and non-ElvUI)
         NS.accentColor.r = pendingAccentR
         NS.accentColor.g = pendingAccentG
         NS.accentColor.b = pendingAccentB
         NS.accentColor.a = pendingAccentA
-        NS.CB_RefreshAccentColor(pendingAccentR, pendingAccentG, pendingAccentB, pendingAccentA)
-        CleanBot_SavedVars.accentColor = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
+        CleanBot_SavedVars.scale        = NS.scale
+        CleanBot_SavedVars.transparency = NS.transparency
+        CleanBot_SavedVars.accentColor  = { r = pendingAccentR, g = pendingAccentG, b = pendingAccentB, a = pendingAccentA }
 
         -- Margins
         if type(CleanBot_SavedVars.margins) ~= "table" then CleanBot_SavedVars.margins = {} end
@@ -441,8 +431,11 @@ NS.CleanBot_BuildSettingsTab = function()
         if sampleLayoutFrame and sampleLayoutFrame:IsShown() then
             buildSampleContent(sampleLayoutFrame._panel)
         end
+        -- One emit applies scale/transparency/accent live via their subscribers, and (with the
+        -- layout flag) re-flows the UI for margin/padding changes via the Layout subscriber.
+        NS.CB_EmitDisplaySettings(true)
         applyBtn:Disable()
-        NS.CB_Print("Settings saved. Reload the UI to apply layout changes.")
+        NS.CB_Print("Settings applied.")
     end)
     applyBtn:SetPoint("RIGHT", cancelBtn, "LEFT",
         -((applyBtn.marginRight or 0) + (cancelBtn.marginLeft or 0)), 0)
@@ -504,7 +497,10 @@ NS.CleanBot_BuildSettingsTab = function()
     local themeTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsThemeTab", "Theme",
         function() selectSubTab(1) end)
     themeTab:SetWidth(NS.TAB_WIDTH)
-    themeTab:SetPoint("LEFT", subTabBar, "LEFT", (panel.paddingLeft or 0) + (themeTab.marginLeft or 0), 0)
+    NS.CB_Anchor(themeTab, function()
+        themeTab:ClearAllPoints()
+        themeTab:SetPoint("LEFT", subTabBar, "LEFT", (panel.paddingLeft or 0) + (themeTab.marginLeft or 0), 0)
+    end)
     subTabs[1] = themeTab
 
     local layoutTab = NS.CB_CreateTab(subTabBar, "CleanBotSettingsLayoutTab", "Layout",
@@ -548,9 +544,7 @@ NS.CleanBot_BuildSettingsTab = function()
     local scaleSlider = NS.CB_CreateSlider(themeChild, "CleanBotScaleSlider", "Scale",
         50, 150, pendingScale, "50%", "150%", function(v) pendingScale = v; if syncApplyBtn then syncApplyBtn() end end)
     scaleSlider:SetWidth(SLIDER_W)
-    scaleSlider:SetPoint("TOPLEFT", themeChild, "TOPLEFT",
-        (themeChild.paddingLeft or 0) + (scaleSlider.marginLeft or 0),
-       -((themeChild.paddingTop or 0) + (scaleSlider.marginTop  or 0)))
+    NS.CB_AnchorWall(scaleSlider, themeChild, "TOPLEFT")
 
     -- ── Transparency ───────────────────────────────────────────
     local transSlider = NS.CB_CreateSlider(themeChild, "CleanBotTransSlider", "Transparency",
@@ -575,9 +569,7 @@ NS.CleanBot_BuildSettingsTab = function()
     -- ── Show Sample Layout ─────────────────────────────────────
     local sampleBtn = NS.CB_CreateButton(layoutChild, "CleanBotShowSampleLayout",
         "Show Sample Layout", 140, 22, showSampleLayout)
-    sampleBtn:SetPoint("TOPLEFT", layoutChild, "TOPLEFT",
-        (layoutChild.paddingLeft or 0) + (sampleBtn.marginLeft or 0),
-       -((layoutChild.paddingTop or 0) + (sampleBtn.marginTop  or 0)))
+    NS.CB_AnchorWall(sampleBtn, layoutChild, "TOPLEFT")
 
     local COL_TYPE_W = 80
     local COL_GAP    = 10
@@ -608,6 +600,12 @@ NS.CleanBot_BuildSettingsTab = function()
     -- Scroll child is a borderless void — full width, no content padding.
     -- Subtract the panel padding on both sides (scroll frame inset) plus 20px scroll bar.
     local SEP_W = NS.EXPANDED_WIDTH - (panel.paddingLeft or 0) - (panel.paddingRight or 0) - 20
+    -- Separators span the content width; recompute + re-apply on a live padding change.
+    local layoutSeps = {}
+    NS.CB_RegisterRelayout(function()
+        local w = NS.EXPANDED_WIDTH - (panel.paddingLeft or 0) - (panel.paddingRight or 0) - 20
+        for _, s in ipairs(layoutSeps) do s:SetWidth(w) end
+    end)
 
     -- ── Padding ────────────────────────────────────────────────
     local paddingHeader = NS.CB_CreateHeader(layoutChild, "Padding")
@@ -616,6 +614,7 @@ NS.CleanBot_BuildSettingsTab = function()
     local paddingSep = NS.CB_CreateSeparator(layoutChild)
     NS.CB_AnchorBelow(paddingSep, paddingHeader)
     paddingSep:SetWidth(SEP_W)
+    layoutSeps[#layoutSeps + 1] = paddingSep
 
     -- Scroll child is a borderless void — content starts at its left edge (no padding offset).
     local COL_BASE = layoutChild.paddingLeft or 0
@@ -672,6 +671,7 @@ NS.CleanBot_BuildSettingsTab = function()
             local sep = NS.CB_CreateSeparator(layoutChild)
             NS.CB_AnchorBelow(sep, rowB)
             sep:SetWidth(SEP_W)
+            layoutSeps[#layoutSeps + 1] = sep
             prevRow = sep
         end
     end
@@ -684,6 +684,7 @@ NS.CleanBot_BuildSettingsTab = function()
     local marginsSep = NS.CB_CreateSeparator(layoutChild)
     NS.CB_AnchorBelow(marginsSep, marginsHeader)
     marginsSep:SetWidth(SEP_W)
+    layoutSeps[#layoutSeps + 1] = marginsSep
 
     prevRow = marginsSep
     for i, mtype in ipairs(MARGIN_TYPES) do
@@ -739,15 +740,14 @@ NS.CleanBot_BuildSettingsTab = function()
             local sep = NS.CB_CreateSeparator(layoutChild)
             NS.CB_AnchorBelow(sep, rowB)
             sep:SetWidth(SEP_W)
+            layoutSeps[#layoutSeps + 1] = sep
             prevRow = sep
         end
     end
 
     -- ── Other tab: Bot Emotes ──────────────────────────────────
     local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behavior")
-    botEmotesHeader:SetPoint("TOPLEFT", otherPanel, "TOPLEFT",
-        (otherPanel.paddingLeft or 0) + (botEmotesHeader.marginLeft or 0),
-        -((otherPanel.paddingTop or 0) + (botEmotesHeader.marginTop  or 0)))
+    NS.CB_AnchorWall(botEmotesHeader, otherPanel, "TOPLEFT")
 
     local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
     local botEmotesCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotBotEmotesCB", "Enable Bot Emotes", EMOTE_TOOLTIP)
@@ -878,9 +878,7 @@ NS.CleanBot_BuildSettingsTab = function()
     end
 
     local bridgeHeader = NS.CB_CreateHeader(debugPanel, "Bridge Override")
-    bridgeHeader:SetPoint("TOPLEFT", debugPanel, "TOPLEFT",
-        (debugPanel.paddingLeft or 0) + (bridgeHeader.marginLeft or 0),
-        -((debugPanel.paddingTop or 0) + (bridgeHeader.marginTop  or 0)))
+    NS.CB_AnchorWall(bridgeHeader, debugPanel, "TOPLEFT")
 
     -- Wide enough for the longest collapsed label, "Auto (unknown)".
     local bridgeDD = NS.CB_CreateDropdown(debugPanel, "CleanBotDebugBridgeDD", 170)
@@ -931,6 +929,10 @@ NS.CleanBot_BuildSettingsTab = function()
         function() if NS.CB_ToggleIconBrowser then NS.CB_ToggleIconBrowser() end end)
     NS.CB_AnchorBelow(iconBrowserBtn, knownBotsBtn)
 
+    local layoutTestCB = CB_MakeDebugCheck("CleanBotDebugLayoutTestCB", "Layout Test Buttons",
+        "Show the centered Randomize/Reset Layout buttons for spam-testing live margin/padding re-flow.",
+        iconBrowserBtn, function(v) if NS.CB_SetLayoutTestButtons then NS.CB_SetLayoutTestButtons(v) end end)
+
     -- Syncs all Debug-tab controls from NS state. Called at build and by every
     -- setter in Debug.lua (so slash-command changes update an open panel).
     NS.CB_RefreshDebugTab = function()
@@ -944,6 +946,7 @@ NS.CleanBot_BuildSettingsTab = function()
         simulateCB:SetChecked(NS.debugSimulate and true or false)
         verifyCB:SetChecked(NS.debugVerify and true or false)
         traceCB:SetChecked(NS.debugInspectTrace and true or false)
+        layoutTestCB:SetChecked(NS.layoutTestButtons and true or false)
     end
     NS.CB_RefreshDebugTab()
 

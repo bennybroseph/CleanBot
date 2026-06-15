@@ -103,6 +103,42 @@ returns the live list via `GetSupportedStrategies()` if dynamic discovery is eve
 The full strategy reference — what each token does, per-class coverage, and known
 conflicts — lives in [playerbot-strategies.md](playerbot-strategies.md).
 
+### Command targeting — `@` qualifiers (`src/Bot/Cmd/ChatFilter.cpp`)
+
+A command may lead with one or more `@…` qualifiers that restrict **which** of your bots react,
+e.g. `@tank co +passive`, `@melee @warrior s gray`. Source: `CompositeChatFilter` runs each filter
+in turn — a filter returns `""` (this bot ignores the command) or strips its leading `@token ` and
+passes the rest on. So qualifiers **chain (logical AND)**, and they apply to **whispers and
+party/raid chat alike** (the filter runs in `PlayerbotAI::HandleCommand` for every channel).
+
+The role checks `IsTank`/`IsHeal`/`IsDps` default to `bySpec=false`, which reads
+`ContainsStrategy(STRATEGY_TYPE_*)` — the bot's **active strategy**, not its talent spec.
+
+| Qualifier | Matches bots where… | Filter class |
+|-----------|---------------------|--------------|
+| `@tank` | tank strategy active | StrategyChatFilter |
+| `@heal` | heal strategy active | StrategyChatFilter |
+| `@dps` | not tank and not heal | StrategyChatFilter |
+| `@ranged` / `@melee` | `IsRanged` (strategy) **and** class allows ranged/melee | Strategy + CombatType |
+| `@rangeddps` / `@meleedps` | ranged/melee **and** not tank/heal | StrategyChatFilter |
+| `@<class>` | `@dk @druid @hunter @mage @paladin @priest @rogue @shaman @warlock @warrior` | ClassChatFilter |
+| `@<n>` / `@<from>-<to>` | bot level == n / within range | LevelChatFilter |
+| `@group<list>` | bot's raid subgroup ∈ list (`@group1`, `@group1,3`, `@group1-2`) | SubGroupChatFilter |
+| `@<spec>` | `@arms @fury @frost @bear @cat @bdkt @bdkd …` (spec-tab, druid/DK by role) | SpecChatFilter |
+| `@star`…`@skull` | bot **is** that raid-target-icon, or its current target is | RtiChatFilter |
+| `@aura<id>` / `@noaura<id>` | bot has / lacks that aura | AuraChatFilter |
+| `@aggroby<id\|"name">` | bot is currently aggroed by that creature | AggroByChatFilter |
+
+CombatType's class rule (used for `@melee`/`@ranged`): war/pal/rogue/dk = melee; hunter/priest/
+mage/warlock = ranged; druid = melee if tank else ranged; shaman = ranged if heal else melee.
+
+**CleanBot overhearing** (`Overhear.lua`) mirrors the families it can evaluate from cached state +
+live unit info — **role, class, melee/ranged, level, subgroup**. The server-only families
+(`@<spec>`, `@aura`/`@noaura`, `@aggroby`, RTI `@star…@skull`) and any unrecognized `@token` cause
+the overheard command to be **skipped** (not applied to anyone) rather than mis-targeted; the next
+authoritative sync reconciles. `@melee`/`@ranged` use the deterministic class+role rule above as a
+close approximation of the server's strategy-based `IsRanged`.
+
 ### talents (`ChangeTalentsAction.cpp`)
 Usage string from source:
 `talents switch <1/2>, talents autopick, talents spec list, talents spec <specName>, talents apply <link>`

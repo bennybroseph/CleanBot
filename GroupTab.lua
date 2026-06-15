@@ -848,11 +848,11 @@ local function CB_UpdateMemberRoleIcons(key)
     if dirty then memberList:RefreshDisplay() end
 end
 
--- Hooked from CB_UpdateTabData (Individual.lua): when a member of the
--- selected group gets fresh data (STATE~ packet, whisper reconcile), the
--- aggregate view refreshes too — even for members not bound to a slot.
+-- Group-tab reaction to BOT_STATE_CHANGED: when a member of the selected group gets fresh
+-- data (STATE~ packet, whisper reconcile, overheard command), the aggregate view refreshes
+-- too — even for members not bound to an Individual slot.
 ---@param key string  Bot name-key whose entry just changed.
-NS.CB_OnMemberDataChanged = function(key)
+NS.CB_On(NS.EV.BOT_STATE_CHANGED, function(key)
     if not NS.groupPanel then return end
 
     -- Role-group presence depends on every bot's role state, not just the
@@ -872,7 +872,7 @@ NS.CB_OnMemberDataChanged = function(key)
         if #cs.members > 0 then NS.CB_RefreshGroupAggregate(cs) end
     end
     CB_SyncGroupViews()
-end
+end)
 
 -- Hooked from the fan-out write helpers (Individual.lua) after a group-slot
 -- control sends: folds the optimistic per-member writes back into the
@@ -907,8 +907,8 @@ NS.CleanBot_BuildGroupTab = function()
     -- extra BOT_BAR_H inset). Keep the normal right padding so the strategy
     -- panel isn't flush against the frame border.
     local content = CreateFrame("Frame", "CleanBotGroupContent", panel)
-    content:SetPoint("TOPLEFT",     panel, "TOPLEFT",      panel.paddingLeft,  -panel.paddingTop)
-    content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -panel.paddingRight,  panel.paddingBottom)
+    NS.CB_AnchorWall(content, panel, "TOPLEFT")
+    NS.CB_AnchorWall(content, panel, "BOTTOMRIGHT")
 
     -- Static height (frame height never changes); GetHeight is 0 until first
     -- layout, so fall back to the same arithmetic Individual.lua uses.
@@ -1028,8 +1028,11 @@ NS.CleanBot_BuildGroupTab = function()
     -- appends. Two stacked lines pinned to the panel's bottom-left; the content
     -- frames reserve GROUP_LEGEND_H above it so strategies never overlap them.
     local legendBottom = groupContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    legendBottom:SetPoint("BOTTOMLEFT", groupContainer, "BOTTOMLEFT",
-        (groupCtrl.paddingLeft or 0), (groupCtrl.paddingBottom or 0))
+    NS.CB_Anchor(legendBottom, function()
+        legendBottom:ClearAllPoints()
+        legendBottom:SetPoint("BOTTOMLEFT", groupContainer, "BOTTOMLEFT",
+            (groupCtrl.paddingLeft or 0), (groupCtrl.paddingBottom or 0))
+    end)
     legendBottom:SetText("? - Strategy value is different for some characters")
     local legendTop = groupContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     legendTop:SetPoint("BOTTOMLEFT", legendBottom, "TOPLEFT", 0, 2)
@@ -1049,6 +1052,8 @@ NS.CleanBot_BuildGroupTab = function()
     commandsContent.paddingRight  = groupCtrl.paddingRight
     commandsContent.paddingTop    = groupCtrl.paddingTop
     commandsContent.paddingBottom = groupCtrl.paddingBottom
+    commandsContent._paddingRole  = groupCtrl._paddingRole or "panel"  -- re-stamped live on layout change
+    NS.CB_RegisterStampable(commandsContent)
 
     combatContent = CreateFrame("Frame", nil, groupContainer)
     combatContent:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -1058,6 +1063,8 @@ NS.CleanBot_BuildGroupTab = function()
     combatContent.paddingRight  = groupCtrl.paddingRight
     combatContent.paddingTop    = groupCtrl.paddingTop
     combatContent.paddingBottom = groupCtrl.paddingBottom
+    combatContent._paddingRole  = groupCtrl._paddingRole or "panel"
+    NS.CB_RegisterStampable(combatContent)
 
     nonCombatContent = CreateFrame("Frame", nil, groupContainer)
     nonCombatContent:SetPoint("TOPLEFT",     groupContainer, "TOPLEFT",     0, -NS.BOT_BAR_H)
@@ -1067,12 +1074,17 @@ NS.CleanBot_BuildGroupTab = function()
     nonCombatContent.paddingRight  = groupCtrl.paddingRight
     nonCombatContent.paddingTop    = groupCtrl.paddingTop
     nonCombatContent.paddingBottom = groupCtrl.paddingBottom
+    nonCombatContent._paddingRole  = groupCtrl._paddingRole or "panel"
+    NS.CB_RegisterStampable(nonCombatContent)
 
     -- Commands tab is first; Combat then anchors ahead of it.
     commandsTab = NS.CB_CreateTab(innerTabBar, "CleanBotGroupCommandsTab", "Commands",
                                   function() CB_SelectGroupInnerTab("commands") end)
-    commandsTab:SetPoint("LEFT", innerTabBar, "LEFT",
-        (groupCtrl.paddingLeft or 0) + (commandsTab.marginLeft or 0), 0)
+    NS.CB_Anchor(commandsTab, function()
+        commandsTab:ClearAllPoints()
+        commandsTab:SetPoint("LEFT", innerTabBar, "LEFT",
+            (groupCtrl.paddingLeft or 0) + (commandsTab.marginLeft or 0), 0)
+    end)
 
     for j, lbl in ipairs({ "Combat", "Non-Combat" }) do
         local jj = j
@@ -1098,9 +1110,11 @@ NS.CleanBot_BuildGroupTab = function()
     -- the reserved top row; class content frames are pushed down by CLASS_DD_ROW
     -- when it's shown. x pulls left to offset the template's built-in inset.
     classDropdown = NS.CB_CreateDropdown(groupContainer, "CleanBotGroupClassDropdown", 160)
-    classDropdown:ClearAllPoints()
-    classDropdown:SetPoint("TOPLEFT", groupContainer, "TOPLEFT",
-        (groupCtrl.paddingLeft or 0) - 16, -(NS.BOT_BAR_H + 2))
+    NS.CB_Anchor(classDropdown, function()
+        classDropdown:ClearAllPoints()
+        classDropdown:SetPoint("TOPLEFT", groupContainer, "TOPLEFT",
+            (groupCtrl.paddingLeft or 0) - 16, -(NS.BOT_BAR_H + 2))
+    end)
     classDropdown:Hide()
 
     -- The generic content is built exactly once against the mutable group

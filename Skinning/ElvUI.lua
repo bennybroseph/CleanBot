@@ -139,11 +139,14 @@ end
 NS.CB_CreatePanel = function(parent, name, nestLevel, paddingRole)
     local frame = CreateFrame("Frame", name, parent)
     NS.CB_ApplyFrameSkin(frame, nestLevel or 1)
-    local pad = NS.PADDING[paddingRole] or NS.PADDING.panel
+    local role = (paddingRole and NS.PADDING[paddingRole]) and paddingRole or "panel"
+    local pad  = NS.PADDING[role]
     frame.paddingTop    = pad.top
     frame.paddingBottom = pad.bottom
     frame.paddingLeft   = pad.left
     frame.paddingRight  = pad.right
+    frame._paddingRole  = role           -- re-stamped from NS.PADDING on a live layout change
+    NS.CB_RegisterStampable(frame)
     return frame
 end
 
@@ -155,6 +158,27 @@ NS.CB_RefreshScale = function(s)
     for frame, _ in pairs(NS.CB_rootFrames) do
         frame:SetScale(scale)
     end
+end
+
+-- The three theme refreshers are reactive: they re-apply to whole frame registries, so they
+-- subscribe once to their display-setting event. Producers (Settings Apply, login restore) just
+-- emit via CB_EmitDisplaySettings; nothing calls the refreshers directly anymore.
+NS.CB_On(NS.EV.SCALE_CHANGED,        NS.CB_RefreshScale)
+NS.CB_On(NS.EV.TRANSPARENCY_CHANGED, NS.CB_RefreshTransparency)
+NS.CB_On(NS.EV.ACCENT_CHANGED,       NS.CB_RefreshAccentColor)
+
+-- Emits all four display-setting events from the current NS.* values. The single apply path
+-- shared by Settings Apply and the PLAYER_LOGIN restore. LAYOUT_CHANGED drives the live re-layout
+-- (re-stamp + replay) subscribed in Skinning/Layout.lua.
+--- @param includeLayout boolean?  Also emit LAYOUT_CHANGED (the live re-flow). Settings Apply passes
+---   true; the login restore omits it — the freshly-built UI is already laid out, so a replay there
+---   is redundant (and only risks clobbering build-time positions).
+NS.CB_EmitDisplaySettings = function(includeLayout)
+    local c = NS.accentColor or {}
+    NS.CB_Emit(NS.EV.SCALE_CHANGED,        NS.scale)
+    NS.CB_Emit(NS.EV.TRANSPARENCY_CHANGED, NS.transparency)
+    NS.CB_Emit(NS.EV.ACCENT_CHANGED,       c.r, c.g, c.b, c.a)
+    if includeLayout then NS.CB_Emit(NS.EV.LAYOUT_CHANGED) end
 end
 
 -- Applies the title bar ornament and creates the title FontString for an outer frame.
@@ -465,6 +489,7 @@ NS.CB_CreateInnerFrame = function(parent, name, paddingRole, marginType, widthPc
     child.marginBottom = mBottom
     child.marginLeft   = mLeft
     child.marginRight  = mRight
+    if marginType then child._marginType = marginType; NS.CB_RegisterStampable(child) end
 
     local wPct = widthPct  or 1
     local hPct = heightPct or 1
@@ -512,14 +537,14 @@ end
 ---@return table         scrollFrame  The created ScrollFrame.
 ---@return table         scrollChild  The scroll child Frame.
 NS.CB_CreateScrollFrame = function(parent, name)
-    local pTop    = parent.paddingTop    or 0
-    local pBottom = parent.paddingBottom or 0
-    local pLeft   = parent.paddingLeft   or 0
-    local pRight  = parent.paddingRight  or 0
-
     local sf = CreateFrame("ScrollFrame", name, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT",     parent, "TOPLEFT",      pLeft,          -pTop)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -(pRight + 20),   pBottom)
+    -- Inset by the parent's padding (+20 on the right for the scroll bar). Recorded so a live padding
+    -- change re-insets the scroll region; the child width self-heals via the OnSizeChanged hook below.
+    NS.CB_Anchor(sf, function()
+        sf:ClearAllPoints()
+        sf:SetPoint("TOPLEFT",     parent, "TOPLEFT",      (parent.paddingLeft  or 0),        -(parent.paddingTop or 0))
+        sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -((parent.paddingRight or 0) + 20),  (parent.paddingBottom or 0))
+    end)
     sf:EnableMouseWheel(true)
     sf:SetScript("OnMouseWheel", function(self, delta)
         local cur = self:GetVerticalScroll()

@@ -323,6 +323,23 @@ NS.CB_ResizeFrame = function(width)
     CleanBotFrame:SetWidth(width)
 end
 
+-- Target width for the CURRENT top tab: Individual restores the saved expand state; Group is always
+-- expanded while bots are present (no collapse affordance) and follows the saved state only in the
+-- empty-roster case; other tabs use collapsed width. Returns nil before COLLAPSED_WIDTH is computed.
+---@return number?  Target frame width, or nil if geometry isn't ready yet.
+NS.CB_CurrentTargetWidth = function()
+    if not NS.COLLAPSED_WIDTH then return nil end
+    local savedW = NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH
+    local index  = NS.activeTopTabIndex
+    if index == 2 then
+        return savedW
+    elseif index == 3 then
+        local haveBots = NS.desiredBots and #NS.desiredBots > 0
+        return haveBots and NS.EXPANDED_WIDTH or savedW
+    end
+    return NS.COLLAPSED_WIDTH
+end
+
 --- Selects the top-level tab at `index`, showing its panel and deactivating the rest.
 ---@param index number  1-based index of the tab to activate.
 NS.CleanBot_SelectTopTab = function(index)
@@ -342,19 +359,8 @@ NS.CleanBot_SelectTopTab = function(index)
     -- Resize the frame: Individual restores the saved expand state; Group is always
     -- expanded while bots are present (no collapse affordance) and follows the saved
     -- state only in the empty roster case; other tabs use collapsed width.
-    if NS.COLLAPSED_WIDTH then
-        local savedW = NS.individualExpanded and NS.EXPANDED_WIDTH or NS.COLLAPSED_WIDTH
-        local targetW
-        if index == 2 then
-            targetW = savedW
-        elseif index == 3 then
-            local haveBots = NS.desiredBots and #NS.desiredBots > 0
-            targetW = haveBots and NS.EXPANDED_WIDTH or savedW
-        else
-            targetW = NS.COLLAPSED_WIDTH
-        end
-        NS.CB_ResizeFrame(targetW)
-    end
+    local targetW = NS.CB_CurrentTargetWidth()
+    if targetW then NS.CB_ResizeFrame(targetW) end
 
     if index == 2 then
         for i, info in ipairs(NS.tabList or {}) do
@@ -391,6 +397,8 @@ NS.CB_BuildFrames = function()
     CleanBotFrame.paddingBottom = framePad.bottom
     CleanBotFrame.paddingLeft   = framePad.left
     CleanBotFrame.paddingRight  = framePad.right
+    CleanBotFrame._paddingRole  = "frame"        -- re-stamped from NS.PADDING.frame on layout change
+    NS.CB_RegisterStampable(CleanBotFrame)
 
     -- ── Top tab bar ────────────────────────────────────────────
     NS.topTabBar = CreateFrame("Frame", "CleanBotTopTabBar", CleanBotFrame)
@@ -408,7 +416,10 @@ NS.CB_BuildFrames = function()
         if prevTopTab then
             NS.CB_AnchorAhead(tab, prevTopTab)
         else
-            tab:SetPoint("LEFT", NS.topTabBar, "LEFT", CleanBotFrame.paddingLeft + (tab.marginLeft or 0), 0)
+            NS.CB_Anchor(tab, function()
+                tab:ClearAllPoints()
+                tab:SetPoint("LEFT", NS.topTabBar, "LEFT", CleanBotFrame.paddingLeft + (tab.marginLeft or 0), 0)
+            end)
         end
         prevTopTab  = tab
         NS.topTabs[i] = tab
@@ -416,8 +427,11 @@ NS.CB_BuildFrames = function()
 
     -- ── Content frame ──────────────────────────────────────────
     NS.contentFrame = CreateFrame("Frame", "CleanBotContentFrame", CleanBotFrame)
-    NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      CleanBotFrame.paddingLeft,   -(NS.TITLE_H + NS.TOP_BAR_H))
-    NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -CleanBotFrame.paddingRight,    CleanBotFrame.paddingBottom)
+    NS.CB_Anchor(NS.contentFrame, function()
+        NS.contentFrame:ClearAllPoints()
+        NS.contentFrame:SetPoint("TOPLEFT",     CleanBotFrame, "TOPLEFT",      CleanBotFrame.paddingLeft,   -(NS.TITLE_H + NS.TOP_BAR_H))
+        NS.contentFrame:SetPoint("BOTTOMRIGHT", CleanBotFrame, "BOTTOMRIGHT", -CleanBotFrame.paddingRight,    CleanBotFrame.paddingBottom)
+    end)
     NS.CB_ApplyFrameSkin(NS.contentFrame, 1)
 
     -- ── Individual panel ───────────────────────────────────────
@@ -575,10 +589,10 @@ initFrame:SetScript("OnEvent", function(self, event)
         if NS.individualExpandBtn then
             NS.individualExpandBtn:SetText(NS.individualExpanded and "<" or ">")
         end
-        NS.CB_RefreshScale(NS.scale)
-        NS.CB_RefreshTransparency(NS.transparency)
-        -- Accent color is baked in during CB_ApplyFrameSkin calls inside
-        -- NS.CB_BuildFrames, which read NS.accentColor at build time.
+        -- One apply path shared with Settings Apply: emit the display-setting events so the
+        -- theme subscribers re-apply scale/transparency/accent. (Accent is also baked in during
+        -- the CB_ApplyFrameSkin calls inside CB_BuildFrames; emitting it again is harmless.)
+        NS.CB_EmitDisplaySettings()
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

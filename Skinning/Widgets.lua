@@ -41,6 +41,7 @@ NS.CB_CreateLabel = function(parent, text, fontObj)
     lbl.marginBottom = NS.MARGIN.label.bottom
     lbl.marginLeft   = NS.MARGIN.label.left
     lbl.marginRight  = NS.MARGIN.label.right
+    lbl._marginType  = "label"; NS.CB_RegisterStampable(lbl)
     return lbl
 end
 
@@ -58,6 +59,7 @@ NS.CB_CreateHeader = function(parent, text, fontObj)
     hdr.marginBottom = NS.MARGIN.header.bottom
     hdr.marginLeft   = NS.MARGIN.header.left
     hdr.marginRight  = NS.MARGIN.header.right
+    hdr._marginType  = "header"; NS.CB_RegisterStampable(hdr)
     return hdr
 end
 
@@ -243,6 +245,7 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
     toggleBtn.marginBottom = NS.MARGIN.label.bottom
     toggleBtn.marginLeft   = NS.MARGIN.label.left
     toggleBtn.marginRight  = NS.MARGIN.label.right
+    toggleBtn._marginType  = "label"; NS.CB_RegisterStampable(toggleBtn)
 
     -- Visual background frame. Stays at MEDIUM strata (default) so that child
     -- content widgets inherit MEDIUM and remain mouse-interactive. WoW 3.3.5a
@@ -271,8 +274,22 @@ NS.CB_CreateSection = function(parent, key, title, nestLevel)
         self.bg:SetHeight(math.max(bgTop - lastBt + botGap, 4))
     end
 
+    -- Track for live re-flow: on a layout change the background width/position (Apply, sync) and
+    -- height (UpdateBackground, deferred — reads GetBottom) must recompute from the new spacing.
+    NS.CB_collapsibleSections = NS.CB_collapsibleSections or {}
+    NS.CB_collapsibleSections[#NS.CB_collapsibleSections + 1] = section
+
     return section
 end
+
+-- Live re-flow of every collapsible section's background (registered once). Apply recomputes width +
+-- re-pins to the toggle (sync); UpdateBackground trims height after the new layout draws (deferred).
+NS.CB_RegisterRelayout(function()
+    for _, s in ipairs(NS.CB_collapsibleSections or {}) do s:Apply() end
+end)
+NS.CB_RegisterDeferredRelayout(function()
+    for _, s in ipairs(NS.CB_collapsibleSections or {}) do s:UpdateBackground() end
+end)
 
 -- Inline-texture escape ("|T...|t") for embedding an icon inside any FontString
 -- (dropdown entries, the collapsed dropdown value, labels, tab text). The icon
@@ -663,6 +680,7 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
     container.marginBottom = NS.MARGIN.button.bottom
     container.marginLeft   = NS.MARGIN.button.left
     container.marginRight  = NS.MARGIN.button.right
+    container._marginType  = "button"; NS.CB_RegisterStampable(container)
 
     return container
 end
@@ -685,6 +703,7 @@ NS.CB_CreateButton = function(parent, name, text, w, h, onClick)
     btn.marginBottom = NS.MARGIN.button.bottom
     btn.marginLeft   = NS.MARGIN.button.left
     btn.marginRight  = NS.MARGIN.button.right
+    btn._marginType  = "button"; NS.CB_RegisterStampable(btn)
     return btn
 end
 
@@ -726,6 +745,7 @@ NS.CB_CreateIconButton = function(parent, name, iconTex, size, onClick)
     btn.marginBottom = NS.MARGIN.button.bottom
     btn.marginLeft   = NS.MARGIN.button.left
     btn.marginRight  = NS.MARGIN.button.right
+    btn._marginType  = "button"; NS.CB_RegisterStampable(btn)
     return btn
 end
 
@@ -784,6 +804,7 @@ NS.CB_CreateDropdown = function(parent, name, width)
     dd.marginBottom = NS.MARGIN.dropdown.bottom
     dd.marginLeft   = NS.MARGIN.dropdown.left
     dd.marginRight  = NS.MARGIN.dropdown.right
+    dd._marginType  = "dropdown"; NS.CB_RegisterStampable(dd)
     return dd
 end
 
@@ -798,6 +819,7 @@ NS.CB_CreateCheckBox = function(parent, name)
     cb.marginBottom = NS.MARGIN.checkbox.bottom
     cb.marginLeft   = NS.MARGIN.checkbox.left
     cb.marginRight  = NS.MARGIN.checkbox.right
+    cb._marginType  = "checkbox"; NS.CB_RegisterStampable(cb)
     return cb
 end
 
@@ -869,6 +891,7 @@ NS.CB_CreateTab = function(parent, name, text, onClick)
     tab.marginBottom = NS.MARGIN.tab.bottom
     tab.marginLeft   = NS.MARGIN.tab.left
     tab.marginRight  = NS.MARGIN.tab.right
+    tab._marginType  = "tab"; NS.CB_RegisterStampable(tab)
     tab:SetActive(false)  -- start inactive
     return tab
 end
@@ -928,6 +951,7 @@ NS.CB_CreateEditBox = function(parent, name, w, h)
     box.marginBottom = NS.MARGIN.editBox.bottom
     box.marginLeft   = NS.MARGIN.editBox.left
     box.marginRight  = NS.MARGIN.editBox.right
+    box._marginType  = "editBox"; NS.CB_RegisterStampable(box)
     return box
 end
 
@@ -1127,6 +1151,9 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     wrapper.marginBottom = NS.MARGIN.slider.bottom
     wrapper.marginLeft   = NS.MARGIN.slider.left
     wrapper.marginRight  = NS.MARGIN.slider.right
+    wrapper._marginType  = "slider"
+    if title then wrapper._marginTopType = "label" end  -- titled slider reserves label-sized top
+    NS.CB_RegisterStampable(wrapper)
     return wrapper
 end
 
@@ -1236,6 +1263,7 @@ NS.CB_CreateColorSwatch = function(parent, name, text, initR, initG, initB, onCh
     wrapper.marginBottom = NS.MARGIN.swatch.bottom
     wrapper.marginLeft   = NS.MARGIN.swatch.left
     wrapper.marginRight  = NS.MARGIN.swatch.right
+    wrapper._marginType  = "swatch"; NS.CB_RegisterStampable(wrapper)
     return wrapper
 end
 

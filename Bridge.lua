@@ -903,6 +903,23 @@ NS.CB_ScheduleReconcile = function(key, botName)
     end)
 end
 
+-- Overheard inventory/bank/equip command (Overhear.lua) → re-sync any open window for that bot.
+-- Reuses the coalesced reconcile (inventory + bank, each gated on its window being shown). For the
+-- currently-viewed bot also refresh the equipment inspect, mirroring the UNIT_INVENTORY_CHANGED path.
+NS.CB_On(NS.EV.BOT_INVENTORY_DIRTY, function(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    NS.CB_ScheduleReconcile(key, entry.name)
+    if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
+        for _, info in ipairs(NS.tabList) do
+            if info.key == key and info.unit then
+                NS.CB_QueueEquipRefresh({ { key = key, unit = info.unit } })
+                break
+            end
+        end
+    end
+end)
+
 ---@param key     string        Bot name-key (lowercased lookup key).
 ---@param botName string        Bot's display name (whisper/bridge target).
 ---@param anchor  table|string? Placement forwarded to CB_ToggleInventory ("CENTER", a frame, or nil).
@@ -1198,7 +1215,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local name  = clean:match("Formation:%s*(%a+)")
             if name then
                 entry.formation = strlower(name)
-                if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { formation = true }) end
             end
             return
         end
@@ -1211,7 +1228,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local mode  = clean:match("Loot strategy:%s*(%a+)")
             if mode then
                 entry.lootStrategy = strlower(mode)
-                if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { loot = true }) end
             end
             return
         end
