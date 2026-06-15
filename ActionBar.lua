@@ -827,6 +827,14 @@ local function CB_BuildActionBar()
             t.title, t.desc)
     end
 
+    -- Pull: tell the group's tank bots to pull YOUR current target (server-side: tank-only, needs the
+    -- pull strategy, which tank specs run by default). One-shot, like Attack.
+    local pullBtn = NS.CB_CreateIconButton(bar, "CleanBotActionPullBtn",
+        "Interface\\Icons\\Ability_Hunter_Misdirection", BTN,
+        function() NS.CB_SendGroupCommand("pull my target") end)
+    NS.CB_SetTooltip(pullBtn, "Pull",
+        "Order your tank bots to pull your current target. (Select a mob first.)")
+
     -- Passive: toggle every bot's passive state (OR-read + blanket flip — same as the
     -- Manage tab's Passive checkbox). Lit when any bot is passive.
     passiveBtn = NS.CB_CreateIconButton(bar, "CleanBotActionPassiveBtn",
@@ -872,7 +880,7 @@ local function CB_BuildActionBar()
     end)
 
     -- Lay out the buttons in flow order per the grow direction (also sizes the bar).
-    barButtons = { summonBtn, attackBtn, passiveBtn, followBtn, releaseBtn }
+    barButtons = { summonBtn, attackBtn, pullBtn, passiveBtn, followBtn, releaseBtn }
     CB_LayoutBar()
 
     -- Edit overlay: covers the bar above the buttons, mouse-enabled only in edit mode, so it

@@ -37,6 +37,9 @@ NS.CB_SendGroupCommand = function(cmd)
         NS.CB_Print("You are not in a party or raid.")
         return
     end
+    -- Hide our own party/raid echo (chat window) and its world chat bubble (gated on Hide Bot Chatter).
+    if NS.CB_TagSelfGroup then NS.CB_TagSelfGroup(cmd) end
+    if NS.CB_HideOwnBubble then NS.CB_HideOwnBubble(cmd) end
     -- The broadcast reaches every bot and each may whisper a reply (e.g. formation's
     -- "Formation: ..."). Open a reply window per managed bot so ChatFilter hides those
     -- replies — the per-bot whisper path does this automatically via CB_SendBotCommandRaw.
