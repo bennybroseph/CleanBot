@@ -47,6 +47,35 @@ NS.CB_SendGroupCommand = function(cmd)
     end
 end
 
+-- Group-wide Passive state, broadcast-style (shared by the Manage tab's Passive checkbox and the
+-- action bar's Passive toggle). Read is an OR: "any bot passive" → on, so toggling off is the
+-- easy common case. Set is a blanket flip: cache every known member's state + broadcast the toggle.
+
+--- True when ANY group member is cached as passive.
+---@return boolean
+NS.CB_GetGroupPassive = function()
+    local any = false
+    if NS.CB_ForEachGroupMember then
+        NS.CB_ForEachGroupMember(function(_, name)
+            local e = name and CleanBot_PartyBots[strlower(name)]
+            if e and e.combat and e.combat.passive == true then any = true end
+        end)
+    end
+    return any
+end
+
+--- Sets every group member passive on/off: optimistically caches the state, then broadcasts.
+---@param on boolean
+NS.CB_SetGroupPassive = function(on)
+    if NS.CB_ForEachGroupMember then
+        NS.CB_ForEachGroupMember(function(_, name)
+            local e = name and CleanBot_PartyBots[strlower(name)]
+            if e then e.combat = e.combat or {}; e.combat.passive = on end
+        end)
+    end
+    NS.CB_SendGroupCommand("co " .. (on and "+passive" or "-passive"))
+end
+
 -- Refreshes every Commands-tab control (formation dropdowns + passive checkboxes) from its
 -- host's getter. Called when a relevant reply lands, on bot/group selection, and on
 -- combat-data updates (mirrors how the bot-frame registries are repainted on data updates).

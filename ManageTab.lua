@@ -419,15 +419,8 @@ NS.CleanBot_BuildManageTab = function()
         function(cmd) NS.CB_SendGroupCommand(cmd) end,
         function() return "your party/raid bots'" end,
         nil, nil,  -- formation stays action-only (broadcast, no aggregate display)
-        function()  -- passive: OR over the group — checked when ANY bot is passive (cache read)
-            local any = false
-            NS.CB_ForEachGroupMember(function(_, name)
-                local e = name and CleanBot_PartyBots[strlower(name)]
-                if e and e.combat and e.combat.passive == true then any = true end
-            end)
-            return any
-        end,
-        function(on)  -- blanket flip: write every known group member's cached state
+        NS.CB_GetGroupPassive,   -- passive: OR over the group — checked when ANY bot is passive
+        function(on)             -- blanket flip the cache (the command set sends co +/-passive itself)
             NS.CB_ForEachGroupMember(function(_, name)
                 local e = name and CleanBot_PartyBots[strlower(name)]
                 if e then e.combat = e.combat or {}; e.combat.passive = on end
