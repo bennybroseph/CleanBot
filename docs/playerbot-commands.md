@@ -186,7 +186,11 @@ repair cost and rest-XP are present but unused.
    name** — e.g. stepping a bot onto a **banker** so the `bank` commands pass their proximity
    check. (Bounded by the bot's search range — it's the last-leg positioner, not a long-haul
    travel; pair with `summon`/`follow` to get the bot into the area first.)
-9. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`.
+9. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`. Note `flee` ≠
+   `runaway`: `flee` (`FleeAction`) is a single `MoveAway` straight from the current target and only
+   fires when that target is in **melee range**; `runaway` (`RunAwayAction` → `Flee`) repositions near a
+   friendly or to `FleeManager`'s optimal max-distance point. Both are one `MoveTo` per call (no loop) —
+   see `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
 
 ### Lower priority / situational
 `mail` / `send mail` / `check mail`, `bank` / `guild bank`, `trainer` / `train`, `taxi`,

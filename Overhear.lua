@@ -78,6 +78,10 @@ NS.CB_ClassifyChatCommand = function(msg)
     if not msg then return nil end
     local trimmed = msg:gsub("^%s*(.-)%s*$", "%1")
     if trimmed == "" then return nil end
+    -- Bare movement one-shot (whole message is the command, e.g. "follow", "stay", "flee from adds").
+    -- Checked before the verb split so multi-word "flee from adds" matches; "follow me" does NOT.
+    local low = strlower(trimmed)
+    if NS.CB_MovementField(low) then return "movement", low, "" end
     local verb, rest = strmatch(trimmed, "^(%S+)%s*(.*)$")
     verb = verb and strlower(verb)
     if verb == "co"        then return "combat",    verb, rest end
@@ -102,14 +106,26 @@ end
 
 -- Validation sets, built lazily from the live tables (Overhear loads before
 -- CommandControls/Strategies in the TOC, so we can't snapshot them at file load).
-local formationSet, lootSet
+local formationSet, lootSet, movementSet
 local function ensureSets()
     if formationSet then return end
-    formationSet, lootSet = {}, {}
+    formationSet, lootSet, movementSet = {}, {}, {}
     for _, f in ipairs(NS.FORMATIONS or {}) do formationSet[f.token] = true end
     for _, grp in ipairs(NS.NC_STRATEGIES or {}) do
         if grp.options then for _, o in ipairs(grp.options) do lootSet[o.value] = true end end
     end
+    -- token (chat one-shot, e.g. "follow", "flee from adds") → strategy field (e.g. "mFollow").
+    for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do movementSet[m.cmd] = m.field end
+end
+
+--- Maps a bare movement one-shot command to its strategy field, or nil if not one.
+--- (e.g. "follow" → "mFollow"). Note "flee" is a transient action with no persistent
+--- field, so it is intentionally absent — only the exclusive movement strategies map.
+---@param token string?
+---@return string?  The movement field, or nil.
+NS.CB_MovementField = function(token)
+    ensureSets()
+    return token and movementSet[token] or nil
 end
 
 --- True if `token` is a valid `formation <token>` value.
@@ -301,6 +317,21 @@ local function applyFormation(key, rest)
     end
 end
 
+-- Sets one bot's cached movement mode from an overheard bare one-shot ("follow"/"stay"/"runaway"/…).
+-- The one-shot applies to the bot's ACTIVE engine, so we approximate the context with the player's
+-- combat state (matching the action bar's display rule). Movement is exclusive — the chosen field is
+-- set and the rest cleared.
+local function applyMovement(key, token)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    local field = NS.CB_MovementField(token)
+    if not field then return end
+    local section = UnitAffectingCombat("player") and "combat" or "nonCombat"
+    entry[section] = entry[section] or {}
+    for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do entry[section][m.field] = (m.field == field) end
+    if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { [section] = true }) end
+end
+
 -- Sets one bot's cached loot-quality from an overheard "ll <value>".
 local function applyLoot(key, rest)
     local entry = CleanBot_PartyBots[key]
@@ -316,6 +347,8 @@ end
 local function dispatch(key, kind, verb, rest)
     if kind == "combat" or kind == "noncombat" then
         applyStateDelta(key, kind, rest)
+    elseif kind == "movement" then
+        applyMovement(key, verb)
     elseif kind == "formation" then
         applyFormation(key, rest)
     elseif kind == "loot" then

@@ -551,6 +551,7 @@ local function CB_BuildIconBrowser()
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD)
     title:SetText("Icon Browser — click to print path")
+    f.title = title
 
     local search = NS.CB_CreateEditBox(f, "CleanBotIconBrowserSearch", 200, 20)
     search:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 4, -(PAD + 22))
@@ -567,6 +568,9 @@ local function CB_BuildIconBrowser()
     local function RefreshGrid()
         local total    = #filtered
         local numLines = math.ceil(total / COLS)
+        -- Surface the database size (and current filter count) so an empty macro-icon DB is obvious.
+        f.title:SetText(string.format("Icon Browser — %d icons%s", #(allIcons or {}),
+            (#filtered ~= #(allIcons or {})) and (" (" .. total .. " shown)") or ""))
         FauxScrollFrame_Update(scroll, numLines, ROWS, CELL)
         local offset = FauxScrollFrame_GetOffset(scroll)
         for idx = 1, COLS * ROWS do
@@ -584,7 +588,10 @@ local function CB_BuildIconBrowser()
 
     for idx = 1, COLS * ROWS do
         local col, row = (idx - 1) % COLS, math.floor((idx - 1) / COLS)
-        local btn = CreateFrame("Button", nil, scroll)
+        -- Parent to f, NOT scroll: FauxScrollFrame_Update hides the scroll frame when the results fit
+        -- without scrolling, which would hide buttons parented to it. Anchor cross-frame to scroll so
+        -- they still position correctly. (Same trap CB_CreateSelectList documents.)
+        local btn = CreateFrame("Button", nil, f)
         btn:SetSize(ICON, ICON)
         btn:SetPoint("TOPLEFT", scroll, "TOPLEFT",
             col * CELL + (CELL - ICON) / 2, -(row * CELL + (CELL - ICON) / 2))
