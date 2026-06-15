@@ -836,6 +836,32 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.hideBotChatter = checked
     end)
 
+    -- ── Action Bar section (mirrors the minimap right-click toggles) ────
+    local actionBarHeader = NS.CB_CreateHeader(otherPanel, "Action Bar")
+    NS.CB_AnchorBelow(actionBarHeader, hideChatterCB)
+
+    local actionBarCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotActionBarCB", "Show Action Bar",
+        "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")
+    actionBarCB:SetChecked(NS.actionBarShown == true)
+    NS.CB_AnchorBelow(actionBarCB, actionBarHeader)
+    actionBarCB:SetScript("OnClick", function(self)
+        if NS.CB_SetActionBarShown then NS.CB_SetActionBarShown(self:GetChecked() and true or false) end
+    end)
+
+    local actionBarEditCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotActionBarEditCB", "Action Bar Edit Mode",
+        "Disable the action bar's buttons and let it be dragged to reposition (it snaps to nearby frames). Resets off each session. Also: Shift+Right-click the minimap icon.")
+    actionBarEditCB:SetChecked(NS.actionBarEditMode == true)
+    NS.CB_AnchorBelow(actionBarEditCB, actionBarCB)
+    actionBarEditCB:SetScript("OnClick", function(self)
+        if NS.CB_SetActionBarEditMode then NS.CB_SetActionBarEditMode(self:GetChecked() and true or false) end
+    end)
+
+    -- Lets the minimap toggles keep these boxes in sync (mirrors CB_RefreshSelfBotCheckbox).
+    NS.CB_RefreshActionBarChecks = function()
+        actionBarCB:SetChecked(NS.actionBarShown == true)
+        actionBarEditCB:SetChecked(NS.actionBarEditMode == true)
+    end
+
     -- ── Debug tab ──────────────────────────────────────────────
     -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:
     -- every control routes through the shared setters in Debug.lua, which

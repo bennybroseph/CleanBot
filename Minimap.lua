@@ -99,17 +99,25 @@ btn:SetScript("OnDragStop", function(self)
     self:UnlockHighlight()
 end)
 
--- Right button is registered so future right-click actions can hook in here.
+-- Left = open window; Right = toggle the action bar; Shift+Right = its edit mode.
 btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 btn:SetScript("OnClick", function(self, button)
     if button == "LeftButton" then
         CleanBotNS.CleanBot_Toggle()
+    elseif button == "RightButton" then
+        if IsShiftKeyDown() then
+            if NS.CB_ToggleActionBarEditMode then NS.CB_ToggleActionBarEditMode() end
+        elseif NS.CB_ToggleActionBar then
+            NS.CB_ToggleActionBar()
+        end
     end
 end)
 
 NS.CB_AttachTooltip(btn, function(tt)
     tt:AddLine("CleanBot", 1, 1, 1)
-    tt:AddLine("Click to Open CleanBot", 0.8, 0.8, 0.8)
+    tt:AddLine("Left-click: Open CleanBot", 0.8, 0.8, 0.8)
+    tt:AddLine("Right-click: Toggle Action Bar", 0.8, 0.8, 0.8)
+    tt:AddLine("Shift+Right-click: Action Bar Edit Mode", 0.8, 0.8, 0.8)
     tt:AddLine("Drag to Move", 0.8, 0.8, 0.8)
 
     -- Bridge status line — always shows the real handshake state (not the debug override).
