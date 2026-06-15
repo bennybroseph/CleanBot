@@ -22,10 +22,13 @@ local SNAP_RELEASE = 40  -- px: how far past the snap the bar must move to RELEA
 local SNAP_GAP     = 2   -- px gap left when snapped flush to a frame's edge
 
 -- State (assigned by the build; setters guard on `bar` so they're safe pre-build).
-local bar, overlay, passiveBtn, snapHighlight, configFrame
-local barButtons = {}   -- the bar's buttons in flow order; laid out by CB_LayoutBar per grow direction
-local followBtn, runawayBtn, stayBtn   -- movement flyout buttons (saturation tracks the group's value)
-local pendingRunawayRevert             -- key → { name, prev } captured on Runaway; restored on combat end
+local bar, overlay, snapHighlight, configFrame
+local barButtons = {}   -- the bar's buttons (enabled slots in order); laid out by CB_LayoutBar
+local slotBtns   = {}   -- slot id → bar button frame (all created once from the registry)
+local pendingRunawayRevert  -- key → { name, prev } captured on Runaway; restored on combat end
+-- Persisted button layout (merged with the registry at load): slot order + per-flyout child order, plus
+-- disabled sets. Built by CB_LoadLayout, consumed by CB_RebuildBar, written by CB_SaveLayout.
+local barLayout = { slotOrder = {}, slotOff = {}, childOrder = {}, childOff = {} }
 
 -- Effective on-screen opacity: the product of the frame's own alpha and all its ancestors'. A frame
 -- can be IsVisible() (shown, in a shown parent chain) yet faded to nothing — ElvUI does this to its
@@ -86,8 +89,9 @@ NS.actionBarSnap     = true    -- persisted in CleanBot_SavedVars.actionBarSnap;
 -- desaturated (grayed) otherwise. Registered as a command refresher so it tracks the Manage
 -- tab's checkbox and co? replies.
 local function refreshPassiveBtn()
-    if not passiveBtn then return end
-    passiveBtn.icon:SetDesaturated(not NS.CB_GetGroupPassive())
+    local b = slotBtns.passive
+    if not b then return end
+    b.icon:SetDesaturated(not NS.CB_GetGroupPassive())
 end
 
 -- ── Movement flyout (Follow / Runaway / Stay) ────────────────────────────────
@@ -100,11 +104,13 @@ local function playerCombatSection()
 end
 
 local function refreshMoveBtns()
-    if not followBtn then return end
+    local m = slotBtns.movement
+    if not m then return end
     local section = playerCombatSection()
-    followBtn.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mFollow"))
-    runawayBtn.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mRunaway"))
-    stayBtn.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mStay"))
+    m.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mFollow"))
+    local kids = m.allChildren or {}
+    if kids.runaway then kids.runaway.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mRunaway")) end
+    if kids.stay    then kids.stay.icon:SetDesaturated(not NS.CB_GroupMovementActive(section, "mStay")) end
 end
 
 -- An explicit Follow/Stay choice supersedes a pending Runaway revert.
@@ -455,7 +461,9 @@ local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc
     local flyout = CreateFrame("Frame", name .. "Flyout", btn)
     flyout:SetFrameLevel(btn:GetFrameLevel() + 5)
     flyout:Hide()
-    btn.flyout, btn.children = flyout, {}
+    -- allChildren = every child created (id → frame); childIds = registry/default order; children = the
+    -- currently ACTIVE ordered subset that layout() draws (set by SetActiveChildren from the saved order).
+    btn.flyout, btn.children, btn.allChildren, btn.childIds = flyout, {}, {}, {}
 
     -- Screen rect the flyout would occupy growing `dir` from the button, for `n` children.
     local function flyoutRect(dir, n)
@@ -549,17 +557,33 @@ local function CB_CreateFlyoutButton(parent, name, iconTex, onClick, title, desc
         end
     end)
 
-    -- Adds a child button; positioning happens in layout() at open time (direction can change). Selecting
-    -- a child also closes the flyout unless it's pinned.
-    function btn:AddFlyout(childIcon, childOnClick, childTitle, childDesc)
-        local idx   = #self.children + 1
-        local child = NS.CB_CreateIconButton(flyout, name .. "Fly" .. idx, childIcon, BTN, function()
+    -- Registers a child button into the master pool (does NOT make it active — CB_RebuildBar /
+    -- SetActiveChildren decides which children show and in what order). Positioning happens in layout()
+    -- at open time. Selecting a child also closes the flyout unless it's pinned.
+    function btn:AddFlyout(childId, childIcon, childOnClick, childTitle, childDesc)
+        local child = NS.CB_CreateIconButton(flyout, name .. "Fly_" .. childId, childIcon, BTN, function()
             if childOnClick then childOnClick() end
             if not flyout.pinned then flyout:Hide() end
         end)
         if childTitle then NS.CB_SetTooltip(child, childTitle, childDesc) end
-        self.children[idx] = child
+        child._childId = childId
+        self.allChildren[childId] = child
+        self.childIds[#self.childIds + 1] = childId
         return child
+    end
+
+    -- Sets the active child set + order from a list of child ids: hides every child, then shows the
+    -- listed ones in order. `children` (what layout() draws) becomes those frames. Re-layouts if open.
+    function btn:SetActiveChildren(orderedIds)
+        for _, id in ipairs(self.childIds) do
+            local c = self.allChildren[id]; if c then c:Hide() end
+        end
+        self.children = {}
+        for _, id in ipairs(orderedIds or {}) do
+            local c = self.allChildren[id]
+            if c then c:Show(); self.children[#self.children + 1] = c end
+        end
+        if flyout:IsShown() then layout(flyoutDir()) end
     end
 
     return btn
@@ -793,6 +817,171 @@ local function CB_BuildConfig()
     end
 end
 
+-- ── Button registry + persisted layout ──────────────────────────────────────
+-- Reconciles a saved id order against the current default order: keeps saved ids that still exist (in
+-- saved order), drops unknown ones, then appends any new default ids (in default order). Pure.
+NS.CB_MergeOrder = function(defaultIds, savedIds)
+    local present, seen, out = {}, {}, {}
+    for _, id in ipairs(defaultIds) do present[id] = true end
+    for _, id in ipairs(savedIds or {}) do
+        if present[id] and not seen[id] then seen[id] = true; out[#out + 1] = id end
+    end
+    for _, id in ipairs(defaultIds) do
+        if not seen[id] then seen[id] = true; out[#out + 1] = id end
+    end
+    return out
+end
+
+-- Returns a copy of `order` with `id` removed and re-inserted at `newIndex` (clamped to [1, #+1]). Pure.
+NS.CB_MoveInOrder = function(order, id, newIndex)
+    local out = {}
+    for _, x in ipairs(order) do if x ~= id then out[#out + 1] = x end end
+    if newIndex < 1 then newIndex = 1 elseif newIndex > #out + 1 then newIndex = #out + 1 end
+    table.insert(out, newIndex, id)
+    return out
+end
+
+-- Declarative slot/action registry. Each slot = one bar button; `children` (optional) are its flyout
+-- items. The slot's own `onClick` is the main (left-click) action and is FIXED — not reorderable or
+-- separately disable-able; disabling a slot removes the whole button. Children are reorderable and
+-- individually toggleable. `refresh` (optional) is a saturation refresher registered once.
+local ATK = "Interface\\AddOns\\CleanBot\\icons\\attack"
+local function attackCmd(qual)
+    return function() NS.CB_SendGroupCommand((qual and (qual .. " ") or "") .. "do attack my target") end
+end
+local SLOTS = {
+    { id = "summon", frame = "CleanBotActionSummonBtn", icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
+      title = "Summon", desc = "Summon your party/raid bots to you.",
+      onClick = function() NS.CB_SendGroupCommand("summon") end },
+
+    { id = "attack", frame = "CleanBotActionAttackBtn", icon = ATK,
+      title = "Attack", desc = "Order all your bots to attack your target.", onClick = attackCmd(nil),
+      children = {
+        { id = "tank",   icon = ATK .. "_tank",   title = "Attack — Tanks",   desc = "Order your tank bots to attack your target.",   onClick = attackCmd("@tank") },
+        { id = "healer", icon = ATK .. "_healer", title = "Attack — Healers", desc = "Order your healer bots to attack your target.", onClick = attackCmd("@heal") },
+        { id = "dps",    icon = ATK .. "_dps",    title = "Attack — DPS",     desc = "Order your DPS bots to attack your target.",    onClick = attackCmd("@dps") },
+        { id = "melee",  icon = ATK .. "_melee",  title = "Attack — Melee",   desc = "Order your melee bots to attack your target.",  onClick = attackCmd("@melee") },
+        { id = "ranged", icon = ATK .. "_ranged", title = "Attack — Ranged",  desc = "Order your ranged bots to attack your target.", onClick = attackCmd("@ranged") },
+      } },
+
+    { id = "pull", frame = "CleanBotActionPullBtn", icon = "Interface\\Icons\\Ability_Hunter_Misdirection",
+      title = "Pull", desc = "Order your tank bots to pull your current target. (Select a mob first.)",
+      onClick = function() NS.CB_SendGroupCommand("pull my target") end },
+
+    { id = "passive", frame = "CleanBotActionPassiveBtn", icon = "Interface\\Icons\\Spell_Nature_Sleep",
+      title = "Passive", desc = "Toggle all bots passive — stand down and do nothing in combat.",
+      onClick = function() NS.CB_SetGroupPassive(not NS.CB_GetGroupPassive()); NS.CB_RefreshCommands() end,
+      refresh = refreshPassiveBtn },
+
+    { id = "movement", frame = "CleanBotActionFollowBtn", icon = "Interface\\Icons\\Ability_Hunter_BeastSoothe",
+      title = "Follow", desc = "Order your bots to follow you.",
+      onClick = function() setMovement("mFollow") end, refresh = refreshMoveBtns,
+      children = {
+        { id = "stay",    icon = "Interface\\Icons\\Spell_Nature_TimeStop", title = "Stay",
+          desc = "Order your bots to hold position.", onClick = function() setMovement("mStay") end },
+        { id = "runaway", icon = "Interface\\Icons\\Ability_Rogue_Sprint", title = "Runaway",
+          desc = "Order your bots to keep their distance from enemies. Reverts to their previous combat movement when combat ends.",
+          onClick = runawayMovement },
+      } },
+
+    { id = "release", frame = "CleanBotActionReleaseBtn", icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit",
+      title = "Release", desc = "Release your bots' spirits when they die.",
+      onClick = function() NS.CB_SendGroupCommand("release") end,
+      children = {
+        { id = "revive", icon = "Interface\\Icons\\Spell_Holy_Resurrection", title = "Revive",
+          desc = "Revive your bots from their corpses.", onClick = function() NS.CB_SendGroupCommand("revive") end },
+      } },
+}
+NS.CB_actionSlots = SLOTS   -- exposed so the config panel can render the enable/disable list
+
+-- Creates every slot button + flyout child ONCE from the registry (no order/visibility logic — that's
+-- CB_RebuildBar). Frames can't be destroyed in 3.3.5a, so we pre-create the full set and only
+-- show/hide/reorder afterward.
+local function CB_BuildButtons()
+    for _, s in ipairs(SLOTS) do
+        local btn
+        if s.children then
+            btn = CB_CreateFlyoutButton(bar, s.frame, s.icon, s.onClick, s.title, s.desc)
+            for _, c in ipairs(s.children) do
+                btn:AddFlyout(c.id, c.icon, c.onClick, c.title, c.desc)
+            end
+        else
+            btn = NS.CB_CreateIconButton(bar, s.frame, s.icon, BTN, s.onClick)
+            NS.CB_SetTooltip(btn, s.title, s.desc)
+        end
+        slotBtns[s.id] = btn
+        if s.refresh then NS.commandRefreshers[#NS.commandRefreshers + 1] = s.refresh end
+    end
+end
+
+-- Merges the saved layout (CleanBot_SavedVars.actionBarLayout) with the registry defaults into barLayout.
+local function CB_LoadLayout()
+    local saved = (CleanBot_SavedVars and CleanBot_SavedVars.actionBarLayout) or {}
+    local defSlots = {}
+    for _, s in ipairs(SLOTS) do defSlots[#defSlots + 1] = s.id end
+    barLayout.slotOrder  = NS.CB_MergeOrder(defSlots, saved.slotOrder)
+    barLayout.childOrder = {}
+    for _, s in ipairs(SLOTS) do
+        if s.children then
+            local defChildren = {}
+            for _, c in ipairs(s.children) do defChildren[#defChildren + 1] = c.id end
+            barLayout.childOrder[s.id] = NS.CB_MergeOrder(defChildren, saved.childOrder and saved.childOrder[s.id])
+        end
+    end
+    barLayout.slotOff, barLayout.childOff = {}, {}
+    if type(saved.slotOff)  == "table" then for k, v in pairs(saved.slotOff)  do if v then barLayout.slotOff[k]  = true end end end
+    if type(saved.childOff) == "table" then for k, v in pairs(saved.childOff) do if v then barLayout.childOff[k] = true end end end
+end
+
+local function CB_SaveLayout()
+    if CleanBot_SavedVars then
+        CleanBot_SavedVars.actionBarLayout = {
+            slotOrder = barLayout.slotOrder, slotOff = barLayout.slotOff,
+            childOrder = barLayout.childOrder, childOff = barLayout.childOff,
+        }
+    end
+end
+NS.CB_SaveLayout = CB_SaveLayout
+NS.CB_actionBarLayout = barLayout   -- exposed so the config panel reads/writes order + enabled state
+
+-- Applies barLayout to the (already-created) buttons: builds barButtons from the enabled slots in order,
+-- hides disabled slots, sets each flyout's active child subset, then lays the bar out. No frame creation.
+local function CB_RebuildBar()
+    if not bar then return end
+    barButtons = {}
+    for _, id in ipairs(barLayout.slotOrder) do
+        local b = slotBtns[id]
+        if b then
+            if barLayout.slotOff[id] then b:Hide()
+            else b:Show(); barButtons[#barButtons + 1] = b end
+        end
+    end
+    for id, b in pairs(slotBtns) do
+        if b.SetActiveChildren then
+            local order, active = barLayout.childOrder[id] or b.childIds, {}
+            for _, cid in ipairs(order) do
+                if not barLayout.childOff[id .. "." .. cid] then active[#active + 1] = cid end
+            end
+            b:SetActiveChildren(active)
+        end
+    end
+    CB_LayoutBar()
+end
+NS.CB_RebuildBar = CB_RebuildBar
+
+-- Enable/disable accessors for the Settings-tab list. Getters default to enabled; setters mutate
+-- barLayout, persist, and rebuild the bar live. childOff is keyed "slotId.childId".
+NS.CB_IsSlotEnabled  = function(id)            return not barLayout.slotOff[id] end
+NS.CB_IsChildEnabled = function(slotId, cid)   return not barLayout.childOff[slotId .. "." .. cid] end
+NS.CB_SetSlotEnabled = function(id, on)
+    barLayout.slotOff[id] = (not on) or nil
+    CB_SaveLayout(); CB_RebuildBar()
+end
+NS.CB_SetChildEnabled = function(slotId, cid, on)
+    barLayout.childOff[slotId .. "." .. cid] = (not on) or nil
+    CB_SaveLayout(); CB_RebuildBar()
+end
+
 -- ── Build (once, at PLAYER_LOGIN) ────────────────────────────────────────────
 local function CB_BuildActionBar()
     bar = CreateFrame("Frame", "CleanBotActionBarFrame", UIParent)
@@ -801,76 +990,12 @@ local function CB_BuildActionBar()
     bar:Hide()
     NS.CB_ApplyFrameSkin(bar, 2)
 
-    -- Summon: bring the party/raid's bots to the player.
-    local summonBtn = NS.CB_CreateIconButton(bar, "CleanBotActionSummonBtn",
-        "Interface\\Icons\\Spell_Arcane_TeleportStormwind", BTN,
-        function() NS.CB_SendGroupCommand("summon") end)
-    NS.CB_SetTooltip(summonBtn, "Summon", "Summon your party/raid bots to you.")
+    -- Create every slot button + flyout child once from the registry (order/visibility applied later
+    -- by CB_RebuildBar). Refreshers (Passive / Movement saturation) are registered here.
+    CB_BuildButtons()
 
-    -- Attack (flyout): left-click orders the WHOLE group onto your target; the flyout sends the same
-    -- order scoped to a single role/combat-type via the leading @-qualifier (read by the bots
-    -- server-side). Icons live in the addon's icons/ folder.
-    local ATK = "Interface\\AddOns\\CleanBot\\icons\\attack"
-    local attackBtn = CB_CreateFlyoutButton(bar, "CleanBotActionAttackBtn", ATK,
-        function() NS.CB_SendGroupCommand("do attack my target") end,
-        "Attack", "Order all your bots to attack your target.")
-    local attackTargets = {
-        { icon = "_tank",   qual = "@tank",   title = "Attack — Tanks",   desc = "Order your tank bots to attack your target." },
-        { icon = "_healer", qual = "@heal",   title = "Attack — Healers", desc = "Order your healer bots to attack your target." },
-        { icon = "_dps",    qual = "@dps",    title = "Attack — DPS",     desc = "Order your DPS bots to attack your target." },
-        { icon = "_melee",  qual = "@melee",  title = "Attack — Melee",   desc = "Order your melee bots to attack your target." },
-        { icon = "_ranged", qual = "@ranged", title = "Attack — Ranged",  desc = "Order your ranged bots to attack your target." },
-    }
-    for _, t in ipairs(attackTargets) do
-        attackBtn:AddFlyout(ATK .. t.icon,
-            function() NS.CB_SendGroupCommand(t.qual .. " do attack my target") end,
-            t.title, t.desc)
-    end
-
-    -- Pull: tell the group's tank bots to pull YOUR current target (server-side: tank-only, needs the
-    -- pull strategy, which tank specs run by default). One-shot, like Attack.
-    local pullBtn = NS.CB_CreateIconButton(bar, "CleanBotActionPullBtn",
-        "Interface\\Icons\\Ability_Hunter_Misdirection", BTN,
-        function() NS.CB_SendGroupCommand("pull my target") end)
-    NS.CB_SetTooltip(pullBtn, "Pull",
-        "Order your tank bots to pull your current target. (Select a mob first.)")
-
-    -- Passive: toggle every bot's passive state (OR-read + blanket flip — same as the
-    -- Manage tab's Passive checkbox). Lit when any bot is passive.
-    passiveBtn = NS.CB_CreateIconButton(bar, "CleanBotActionPassiveBtn",
-        "Interface\\Icons\\Spell_Nature_Sleep", BTN,
-        function()
-            NS.CB_SetGroupPassive(not NS.CB_GetGroupPassive())
-            NS.CB_RefreshCommands()
-        end)
-    NS.CB_SetTooltip(passiveBtn, "Passive", "Toggle all bots passive — stand down and do nothing in combat.")
-    NS.commandRefreshers[#NS.commandRefreshers + 1] = refreshPassiveBtn
-
-    -- Release (flyout → Revive): death-state control, broadcast to the group. Left-click releases
-    -- spirit; hover or right-click reveals Revive (run back / revive from corpse).
-    local releaseBtn = CB_CreateFlyoutButton(bar, "CleanBotActionReleaseBtn",
-        "Interface\\Icons\\Spell_Holy_GuardianSpirit",
-        function() NS.CB_SendGroupCommand("release") end,
-        "Release", "Release your bots' spirits when they die.")
-    releaseBtn:AddFlyout("Interface\\Icons\\Spell_Holy_Resurrection",
-        function() NS.CB_SendGroupCommand("revive") end,
-        "Revive", "Revive your bots from their corpses.")
-
-    -- Movement (flyout): Follow (main) reveals Runaway + Stay. Each lights when it's the group's
-    -- movement value for the current combat context. Blizzard icons (no custom art for these yet).
-    followBtn = CB_CreateFlyoutButton(bar, "CleanBotActionFollowBtn",
-        "Interface\\Icons\\Ability_Hunter_BeastSoothe",
-        function() setMovement("mFollow") end,
-        "Follow", "Order your bots to follow you.")
-    stayBtn = followBtn:AddFlyout("Interface\\Icons\\Spell_Nature_TimeStop",
-        function() setMovement("mStay") end,
-        "Stay", "Order your bots to hold position.")
-    runawayBtn = followBtn:AddFlyout("Interface\\Icons\\Ability_Rogue_Sprint", runawayMovement,
-        "Runaway", "Order your bots to keep their distance from enemies. Reverts to their previous combat movement when combat ends.")
-    NS.commandRefreshers[#NS.commandRefreshers + 1] = refreshMoveBtns
-
-    -- Combat transitions re-flow the displayed context (combat vs non-combat), and combat END triggers
-    -- the pending Runaway revert.
+    -- Combat transitions re-flow the displayed movement context (combat vs non-combat); combat END
+    -- triggers the pending Runaway revert.
     local moveCombatFrame = CreateFrame("Frame", "CleanBotActionMoveCombatFrame")
     moveCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     moveCombatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -878,10 +1003,6 @@ local function CB_BuildActionBar()
         if ev == "PLAYER_REGEN_ENABLED" then revertRunaway() end
         refreshMoveBtns()
     end)
-
-    -- Lay out the buttons in flow order per the grow direction (also sizes the bar).
-    barButtons = { summonBtn, attackBtn, pullBtn, passiveBtn, followBtn, releaseBtn }
-    CB_LayoutBar()
 
     -- Edit overlay: covers the bar above the buttons, mouse-enabled only in edit mode, so it
     -- both blocks button clicks ("disables normal interaction") and is the drag handle.
@@ -938,7 +1059,9 @@ local function CB_BuildActionBar()
         anchor.y        = a.y or 0
         anchor.growDir  = (a.growDir and DIR_LABEL[a.growDir] and a.growDir) or "RIGHT"
     end
-    CB_LayoutBar()   -- reflow buttons for the restored direction before pinning the corner
+    CB_LoadLayout()  -- merge persisted button order + enabled state with the registry
+    CB_RebuildBar()  -- build barButtons + flyout child subsets, then lay out (replaces CB_LayoutBar)
+    if NS.CB_RefreshActionBarButtonList then NS.CB_RefreshActionBarButtonList() end  -- sync Settings checkboxes
     CB_ApplyAnchor()
     -- Snapping defaults ON; only an explicit saved false disables it.
     NS.actionBarSnap = not (CleanBot_SavedVars and CleanBot_SavedVars.actionBarSnap == false)
