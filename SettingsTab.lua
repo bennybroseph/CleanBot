@@ -836,11 +836,14 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.hideBotChatter = checked
     end)
 
-    -- ── Action bar (mirrors the minimap right-click toggles) ────
+    -- ── Action Bar section (mirrors the minimap right-click toggles) ────
+    local actionBarHeader = NS.CB_CreateHeader(otherPanel, "Action Bar")
+    NS.CB_AnchorBelow(actionBarHeader, hideChatterCB)
+
     local actionBarCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotActionBarCB", "Show Action Bar",
         "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")
     actionBarCB:SetChecked(NS.actionBarShown == true)
-    NS.CB_AnchorBelow(actionBarCB, hideChatterCB)
+    NS.CB_AnchorBelow(actionBarCB, actionBarHeader)
     actionBarCB:SetScript("OnClick", function(self)
         if NS.CB_SetActionBarShown then NS.CB_SetActionBarShown(self:GetChecked() and true or false) end
     end)
