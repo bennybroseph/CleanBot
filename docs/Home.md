@@ -21,7 +21,7 @@ New here? Start with **[Getting Started](getting-started.md)**.
 - **[Action Bar](action-bar.md)** — one-click bot commands you can keep on screen.
 - **[Managing Bots](managing-bots.md)** — invite, summon, spawn, and save bot presets.
 - **[Bot Behavior](bot-behavior.md)** — roles, rotations, movement, and loot.
-- **[Gear & Bags](gear-and-bags.md)** — equipment, inventory, trading, banking, and quests.
+- **[Gear & Bags](gear-and-bags.md)** — equipment, inventory, vendors, trading, banking, and quests.
 - **[Settings](settings.md)** — appearance, behavior toggles, and the action bar.
 
 ## Reference
