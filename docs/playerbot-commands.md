@@ -67,6 +67,8 @@ action name in `ChatActionContext.h`.**
 | `pull my target` | `pull` | `TriggerNode("pull")` → `pull my target` action | ✅ (Action Bar "Pull" button) |
 | `release` | `release` | `supported` | ✅ (Action Bar "Release" flyout) |
 | `revive` | `revive` | `TriggerNode("revive")` → `spirit healer` action | ✅ (Action Bar "Release" flyout) |
+| `b <link>` | `b` | `TriggerNode("b")` → buy (`BuyAction`) | ✅ (vendor extension — a selected bot buys the right-clicked merchant item) |
+| `s <link>` | `s` | `TriggerNode("s")` → sell (`SellAction`) | ✅ (vendor extension + inventory "Sell" menu) |
 
 ---
 
@@ -79,6 +81,8 @@ action name in `ChatActionContext.h`.**
 | `talents spec <name>` | ⚠️ | One of five `talents` sub-forms — see "talents" below. |
 | `talents spec list` | ✅ | Populates the premade-spec dropdown; reply is one premade per line, `"1. arms pve (51-0-20)"` (parsed in `Bridge.lua`). |
 | `s gray` | ✅ | Inventory "Sell Trash" button. **The trigger is `s`, not `sell`** — `ChatCommandHandlerStrategy` registers `TriggerNode("s") → SellAction`; there is NO `sell` trigger. Whispering `sell gray` matches no command and (with `enableAutoTradeOnItemMention`) makes the bot open a *trade* on the "gray" keyword instead of vendor-selling. Whisper-only (not bridge-allowlisted); sells only when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Params: `s gray` / `s *` / `s vendor` / `s <itemlink>`. |
+| `b <link>` (vendor buy) | ✅ | **Vendor frame extension** (`Merchant.lua`). With a bot selected on the vendor's portrait tabs/dropdown, right-clicking a merchant item sends `b <itemlink>` so that bot buys it. Trigger `b` (`BuyAction`); whisper-only (not bridge-allowlisted); the bot must be within interaction range of the vendor — CleanBot does a client-side proxy range check (`CheckInteractDistance` to the bot, since the player is at the vendor) and flashes a `UIErrorsFrame` warning instead of sending if it's too far. |
+| `s <link>` (vendor sell) | ✅ | Vendor-sells a single item from a bot's bags. Used by the **vendor extension** (right-click an item in a bot's open bag window while a merchant is up) and the inventory **"Sell"** context-menu entry. Uncommon-or-better items confirm first (bots have **no buyback**). Trigger `s` (`SellAction`); whisper-only; needs a vendor in range. (Bulk `s gray` is the separate "Sell Trash" button above.) |
 | `e <link>` (equip) | ⚠️ | Resolves via `parseItems` — accepts far more than links. |
 | `ue <link>` (unequip) | ✅ | |
 | `u <link>` (use item) | ✅ | |
@@ -185,16 +189,13 @@ repair cost and rest-XP are present but unused.
    item (one link per call; no `reward all`). Pairs with the quest panel's reward display.
 4. **`repair` / `repair all`** (`RepairAllAction`) — send a bot to repair. Companion to the
    durability `stats` already reports.
-5. **`s`** (`SellAction`) / **`b`** (`BuyAction`) — vendor interactions (triggers are the short
-   forms `s`/`b`, not `sell`/`buy`). `s gray` is used (Sell Trash button); other `s` forms and
-   `b` remain unused.
-6. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
-7. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
+5. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
+6. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
    Most relevant form: **`go <unit name>` walks the bot to a nearby matching NPC/player by
    name** — e.g. stepping a bot onto a **banker** so the `bank` commands pass their proximity
    check. (Bounded by the bot's search range — it's the last-leg positioner, not a long-haul
    travel; pair with `summon`/`follow` to get the bot into the area first.)
-8. **Movement one-shot triggers:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`
+7. **Movement one-shot triggers:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`
    (TriggerNodes → `"<name> chat shortcut"`). **Unused by CleanBot** — the Action Bar's Movement
    flyout (Follow / Stay / Runaway) instead drives the *persistent* **movement strategies** via
    `co`/`nc` (the exclusive movement group), not these one-shot shortcuts. Note `flee` ≠ `runaway`:

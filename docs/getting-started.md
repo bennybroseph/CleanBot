@@ -44,5 +44,5 @@ a self-bot or testing without a group.
 - [Action Bar](action-bar.md) — one-click bot commands.
 - [Managing Bots](managing-bots.md) — building and running your group.
 - [Bot Behavior](bot-behavior.md) — roles, rotations, movement, loot.
-- [Gear & Bags](gear-and-bags.md) — equipment, inventory, trading, quests.
+- [Gear & Bags](gear-and-bags.md) — equipment, inventory, vendors, trading, quests.
 - [Settings](settings.md) — appearance and toggles.

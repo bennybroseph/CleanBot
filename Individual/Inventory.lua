@@ -248,6 +248,52 @@ end
 KINDS.inventory.menu = CB_ShowInvMenu
 KINDS.bank.menu      = CB_ShowBankMenu
 
+-- ── Sell at a vendor (CleanBot vendor feature; see Merchant.lua) ─────────────
+-- While a merchant is open, a plain right-click on a bot inventory item sells it.
+-- Uncommon-or-better items confirm first (bots have no vendor buyback). The popup
+-- registers lazily because NS.CB_RegisterConfirmPopup lives in ManageTab.lua, which
+-- loads after this file.
+local function CB_DoSell(cell, key, entry)
+    local link = cell.itemLink
+    if not link then return end
+    NS.CB_SendBotCommand(entry.name, "s " .. NS.CB_CleanItemLink(link))
+    -- Optimistic update: a vendor sale clears the whole stack — blank the cell now (mirrors the
+    -- right-click "Use" path), then reconcile against the bot's real bags.
+    cell.icon:Hide()
+    cell.countText:Hide()
+    cell.itemLink = nil
+    NS.CB_ClearQualityBorder(cell)
+    NS.CB_SetRarityOverlay(cell, nil)
+    NS.CB_ScheduleReconcile(key, entry.name)
+end
+
+local function CB_EnsureSellPopup()
+    if StaticPopupDialogs["CLEANBOT_MERCHANT_SELL"] or not NS.CB_RegisterConfirmPopup then return end
+    NS.CB_RegisterConfirmPopup("CLEANBOT_MERCHANT_SELL",
+        "Sell %s? Bots have no buyback, so this can't be undone.",
+        function(_, data)
+            local e = data and data.key and CleanBot_PartyBots[data.key]
+            -- Only sell if the cell still holds the same item (guard against a refresh between
+            -- the popup opening and confirmation).
+            if e and data.cell and data.cell.itemLink == data.link then CB_DoSell(data.cell, data.key, e) end
+        end)
+end
+
+--- Right-click-to-sell from a bot's inventory cell. Quality >= 2 (uncommon/green or
+--- better) asks for confirmation first; poor/common sell immediately.
+local function CB_MerchantSellCell(cell, key, entry)
+    local link = cell.itemLink
+    if not link then return end
+    if NS.CB_CheckBotVendorRange and not NS.CB_CheckBotVendorRange(entry.name) then return end
+    local _, _, quality = GetItemInfo(link)
+    if (quality or 0) >= 2 then
+        CB_EnsureSellPopup()
+        StaticPopup_Show("CLEANBOT_MERCHANT_SELL", link, nil, { cell = cell, key = key, link = link })
+    else
+        CB_DoSell(cell, key, entry)
+    end
+end
+
 -- Optimistically moves an item from a grid cell to the first empty cell of the
 -- destination frame, mirroring the server-side deposit/withdraw before the refetch
 -- confirms (same eager-update spirit as the right-click "Use"). srcCell is blanked
@@ -286,6 +332,29 @@ local function CB_OptimisticMove(srcCell, destFrame, destCell)
     NS.CB_ApplyItemVisuals(dest, link)
     if count then dest.countText:SetText(count); dest.countText:Show()
     else dest.countText:Hide() end
+end
+
+-- Optimistically shows a freshly BOUGHT item in the bot's open bag window (if any), then
+-- reconciles. Buying happens at the merchant, so the window is usually closed — then this is a
+-- no-op. Adds to the first empty cell; the count/stacking is left to the reconcile to correct.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (for the reconcile).
+---@param link    string  The bought item's link.
+NS.CB_OptimisticBuy = function(key, botName, link)
+    local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+    if f and f:IsShown() and f.cells then
+        for _, c in ipairs(f.cells) do
+            if c:IsShown() and not c.itemLink then
+                c.icon:SetTexture(GetItemIcon(strmatch(link, "item:(%d+)") or 0))
+                c.icon:Show()
+                c.itemLink = link
+                NS.CB_ApplyItemVisuals(c, link)
+                c.countText:Hide()
+                break
+            end
+        end
+        NS.CB_ScheduleReconcile(key, botName)
+    end
 end
 
 -- ── Deposit / withdraw between a bot's bags and bank ─────────────────────
@@ -1112,6 +1181,17 @@ local function CB_RenderGrid(kind, key, forceFull)
                     -- plain right-click opens the menu as usual.
                     local bankF    = NS.botBankFrames[key]
                     local bankOpen = bankF and bankF:IsShown()
+                    -- At a vendor (CleanBot vendor feature enabled), a plain right-click on an
+                    -- INVENTORY item sells it — uncommon+ confirms first (bots have no buyback).
+                    -- The context menu stays on shift+right-click; a bank move wins if the bank
+                    -- is open. With no merchant open we fall through to the bank/menu logic below.
+                    if kind == "inventory" and not bankOpen and not IsShiftKeyDown()
+                        and NS.vendorEnabled and NS.CB_IsMerchantOpen and NS.CB_IsMerchantOpen() then
+                        if CB_GridLocked(kind, key) then return end  -- mid whisper refresh
+                        local entry = CleanBot_PartyBots[key]
+                        if entry then CB_MerchantSellCell(self, key, entry) end
+                        return
+                    end
                     local canMove  = (kind == "bank") or (kind == "inventory" and bankOpen)
                     if canMove and not IsShiftKeyDown() then
                         -- A move touches both grids — block while either is mid-refresh.
