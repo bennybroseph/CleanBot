@@ -207,12 +207,74 @@ repair cost and rest-XP are present but unused.
    `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
 
 ### Lower priority / situational
-`mail` / `send mail` / `check mail`, `trainer` / `train`, `taxi`,
-`glyphs` (`TellGlyphsAction` / `EquipGlyphsAction`), info queries `position` / `los` /
+`mail` / `send mail` / `check mail`, `taxi`, info queries `position` / `los` /
 `reputation` / `emblems`, pet management
 (`pet attack`, `set pet stance`, `toggle pet spell`), `teleport` (`TeleportAction`),
 and the dynamic `help` command (live command + strategy lists). (`summon` is **used** — see
-"Commands CleanBot already sends".)
+"Commands CleanBot already sends".) The profession-related commands (`spells`, `trainer`,
+`craft`, glyphs) have their own section — see **Professions** below.
+
+### Professions — spells / trainer / craft / glyphs
+The module has **no "level my professions" or "list my professions" summary command**. What
+exists is a read path (`spells`), a learn path (`trainer`), a trade-mediated crafting path
+(`craft` + `trade`), and glyph-slot management. All are whisper-only; none are bridge-allowlisted.
+CleanBot does not currently send any of these. Verified against `ListSpellsAction.cpp`,
+`TrainerAction.cpp`, `SetCraftAction.cpp` + `CraftValue.h`, and `TradeStatusAction.cpp`.
+
+**`spells [filter]`** (`ListSpellsAction`) — the **data-out** for "what does this bot know / can
+make", and it is profession-aware. Reply header `=== Spells ===`, one entry per line (sorted),
+or `No spells found.` when nothing matches. It walks the bot's **active, non-passive** spells for
+the current spec. The filter's first token is run through `parseSkill`, so it doubles as a
+**profession selector**:
+- `spells <profession>` — list only that skill line, e.g. `spells alchemy` / `mining` /
+  `tailoring` / `enchanting` / `engineering` / `herbalism` / `skinning` / `leatherworking` /
+  `blacksmithing` / `jewelcrafting` / `inscription` / `cooking` / `first aid` / `fishing`.
+  **An empty result means the bot doesn't have that profession** — so you discover a bot's two
+  primaries by probing the names.
+- Each craftable line shows the **crafted item**, its **reagents** (annotated `(xN)` for how many
+  the bot holds, or `(buy)` if vendor-buyable), a leading `(xN)` = how many it could craft **right
+  now** from bags, and a **skill-difficulty color** — `orange`/`yellow`/`green`/`gray` — derived
+  from the bot's current skill value vs the recipe's ranks (so the color is an indirect read-out of
+  *how trained* the profession is).
+- Extra filters: `spells <skill> <name>` (name substring), a level range `spells <skill> 60-70`,
+  an equipment-slot filter, and `+` / `spells +<skill>` to show **only what's craftable now** from
+  current reagents.
+- Note: the action deliberately re-sends the **full** list so client addons (Multibot/Unbot) can
+  reconstruct the spellbook — i.e. this is the intended hook for profession/recipe data.
+
+**`trainer`** (`TrainerAction`) — list/learn at a trainer NPC.
+- Targeting: the bot resolves the trainer from its **master's selected unit** (`GetMaster():
+  GetSelectedUnit()`), not its own target — so **you click the trainer**, then whisper the bot.
+  The bot must be in range of a living trainer valid for it (`isUseful`/`isPossible`).
+- **Bare `trainer` = list-only** (nothing is learned). Reply: `--- Can learn from <Name> ---`, then
+  `<Spell> <cost>` per line, then `Total cost: <money>` (when non-zero). The list is filtered
+  through `CanTeachSpell`, so it already excludes spells the bot is too low-level for, lacks
+  prerequisites/rep for, or already knows — i.e. it is genuinely *what this bot can learn here*.
+- **`trainer learn`** learns everything listed; **`trainer learn <spelllink>`** learns one.
+- **Profession caveat:** learning at a *tradeskill* trainer is blocked for a bot with an active
+  player master unless the server enables `AiPlayerbot.allowLearnTrainerSpells` (class-spell
+  trainers are not gated this way; random/unowned bots learn freely). **Listing always works**, so
+  you can always see a profession trainer's offerings even when learning is gated.
+
+**`craft <item>` / `craft ?` / `craft reset`** (`SetCraftAction`) + **`trade`** (`TradeStatusAction`)
+— crafting is **trade-mediated**, not fire-and-forget:
+- `craft <itemlink|itemId>` sets the craft target. The bot must **already know the recipe** (it
+  scans its own create-item spells); it then computes the **required reagents** and a **craft fee**
+  (`max(itemLevel, requiredLevel)² / 40`) and whispers `I will craft <item> using reagents: …
+  (craft fee: <money>)`. `craft ?` repeats it (incl. reagents handed over so far); `craft reset` →
+  `I will not craft anything`. A non-recipe → `I cannot craft this`.
+- You then **open a trade and put the reagents in**: on accept, the bot tallies them
+  (`AddObtained`), produces the item, and **charges the craft fee** through the trade
+  (`GetCraftFee`); reagents are consumed (`Crafted`). There is no "just go craft X" command.
+
+**Glyphs** — `glyphs` (`TellGlyphsAction`, list), `glyph equip` (`EquipGlyphsAction`),
+`remove glyph` (`RemoveGlyphAction`). Glyph-slot management (using inscription products), not
+Inscription leveling.
+
+**Not available:** there are no `disenchant` / `prospect` / `mill` / `smelt` / "enchant my item"
+commands. The only profession-adjacent automation is **disenchanting via the loot strategy**
+(`ll disenchant` / `ll skill` modes — see the `ll` row above), which CleanBot already exposes as
+the Loot Quality dropdown.
 
 ### go — move to a unit / object / coordinates (`GoAction.cpp`)
 Trigger `go` — confirmed in the `supported` vector (trigger == action; action name is `"Go"`).
