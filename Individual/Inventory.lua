@@ -203,6 +203,25 @@ local function CB_ShowInvMenu(cell, key)
             end
             addItemCmd("Trade", "t", false)
             addItemCmd("Sell",  "s", true)
+
+            -- Deposit to the guild bank (bags → guild-bank tab 0). Deposit-only: the server
+            -- can't list or withdraw a bot's guild bank, and the guild bank is shared guild-wide.
+            -- Needs the bot in your guild at a guild vault with deposit rights; failures surface
+            -- via the CLEANBOT_NO_GUILD_BANK popup (raised from the whisper handler in Bridge.lua).
+            info.text = "Deposit to Guild Bank"
+            info.func = function()
+                local entry = CleanBot_PartyBots[key]
+                if not entry then return end
+                NS.CB_SendBotCommand(entry.name, "guild bank " .. NS.CB_CleanItemLink(cell.itemLink))
+                -- Optimistic clear (mirrors Use/Sell); reconcile restores the cell on failure.
+                cell.icon:Hide()
+                cell.countText:Hide()
+                cell.itemLink = nil
+                NS.CB_ClearQualityBorder(cell)
+                NS.CB_SetRarityOverlay(cell, nil)
+                NS.CB_ScheduleReconcile(key, entry.name)
+            end
+            UIDropDownMenu_AddButton(info)
         end
 
         -- Deposit is on plain right-click while the bank is open (see the cell OnClick),
@@ -391,6 +410,17 @@ end
 -- (raised from the no-banker whisper handler in Bridge.lua). %s = bot name.
 StaticPopupDialogs["CLEANBOT_NO_BANKER"] = {
     text         = "%s has no banker nearby. Move the bot next to a banker NPC, then try again.",
+    button1      = OKAY,
+    timeout      = 0,
+    whileDead    = true,
+    hideOnEscape = true,
+}
+
+-- Shown when a "guild bank <item>" deposit fails (raised from the guild-bank whisper handler in
+-- Bridge.lua): bot not in your guild, no guild vault nearby, or no deposit rights. %s = bot name.
+StaticPopupDialogs["CLEANBOT_NO_GUILD_BANK"] = {
+    text         = "%s couldn't deposit to the guild bank. The bot must be in your guild, standing "
+                .. "at a guild vault, with deposit rights for the first tab.",
     button1      = OKAY,
     timeout      = 0,
     whileDead    = true,

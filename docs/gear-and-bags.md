@@ -21,6 +21,10 @@ window shows everything the bot carries plus its money. From here you can:
 - **Use** an item (food, potions, quest items…).
 - **Equip** gear straight from the bags.
 - **Sell Trash** — vendor all the bot's gray items in one click (a vendor must be nearby).
+- **Deposit to Guild Bank** — right-click an item and choose this to drop it into your guild's
+  vault. The bot has to be **in your guild**, standing at a **guild vault**, with **deposit
+  rights**; otherwise CleanBot tells you so. This is deposit-only — the server can't show a bot's
+  guild bank contents, so there's no guild-bank window to browse or withdraw from.
 
 ## At a vendor
 

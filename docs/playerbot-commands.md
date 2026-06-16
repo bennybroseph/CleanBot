@@ -69,6 +69,7 @@ action name in `ChatActionContext.h`.**
 | `revive` | `revive` | `TriggerNode("revive")` → `spirit healer` action | ✅ (Action Bar "Release" flyout) |
 | `b <link>` | `b` | `TriggerNode("b")` → buy (`BuyAction`) | ✅ (vendor extension — a selected bot buys the right-clicked merchant item) |
 | `s <link>` | `s` | `TriggerNode("s")` → sell (`SellAction`) | ✅ (vendor extension + inventory "Sell" menu) |
+| `guild bank <link>` | `guild bank` | `GuildBankAction` (deposit only) | ✅ (inventory "Deposit to Guild Bank" menu — deposit-only, no list/withdraw) |
 
 ---
 
@@ -83,6 +84,7 @@ action name in `ChatActionContext.h`.**
 | `s gray` | ✅ | Inventory "Sell Trash" button. **The trigger is `s`, not `sell`** — `ChatCommandHandlerStrategy` registers `TriggerNode("s") → SellAction`; there is NO `sell` trigger. Whispering `sell gray` matches no command and (with `enableAutoTradeOnItemMention`) makes the bot open a *trade* on the "gray" keyword instead of vendor-selling. Whisper-only (not bridge-allowlisted); sells only when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Params: `s gray` / `s *` / `s vendor` / `s <itemlink>`. |
 | `b <link>` (vendor buy) | ✅ | **Vendor frame extension** (`Merchant.lua`). With a bot selected on the vendor's portrait tabs/dropdown, right-clicking a merchant item sends `b <itemlink>` so that bot buys it. Trigger `b` (`BuyAction`); whisper-only (not bridge-allowlisted); the bot must be within interaction range of the vendor — CleanBot does a client-side proxy range check (`CheckInteractDistance` to the bot, since the player is at the vendor) and flashes a `UIErrorsFrame` warning instead of sending if it's too far. |
 | `s <link>` (vendor sell) | ✅ | Vendor-sells a single item from a bot's bags. Used by the **vendor extension** (right-click an item in a bot's open bag window while a merchant is up) and the inventory **"Sell"** context-menu entry. Uncommon-or-better items confirm first (bots have **no buyback**). Trigger `s` (`SellAction`); whisper-only; needs a vendor in range. (Bulk `s gray` is the separate "Sell Trash" button above.) |
+| `guild bank <link>` (deposit) | ✅ | Deposits one bag item into **guild-bank tab 0**. Used by the inventory **"Deposit to Guild Bank"** context-menu entry. `GuildBankAction`; whisper-only (not bridge-allowlisted). **Deposit-only** — the server can't list or withdraw a bot's guild bank, and the guild bank is shared guild-wide, so there is no grid to mirror. Requires the bot in **your guild**, at a **guild vault**, with **deposit rights** for the first tab; failures raise the `CLEANBOT_NO_GUILD_BANK` popup. |
 | `e <link>` (equip) | ⚠️ | Resolves via `parseItems` — accepts far more than links. |
 | `ue <link>` (unequip) | ✅ | |
 | `u <link>` (use item) | ✅ | |
@@ -205,7 +207,7 @@ repair cost and rest-XP are present but unused.
    `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
 
 ### Lower priority / situational
-`mail` / `send mail` / `check mail`, `bank` / `guild bank`, `trainer` / `train`, `taxi`,
+`mail` / `send mail` / `check mail`, `trainer` / `train`, `taxi`,
 `glyphs` (`TellGlyphsAction` / `EquipGlyphsAction`), info queries `position` / `los` /
 `reputation` / `emblems`, pet management
 (`pet attack`, `set pet stance`, `toggle pet spell`), `teleport` (`TeleportAction`),

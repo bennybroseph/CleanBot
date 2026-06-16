@@ -1091,6 +1091,17 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
+        -- Guild-bank deposit failure ("guild bank <item>" from the inventory menu). The reply is
+        -- hidden from chat by the reply-window filter, so surface the reason as a popup. Gated on
+        -- entry (a managed bot), so a human whisper can't trip it. Success ("put to guild bank")
+        -- falls through — hidden by the filter and ignored by parsing.
+        if entry and (strfind(msg, "Cannot find the guild bank nearby", 1, true)
+            or strfind(msg, "to guild bank. I have no rights", 1, true)
+            or strfind(msg, "I'm not in your guild!", 1, true)) then
+            StaticPopup_Show("CLEANBOT_NO_GUILD_BANK", entry.name)
+            return
+        end
+
         -- Spec-list collection: reply lines from "talents spec list", one premade
         -- per line, e.g. "1. arms pve (51-0-20)". Only actual spec lines are consumed
         -- (and reset the silence timeout); any other line falls through to the branches
