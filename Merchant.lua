@@ -238,6 +238,22 @@ local function CB_AcquireTab(key)
 end
 
 -- ── Dropdown (raid mode) ─────────────────────────────────────────────────────
+-- Class-colored "[icon] name" label for the dropdown's CLOSED/selected text (open rows tint via
+-- info.colorCode instead). Mirrors the Individual tab's bot dropdown (CB_ClassIconMarkup + RAID_CLASS_COLORS).
+local function CB_DropLabel(class, name)
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    local colored = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, name) or name
+    return NS.CB_ClassIconMarkup(class) .. " " .. colored
+end
+
+-- Stamps a menu entry with the class icon + class-colored name (open-list rows tint via colorCode).
+local function CB_DropEntry(info, class, name)
+    info.text         = NS.CB_ClassIconMarkup(class) .. " " .. name
+    info.notCheckable = true
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+end
+
 local function CB_BuildDropdown()
     if not dropdown then
         dropdown = NS.CB_CreateDropdown(stripContainer, "CleanBotMerchantDropdown", 120)
@@ -251,23 +267,28 @@ local function CB_BuildDropdown()
         invBtn:SetPoint("LEFT", dropdown, "RIGHT",
             (dropdown.marginRight or 0) + (invBtn.marginLeft or 0), 0)
     end
+    local _, playerClass = UnitClass("player")
     UIDropDownMenu_Initialize(dropdown, function()
         local info = UIDropDownMenu_CreateInfo()
-        info.text = "Player"
-        info.func = function() CB_SelectKey("player"); UIDropDownMenu_SetText(dropdown, "Player") end
+        CB_DropEntry(info, playerClass, "Player")   -- the player's own class icon + color
+        info.func = function()
+            CB_SelectKey("player"); UIDropDownMenu_SetText(dropdown, CB_DropLabel(playerClass, "Player"))
+        end
         UIDropDownMenu_AddButton(info)
         NS.CB_ForEachGroupMember(function(_, name)
             local k = name and strlower(name)
             local e = k and CleanBot_PartyBots[k]
             if e then
                 local i2 = UIDropDownMenu_CreateInfo()
-                i2.text = e.name
-                i2.func = function() CB_SelectKey(k); UIDropDownMenu_SetText(dropdown, e.name) end
+                CB_DropEntry(i2, e.class, e.name)
+                i2.func = function()
+                    CB_SelectKey(k); UIDropDownMenu_SetText(dropdown, CB_DropLabel(e.class, e.name))
+                end
                 UIDropDownMenu_AddButton(i2)
             end
         end)
     end)
-    UIDropDownMenu_SetText(dropdown, "Player")
+    UIDropDownMenu_SetText(dropdown, CB_DropLabel(playerClass, "Player"))
     dropdown:Show()
     invBtn:Show()
 end
