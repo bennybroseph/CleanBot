@@ -161,10 +161,26 @@ default Free Roam), each with a **Free Roam** entry that clears all five for tha
 | `follow` | ✅ | Follow the master (FollowMasterStrategy). |
 | `stay` | ✅ | Hold position. |
 | `guard` | ✅ | Guard a spot — engage what comes, return after. |
-| `runaway` | ✅ | Keep distance from enemies generally. |
-| `flee from adds` | ✅ | Flee specifically from add packs. |
+| `runaway` | ✅ | Keep distance from enemies (`RunAwayAction` → `Flee`; see note). |
+| `flee from adds` | ✅ | Flee specifically from add packs (`"has nearest adds"` → `runaway` @ 50). |
 | `return` | ⬜ | Return to the master after straying (one-shot action, not in the exclusive group). |
-| `flee` | ⬜ | One-shot flee behavior (also an action other strategies invoke). |
+| `flee` | ⬜ | NOT in the exclusive group — both an action (`FleeAction`) and a standalone strategy (`FleeStrategy`); see note. |
+
+**Flee vs. runaway (source-verified, `MovementActions.cpp` / `FleeManager.cpp`).** Both resolve to a
+*single* `MoveTo` per execution — the continuous "keep your distance" feel comes from a strategy
+**re-firing the action each tick** (rate-limited by `lastFlee`, ~2–`returnDelay`/1000 s), not from the
+action looping.
+- **`flee` action** (`FleeAction::Execute`) → `MoveAway(current target, fleeDistance, backwards)`: steps
+  straight away from the current target along the first valid angle in a ±90° fan. `isUseful` only when
+  the target is in **melee range** and the bot isn't channeling — a no-op at range. Does **not** use
+  `FleeManager`.
+- **`runaway` action** (`RunAwayAction::Execute`) → `Flee(group leader)`: if the bot is the enemy's
+  target it moves *near* a friendly tank/master; otherwise near dps/healers; failing that it falls back
+  to **`FleeManager`**, which samples a ring at `GetRange("flee")`, discards directions toward enemies /
+  no-LOS / water, and picks the point **maximizing summed distance to all nearby enemies**.
+- **`flee` strategy** (`FleeStrategy`, name `"flee"`) is standalone (not the exclusive movement group):
+  triggers `panic` / `outnumbered` (→ flee @ `ACTION_EMERGENCY+9`) and `critical health` (→ flee).
+- Relevant config: `fleeDistance`, `fleeingEnabled`, `returnDelay` (the flee throttle), `sightDistance`.
 
 The same `supportsSiblings` mechanism makes the **assist** group (`dps assist` / `dps aoe` /
 `tank assist`) and the **quest** group (`quest` / `accept all quests`) mutually exclusive too.

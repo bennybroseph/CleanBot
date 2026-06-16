@@ -378,6 +378,21 @@ local function CB_TagSelfWhisper(recipient, text)
     list[#list + 1] = GetTime()
 end
 
+-- Same provenance problem for broadcast commands: the player's own party/raid echo
+-- (CHAT_MSG_PARTY/RAID, sender = the player) is indistinguishable from a manually typed line, so we
+-- tag each broadcast CleanBot sends. Keyed by text only (sender is always the player); ChatFilter
+-- consumes one tag per matching echo and expires stale ones.
+NS.selfGroupMessages = NS.selfGroupMessages or {}   -- [text] = { GetTime(), ... }
+
+---@param text string  Exact party/raid message the addon is broadcasting.
+local function CB_TagSelfGroup(text)
+    if not text or text == "" then return end
+    local list = NS.selfGroupMessages[text]
+    if not list then list = {}; NS.selfGroupMessages[text] = list end
+    list[#list + 1] = GetTime()
+end
+NS.CB_TagSelfGroup = CB_TagSelfGroup
+
 -- Raw dispatch: the actual bridge-or-whisper send. Routes through the bridge (silent) when
 -- present and the command is allowlisted; otherwise whispers. Honors the debugSimulate and
 -- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for

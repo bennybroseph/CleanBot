@@ -16,5 +16,6 @@ dofile("spec/strategies_spec.lua")
 dofile("spec/overhear_spec.lua")
 dofile("spec/overhear_appliers_spec.lua")
 dofile("spec/layout_spec.lua")
+dofile("spec/actionbar_layout_spec.lua")
 
 _RUN_FINISH()

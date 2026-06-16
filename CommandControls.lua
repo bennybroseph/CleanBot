@@ -37,6 +37,9 @@ NS.CB_SendGroupCommand = function(cmd)
         NS.CB_Print("You are not in a party or raid.")
         return
     end
+    -- Hide our own party/raid echo (chat window) and its world chat bubble (gated on Hide Bot Chatter).
+    if NS.CB_TagSelfGroup then NS.CB_TagSelfGroup(cmd) end
+    if NS.CB_HideOwnBubble then NS.CB_HideOwnBubble(cmd) end
     -- The broadcast reaches every bot and each may whisper a reply (e.g. formation's
     -- "Formation: ..."). Open a reply window per managed bot so ChatFilter hides those
     -- replies — the per-bot whisper path does this automatically via CB_SendBotCommandRaw.
@@ -74,6 +77,56 @@ NS.CB_SetGroupPassive = function(on)
         end)
     end
     NS.CB_SendGroupCommand("co " .. (on and "+passive" or "-passive"))
+end
+
+-- Group-wide movement mode, broadcast-style (shared by the action bar's Follow/Flee/Stay flyout). The
+-- five movement strategies are mutually exclusive, so a "value" is the single active one per state
+-- (combat = entry.combat, non-combat = entry.nonCombat). NS.MOVEMENT_STRATEGIES (Strategies.lua) is
+-- read at call time — it loads after this file.
+
+--- Builds the exclusive "+sel,-others" toggle body that selects one movement field (nil = Free Roam,
+--- clears all five).
+---@param selField string?  The chosen strategy's field (e.g. "mFollow"), or nil to clear.
+---@return string           Comma-joined toggle body (no "co"/"nc" prefix).
+NS.CB_MovementToggleString = function(selField)
+    local parts = {}
+    for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do
+        parts[#parts + 1] = (m.field == selField and "+" or "-") .. m.cmd
+    end
+    return table.concat(parts, ",")
+end
+
+--- True when ANY group member has `field` as its active movement in `section` ("combat"/"nonCombat").
+---@param section string  "combat" or "nonCombat".
+---@param field   string  Movement field (e.g. "mFollow").
+---@return boolean
+NS.CB_GroupMovementActive = function(section, field)
+    local any = false
+    if NS.CB_ForEachGroupMember then
+        NS.CB_ForEachGroupMember(function(_, name)
+            local e = name and CleanBot_PartyBots[strlower(name)]
+            if e and e[section] and e[section][field] then any = true end
+        end)
+    end
+    return any
+end
+
+--- Sets every group member's movement in `section` to `selField` (nil = Free Roam): optimistically
+--- caches the exclusive state, then broadcasts the matching co/nc toggle.
+---@param section   string   "combat" (→ "co") or "nonCombat" (→ "nc").
+---@param selField  string?  Movement field to select, or nil to clear all five.
+NS.CB_SetGroupMovement = function(section, selField)
+    if NS.CB_ForEachGroupMember then
+        NS.CB_ForEachGroupMember(function(_, name)
+            local e = name and CleanBot_PartyBots[strlower(name)]
+            if e then
+                e[section] = e[section] or {}
+                for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do e[section][m.field] = (m.field == selField) end
+            end
+        end)
+    end
+    local prefix = (section == "combat") and "co" or "nc"
+    NS.CB_SendGroupCommand(prefix .. " " .. NS.CB_MovementToggleString(selField))
 end
 
 -- Refreshes every Commands-tab control (formation dropdowns + passive checkboxes) from its

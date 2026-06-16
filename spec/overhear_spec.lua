@@ -75,6 +75,21 @@ describe("Overhear command classification", function()
         assert.is_nil(k("outfit raid"))     -- outfit without equip/replace
         assert.is_nil(k("hello there"))
     end)
+
+    it("classifies bare movement one-shots (whole message only)", function()
+        local kind, verb, rest = NS.CB_ClassifyChatCommand("follow")
+        assert.equals("movement", kind); assert.equals("follow", verb); assert.equals("", rest)
+        assert.equals("movement", k("stay"))
+        assert.equals("movement", k("runaway"))
+        assert.equals("movement", k("flee from adds"))   -- multi-word movement strategy
+        assert.equals("movement", k("FOLLOW"))           -- case-insensitive
+    end)
+
+    it("does not treat 'flee' or movement words with trailing text as movement commands", function()
+        assert.is_nil(k("flee"))            -- transient one-shot; no persistent field
+        assert.is_nil(k("follow me"))       -- trailing text → not the bare command
+        assert.is_nil(k("stay safe"))
+    end)
 end)
 
 describe("Overhear token validation", function()

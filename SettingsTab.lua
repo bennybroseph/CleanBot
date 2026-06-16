@@ -745,12 +745,16 @@ NS.CleanBot_BuildSettingsTab = function()
         end
     end
 
+    -- ── Other tab: ScrollFrame (content scrolls, like Theme/Layout) ──
+    local otherSF, otherChild = NS.CB_CreateScrollFrame(otherPanel, "CleanBotOtherScroll")
+    otherChild:SetHeight(1)   -- placeholder; sized to fit the content below (see updateOtherHeight)
+
     -- ── Other tab: Bot Emotes ──────────────────────────────────
-    local botEmotesHeader = NS.CB_CreateHeader(otherPanel, "Behavior")
-    NS.CB_AnchorWall(botEmotesHeader, otherPanel, "TOPLEFT")
+    local botEmotesHeader = NS.CB_CreateHeader(otherChild, "Behavior")
+    NS.CB_AnchorWall(botEmotesHeader, otherChild, "TOPLEFT")
 
     local EMOTE_TOOLTIP = "When enabled, switching to a bot's tab in the Individual panel sends an \"emote wave\" command, making them wave at you."
-    local botEmotesCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotBotEmotesCB", "Enable Bot Emotes", EMOTE_TOOLTIP)
+    local botEmotesCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotBotEmotesCB", "Enable Bot Emotes", EMOTE_TOOLTIP)
     botEmotesCB:SetChecked(NS.botEmotes)
     NS.CB_AnchorBelow(botEmotesCB, botEmotesHeader)
 
@@ -768,7 +772,7 @@ NS.CleanBot_BuildSettingsTab = function()
     -- mid-session / on reload would flip it the wrong way). Live state is tracked from the
     -- server's "Enable/Disable player botAI" messages instead. Not ElvUI-gated.
     local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
-    local selfBotCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotSelfBotCB", "Auto-Enable Self as Bot", SELF_BOT_TOOLTIP)
+    local selfBotCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotSelfBotCB", "Auto-Enable Self as Bot", SELF_BOT_TOOLTIP)
     selfBotCB:SetChecked(NS.manageSelf == true)
     NS.CB_AnchorBelow(selfBotCB, botEmotesCB)
     -- Exposed so the first-time popup can tick the box when it enables the preference.
@@ -806,7 +810,7 @@ NS.CleanBot_BuildSettingsTab = function()
     -- there; ElvUI shows item quality through its own button border.
     if not NS.ElvUI_S then
         local ITEM_GLOW_TOOLTIP = "When enabled, items and equipment of uncommon quality or higher show a rarity-colored glow."
-        local itemGlowCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotItemGlowCB", "Enable Item Glow", ITEM_GLOW_TOOLTIP)
+        local itemGlowCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotItemGlowCB", "Enable Item Glow", ITEM_GLOW_TOOLTIP)
         itemGlowCB:SetChecked(NS.itemGlow ~= false)
         NS.CB_AnchorBelow(itemGlowCB, selfBotCB)
         lastBehaviorCB = itemGlowCB
@@ -825,7 +829,7 @@ NS.CleanBot_BuildSettingsTab = function()
     -- server command output it triggers out of the chat window (see ChatFilter.lua).
     -- The filters read NS.hideBotChatter live, so toggling here applies immediately.
     local HIDE_CHATTER_TOOLTIP = "When enabled, CleanBot hides its own whispered commands, the bot replies it requests (stats, strategies, inventory, quests), and the server output it triggers from your chat window. Turn off to see the raw traffic for testing."
-    local hideChatterCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotHideChatterCB", "Hide Bot Chatter", HIDE_CHATTER_TOOLTIP)
+    local hideChatterCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotHideChatterCB", "Hide Bot Chatter", HIDE_CHATTER_TOOLTIP)
     hideChatterCB:SetChecked(NS.hideBotChatter ~= false)
     NS.CB_AnchorBelow(hideChatterCB, lastBehaviorCB)
 
@@ -837,10 +841,10 @@ NS.CleanBot_BuildSettingsTab = function()
     end)
 
     -- ── Action Bar section (mirrors the minimap right-click toggles) ────
-    local actionBarHeader = NS.CB_CreateHeader(otherPanel, "Action Bar")
+    local actionBarHeader = NS.CB_CreateHeader(otherChild, "Action Bar")
     NS.CB_AnchorBelow(actionBarHeader, hideChatterCB)
 
-    local actionBarCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotActionBarCB", "Show Action Bar",
+    local actionBarCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotActionBarCB", "Show Action Bar",
         "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")
     actionBarCB:SetChecked(NS.actionBarShown == true)
     NS.CB_AnchorBelow(actionBarCB, actionBarHeader)
@@ -848,7 +852,7 @@ NS.CleanBot_BuildSettingsTab = function()
         if NS.CB_SetActionBarShown then NS.CB_SetActionBarShown(self:GetChecked() and true or false) end
     end)
 
-    local actionBarEditCB = NS.CB_CreateLabeledCheckBox(otherPanel, "CleanBotActionBarEditCB", "Action Bar Edit Mode",
+    local actionBarEditCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotActionBarEditCB", "Action Bar Edit Mode",
         "Disable the action bar's buttons and let it be dragged to reposition (it snaps to nearby frames). Resets off each session. Also: Shift+Right-click the minimap icon.")
     actionBarEditCB:SetChecked(NS.actionBarEditMode == true)
     NS.CB_AnchorBelow(actionBarEditCB, actionBarCB)
@@ -861,6 +865,107 @@ NS.CleanBot_BuildSettingsTab = function()
         actionBarCB:SetChecked(NS.actionBarShown == true)
         actionBarEditCB:SetChecked(NS.actionBarEditMode == true)
     end
+
+    -- "Customize" collapsible section: per-button enable/disable, laid out in LIVE BAR ORDER. Each slot
+    -- has a master checkbox (show/hide the whole button); multi-action slots also list a checkbox per
+    -- action (the bar button is the first enabled action; the rest are its flyout) indented beneath.
+    -- Toggling applies live + persisted; reordering is by shift-dragging the buttons on the bar — which
+    -- calls CB_RefreshActionBarButtonList to re-flow this list into the new order.
+    local customSec = NS.CB_CreateSection(otherChild, "actionBarCustomize", "Customize", 4)
+    NS.CB_AnchorBelow(customSec.toggleBtn, actionBarEditCB)
+
+    -- Pre-create every checkbox once (positioned later by relayoutButtonRows). slotMasterCB[slotId];
+    -- actionCB[slotId][actionId] (multi-action slots only).
+    local slotMasterCB, actionCB = {}, {}
+    for _, s in ipairs(NS.CB_actionSlots or {}) do
+        local master = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABSlotSet_" .. s.id, s.title,
+            "Show or hide the " .. s.title .. " button.")
+        master:SetScript("OnClick", function(self)
+            if NS.CB_SetSlotEnabled then NS.CB_SetSlotEnabled(s.id, self:GetChecked() and true or false) end
+        end)
+        slotMasterCB[s.id] = master
+        if #s.actions > 1 then
+            actionCB[s.id] = {}
+            for _, a in ipairs(s.actions) do
+                local acb = NS.CB_CreateLabeledCheckBox(customSec.bg, "CleanBotABActSet_" .. s.id .. "_" .. a.id, a.title, a.desc)
+                acb:SetScript("OnClick", function(self)
+                    if NS.CB_SetChildEnabled then NS.CB_SetChildEnabled(s.id, a.id, self:GetChecked() and true or false) end
+                end)
+                actionCB[s.id][a.id] = acb
+            end
+        end
+    end
+
+    -- Size the scroll child to fit the content (like the Manage tab) so the scrollbar range matches.
+    -- The bottommost visible widget is the Customize section's anchor; GetTop/GetBottom need a rendered
+    -- frame, so the update is deferred via a one-shot OnUpdate.
+    local function updateOtherHeight()
+        local top, last = otherChild:GetTop(), customSec:GetAnchor()
+        local bottom = last and last:GetBottom()
+        if not (top and bottom) then return end
+        local contentH = top - bottom + (last.marginBottom or 0) + (otherChild.paddingBottom or 0)
+        otherChild:SetHeight(math.max(contentH, otherSF:GetHeight() or 0))
+    end
+    local function scheduleOtherUpdate()
+        otherChild:SetScript("OnUpdate", function(self)
+            self:SetScript("OnUpdate", nil)
+            customSec:UpdateBackground()
+            updateOtherHeight()
+        end)
+    end
+
+    -- Lays out the checkboxes in live bar order: slot masters flush-left, their actions indented in
+    -- flyout order. Two-anchor (LEFT to bg for X, TOP to prev for Y) keeps masters flush regardless of
+    -- the indented action above. Sets the section's last widget so its bg + the scroll height track it.
+    local function relayoutButtonRows()
+        local lay  = NS.CB_actionBarLayout or {}
+        local padL = (customSec.bg.paddingLeft or 0)
+        local prev = nil
+        for _, sid in ipairs(lay.slotOrder or {}) do
+            local master = slotMasterCB[sid]
+            if master then
+                master:ClearAllPoints()
+                master:SetPoint("LEFT", customSec.bg, "LEFT", padL, 0)
+                if prev then master:SetPoint("TOP", prev, "BOTTOM", 0, -4)
+                else          master:SetPoint("TOP", customSec.bg, "TOP", 0, -(customSec.bg.paddingTop or 0)) end
+                prev = master
+                local order = lay.childOrder and lay.childOrder[sid]
+                if order and actionCB[sid] then
+                    for _, aid in ipairs(order) do
+                        local acb = actionCB[sid][aid]
+                        if acb then
+                            acb:ClearAllPoints()
+                            acb:SetPoint("LEFT", customSec.bg, "LEFT", padL + 18, 0)
+                            acb:SetPoint("TOP", prev, "BOTTOM", 0, -4)
+                            prev = acb
+                        end
+                    end
+                end
+            end
+        end
+        customSec.lastWidget, customSec.frame = prev, prev
+    end
+
+    -- Syncs checkbox states from the live layout AND re-flows the rows into the current bar order. Called
+    -- at build and by ActionBar after it loads SavedVars / after a shift-drag reorder.
+    NS.CB_RefreshActionBarButtonList = function()
+        for sid, master in pairs(slotMasterCB) do
+            master:SetChecked(not NS.CB_IsSlotEnabled or NS.CB_IsSlotEnabled(sid))
+        end
+        for sid, acts in pairs(actionCB) do
+            for aid, acb in pairs(acts) do
+                acb:SetChecked(not NS.CB_IsChildEnabled or NS.CB_IsChildEnabled(sid, aid))
+            end
+        end
+        relayoutButtonRows()
+        scheduleOtherUpdate()
+    end
+
+    relayoutButtonRows()
+    customSec:Apply()                            -- show/position the section bg
+    NS.CB_RefreshActionBarButtonList()
+    customSec.onToggle = scheduleOtherUpdate      -- recompute height after collapse/expand
+    NS.CB_RegisterRelayout(function() relayoutButtonRows(); scheduleOtherUpdate() end)
 
     -- ── Debug tab ──────────────────────────────────────────────
     -- Revealed by /cbdebug enable (persisted). Immediate-on-change — no Apply:
