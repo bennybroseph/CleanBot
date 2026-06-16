@@ -243,7 +243,7 @@ local function CB_BuildDropdown()
         -- Top-center of the vendor frame (the top-left corner holds the frame's portrait icon),
         -- nudged down like the cog. Anchored to MerchantFrame, not the narrow vertical column.
         dropdown:SetPoint("TOP", MerchantFrame, "TOP", -52, 12)
-        invBtn = NS.CB_CreateButton(stripContainer, "CleanBotMerchantInvBtn", "Inventory", 80, 2 ,
+        invBtn = NS.CB_CreateButton(stripContainer, "CleanBotMerchantInvBtn", "Inventory", 80, 22,
             function() CB_OpenBotInventory(selectedKey) end)
         invBtn:SetPoint("LEFT", dropdown, "RIGHT", 2, 2)
     end
