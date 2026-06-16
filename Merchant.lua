@@ -49,6 +49,19 @@ local function CB_HasBots()
     return found
 end
 
+--- True if the bot looks close enough to interact with the open vendor; otherwise warns the user
+--- with Blizzard-style red error text and returns false. There's no direct bot↔vendor distance in
+--- 3.3.5a, so we proxy off the PLAYER (who is necessarily at the vendor while it's open) via
+--- CheckInteractDistance — index 2 = Trade range (~11yd). nil also covers out-of-visibility bots.
+---@param botName string?
+---@return boolean inRange
+NS.CB_CheckBotVendorRange = function(botName)
+    local unit = botName and NS.CB_FindPartyUnit(botName)
+    if unit and CheckInteractDistance(unit, 2) then return true end
+    UIErrorsFrame:AddMessage((botName or "Bot") .. " is too far from the vendor.", 1.0, 0.1, 0.1)
+    return false
+end
+
 -- ── Buy overlays ─────────────────────────────────────────────────────────────
 --- Shows each overlay only when the feature is enabled, a bot is selected, we're on the
 --- buy tab (not buyback), and the merchant slot button is shown. One gate covers
@@ -99,7 +112,10 @@ local function CB_CreateMerchantOverlays()
                 if not entry then return end
                 local link = GetMerchantItemLink(iconBtn:GetID())
                 if not link then return end
-                NS.CB_SendBotCommand(entry.name, "b " .. NS.CB_CleanItemLink(link))
+                if not NS.CB_CheckBotVendorRange(entry.name) then return end   -- too far → warn, don't send
+                local clean = NS.CB_CleanItemLink(link)
+                NS.CB_SendBotCommand(entry.name, "b " .. clean)
+                NS.CB_OptimisticBuy(selectedKey, entry.name, clean)            -- update an open bag window
             end)
 
             overlay:Hide()

@@ -80,6 +80,7 @@
       "UIDropDownMenu_SetWidth",
       "UIDROPDOWNMENU_INIT_MENU",
       "UIDROPDOWNMENU_MENU_LEVEL",
+      "UIErrorsFrame",
       "UnitPopupButtons",
       "UnitPopupMenus",
       "UnitPopupShown",

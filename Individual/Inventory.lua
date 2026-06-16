@@ -253,9 +253,18 @@ KINDS.bank.menu      = CB_ShowBankMenu
 -- Uncommon-or-better items confirm first (bots have no vendor buyback). The popup
 -- registers lazily because NS.CB_RegisterConfirmPopup lives in ManageTab.lua, which
 -- loads after this file.
-local function CB_DoSell(key, entry, link)
+local function CB_DoSell(cell, key, entry)
+    local link = cell.itemLink
+    if not link then return end
     NS.CB_SendBotCommand(entry.name, "s " .. NS.CB_CleanItemLink(link))
-    NS.CB_ScheduleReconcile(key, entry.name)   -- refetch the open window after the sell
+    -- Optimistic update: a vendor sale clears the whole stack — blank the cell now (mirrors the
+    -- right-click "Use" path), then reconcile against the bot's real bags.
+    cell.icon:Hide()
+    cell.countText:Hide()
+    cell.itemLink = nil
+    NS.CB_ClearQualityBorder(cell)
+    NS.CB_SetRarityOverlay(cell, nil)
+    NS.CB_ScheduleReconcile(key, entry.name)
 end
 
 local function CB_EnsureSellPopup()
@@ -264,7 +273,9 @@ local function CB_EnsureSellPopup()
         "Sell %s? Bots have no buyback, so this can't be undone.",
         function(_, data)
             local e = data and data.key and CleanBot_PartyBots[data.key]
-            if e then CB_DoSell(data.key, e, data.link) end
+            -- Only sell if the cell still holds the same item (guard against a refresh between
+            -- the popup opening and confirmation).
+            if e and data.cell and data.cell.itemLink == data.link then CB_DoSell(data.cell, data.key, e) end
         end)
 end
 
@@ -273,12 +284,13 @@ end
 local function CB_MerchantSellCell(cell, key, entry)
     local link = cell.itemLink
     if not link then return end
+    if NS.CB_CheckBotVendorRange and not NS.CB_CheckBotVendorRange(entry.name) then return end
     local _, _, quality = GetItemInfo(link)
     if (quality or 0) >= 2 then
         CB_EnsureSellPopup()
-        StaticPopup_Show("CLEANBOT_MERCHANT_SELL", link, nil, { key = key, link = link })
+        StaticPopup_Show("CLEANBOT_MERCHANT_SELL", link, nil, { cell = cell, key = key, link = link })
     else
-        CB_DoSell(key, entry, link)
+        CB_DoSell(cell, key, entry)
     end
 end
 
@@ -320,6 +332,29 @@ local function CB_OptimisticMove(srcCell, destFrame, destCell)
     NS.CB_ApplyItemVisuals(dest, link)
     if count then dest.countText:SetText(count); dest.countText:Show()
     else dest.countText:Hide() end
+end
+
+-- Optimistically shows a freshly BOUGHT item in the bot's open bag window (if any), then
+-- reconciles. Buying happens at the merchant, so the window is usually closed — then this is a
+-- no-op. Adds to the first empty cell; the count/stacking is left to the reconcile to correct.
+---@param key     string  Bot name-key.
+---@param botName string  Bot's display name (for the reconcile).
+---@param link    string  The bought item's link.
+NS.CB_OptimisticBuy = function(key, botName, link)
+    local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+    if f and f:IsShown() and f.cells then
+        for _, c in ipairs(f.cells) do
+            if c:IsShown() and not c.itemLink then
+                c.icon:SetTexture(GetItemIcon(strmatch(link, "item:(%d+)") or 0))
+                c.icon:Show()
+                c.itemLink = link
+                NS.CB_ApplyItemVisuals(c, link)
+                c.countText:Hide()
+                break
+            end
+        end
+        NS.CB_ScheduleReconcile(key, botName)
+    end
 end
 
 -- ── Deposit / withdraw between a bot's bags and bank ─────────────────────
