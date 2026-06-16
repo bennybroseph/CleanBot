@@ -26,6 +26,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 - Target Party/Raid Members to Swap to Them
 - Manage gear through drag and drop or context menus
     - View Gold and Items in an intuitive and familiar interface
+    - Open Bank (if nearby a banker) or Sell Grays (if near a vendor)
 
 <img width="500" alt="image" src="https://github.com/user-attachments/assets/dc808972-03ca-414a-8a1a-70af408bcb1b" />
 <img width="300" alt="603430857-b9f2179f-db59-44a8-880e-b999b6505b41" src="https://github.com/user-attachments/assets/e747a2d9-e461-402c-97ad-d386d6e49ec6" />
