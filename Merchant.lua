@@ -25,13 +25,30 @@ local selectedKey  = "player"   -- "player" (don't interfere) | strlower(botName
 local built        = false      -- overlays + strip/cog created once at PLAYER_LOGIN
 
 -- Widgets (assigned in the build step; referenced as upvalues by the helpers below).
-local stripContainer, cogBtn, cogPanel, dropdown, invBtn
+local stripContainer, cogBtn, cogPanel, dropdown, invBtn, shoppingLabel
 local tabPool       = {}         -- [key] = portrait tab Button (pooled across rebuilds)
 local merchantOverlays = {}      -- [i]   = right-click overlay over MerchantItem{i}ItemButton
 local openedInvKeys = {}         -- bot inventory windows we opened, hidden on MERCHANT_CLOSED
 
-local PORTRAIT_SIZE   = 32
 local MERCHANT_SLOTS  = MERCHANT_ITEMS_PER_PAGE or 10
+
+-- ── Layout constants (positions & sizes — tweak these to move the UI around) ──
+local PORTRAIT_SIZE = 32     -- portrait tab / cog square (matches the spellbook side-tab template)
+local TAB_PITCH     = -17    -- vertical step between stacked side tabs (native spellbook spacing)
+local STRIP_X       = -33    -- column X from MerchantFrame TOPRIGHT (the cog shares it)
+local STRIP_Y       = -80    -- first portrait tab Y (the cog sits above, at COG_Y)
+local STRIP_H       = 400    -- column height (tall enough for any party)
+local COG_Y         = -28    -- cog Y from MerchantFrame TOPRIGHT
+local PANEL_W       = 150    -- cog settings panel size
+local PANEL_H       = 44
+local PANEL_X       = 2      -- settings panel offset from the cog's TOPRIGHT (opens up-right)
+local PANEL_Y       = 2
+local DROP_X        = -52    -- raid dropdown offset from MerchantFrame TOP (top-center-ish)
+local DROP_Y        = 12
+local INV_BTN_W     = 80     -- raid "Inventory" button size
+local INV_BTN_H     = 22
+local LABEL_Y_BLIZZ = -50    -- "Shopping for" banner Y (Blizzard title height)
+local LABEL_Y_ELVUI = -35    -- "Shopping for" banner Y (ElvUI title height)
 
 --- Accessor for Inventory.lua's cell right-click: true while a vendor is open so a
 --- plain right-click on a bot inventory item sells it (mirrors NS.CB_GetActiveTradeKey).
@@ -52,14 +69,36 @@ end
 --- True if the bot looks close enough to interact with the open vendor; otherwise warns the user
 --- with Blizzard-style red error text and returns false. There's no direct bot↔vendor distance in
 --- 3.3.5a, so we proxy off the PLAYER (who is necessarily at the vendor while it's open) via
---- CheckInteractDistance — index 2 = Trade range (~11yd). nil also covers out-of-visibility bots.
+--- CheckInteractDistance — index 3 = Duel range (~9.9yd). nil also covers out-of-visibility bots.
 ---@param botName string?
 ---@return boolean inRange
 NS.CB_CheckBotVendorRange = function(botName)
     local unit = botName and NS.CB_FindPartyUnit(botName)
-    if unit and CheckInteractDistance(unit, 2) then return true end
+    if unit and CheckInteractDistance(unit, 3) then return true end
     UIErrorsFrame:AddMessage((botName or "Bot") .. " is too far from the vendor.", 1.0, 0.1, 0.1)
     return false
+end
+
+-- ── Selected-bot label ───────────────────────────────────────────────────────
+-- Class-colored "[icon] name" markup (name tinted, class icon on the left). Reused by the raid
+-- dropdown and the "Shopping for" banner. Mirrors the Individual tab (CB_ClassIconMarkup + RAID_CLASS_COLORS).
+local function CB_NameMarkup(class, name)
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    local colored = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, name) or name
+    return NS.CB_ClassIconMarkup(class) .. " " .. colored
+end
+
+-- Updates the "Shopping for <bot>" banner: shown only while a bot is selected on the buy tab.
+local function CB_RefreshShoppingLabel()
+    if not shoppingLabel then return end
+    local e = merchantOpen and NS.vendorEnabled and selectedKey ~= "player"
+        and MerchantFrame.selectedTab == 1 and CleanBot_PartyBots[selectedKey]
+    if e then
+        shoppingLabel:SetText("Shopping for " .. CB_NameMarkup(e.class, e.name))
+        shoppingLabel:Show()
+    else
+        shoppingLabel:Hide()
+    end
 end
 
 -- ── Buy overlays ─────────────────────────────────────────────────────────────
@@ -75,6 +114,7 @@ local function CB_RefreshOverlays()
         -- silently failed). The OnClick re-checks the link, so an unloaded slot is a harmless no-op.
         if active and overlay.iconBtn:IsShown() then overlay:Show() else overlay:Hide() end
     end
+    CB_RefreshShoppingLabel()
 end
 
 local function CB_HideOverlays()
@@ -141,8 +181,33 @@ local function CB_MarkSelected(tab, active)
     end
 end
 
---- Selects a tab/dropdown entry: "player" (passthrough) or a bot key. Updates the
---- active highlight on visible portrait tabs and refreshes the buy overlays.
+--- Opens a bot's inventory window beside the merchant (for selling). No-op for the player.
+--- Closes any other open bot inventory window first so only one is up at a time (no clutter).
+local function CB_OpenBotInventory(key)
+    if key == "player" then return end
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    if NS.botInventoryFrames then
+        for k, f in pairs(NS.botInventoryFrames) do
+            if k ~= key and f:IsShown() then f:Hide() end
+        end
+    end
+    NS.CB_RequestInventory(key, entry.name, MerchantFrame)
+    openedInvKeys[key] = true
+end
+
+--- True if a bot inventory window we opened from the vendor is currently shown.
+local function CB_AnyInventoryShown()
+    for k in pairs(openedInvKeys) do
+        local f = NS.botInventoryFrames and NS.botInventoryFrames[k]
+        if f and f:IsShown() then return true end
+    end
+    return false
+end
+
+--- Selects a tab/dropdown entry: "player" (passthrough) or a bot key. Updates the active
+--- highlight on visible portrait tabs and refreshes the buy overlays. If a bot inventory window
+--- is already open, follows the selection — swapping it to the newly-picked bot's bags.
 local function CB_SelectKey(key)
     selectedKey = key
     for k, tab in pairs(tabPool) do
@@ -150,15 +215,10 @@ local function CB_SelectKey(key)
     end
     CB_UpdateInvBtn()
     CB_RefreshOverlays()
-end
-
---- Opens a bot's inventory window beside the merchant (for selling). No-op for the player.
-local function CB_OpenBotInventory(key)
-    if key == "player" then return end
-    local entry = CleanBot_PartyBots[key]
-    if not entry then return end
-    NS.CB_RequestInventory(key, entry.name, MerchantFrame)
-    openedInvKeys[key] = true
+    if key ~= "player" and CB_AnyInventoryShown() then
+        local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+        if not (f and f:IsShown()) then CB_OpenBotInventory(key) end   -- swap to this bot's bags
+    end
 end
 
 -- ── Portrait tabs (party mode) ───────────────────────────────────────────────
@@ -254,14 +314,6 @@ local function CB_AcquireTab(key)
 end
 
 -- ── Dropdown (raid mode) ─────────────────────────────────────────────────────
--- Class-colored "[icon] name" label for the dropdown's CLOSED/selected text (open rows tint via
--- info.colorCode instead). Mirrors the Individual tab's bot dropdown (CB_ClassIconMarkup + RAID_CLASS_COLORS).
-local function CB_DropLabel(class, name)
-    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
-    local colored = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, name) or name
-    return NS.CB_ClassIconMarkup(class) .. " " .. colored
-end
-
 -- Stamps a menu entry with the class icon + class-colored name (open-list rows tint via colorCode).
 local function CB_DropEntry(info, class, name)
     info.text         = NS.CB_ClassIconMarkup(class) .. " " .. name
@@ -275,8 +327,8 @@ local function CB_BuildDropdown()
         dropdown = NS.CB_CreateDropdown(stripContainer, "CleanBotMerchantDropdown", 120)
         -- Top-center of the vendor frame (the top-left corner holds the frame's portrait icon),
         -- nudged down like the cog. Anchored to MerchantFrame, not the narrow vertical column.
-        dropdown:SetPoint("TOP", MerchantFrame, "TOP", -52, 12)
-        invBtn = NS.CB_CreateButton(stripContainer, "CleanBotMerchantInvBtn", "Inventory", 80, 22,
+        dropdown:SetPoint("TOP", MerchantFrame, "TOP", DROP_X, DROP_Y)
+        invBtn = NS.CB_CreateButton(stripContainer, "CleanBotMerchantInvBtn", "Inventory", INV_BTN_W, INV_BTN_H,
             function() CB_OpenBotInventory(selectedKey) end)
         -- Gap from the dropdown uses the spacing model (element-to-element = before.marginRight +
         -- widget.marginLeft); LEFT↔RIGHT centers the button vertically on the dropdown.
@@ -288,7 +340,7 @@ local function CB_BuildDropdown()
         local info = UIDropDownMenu_CreateInfo()
         CB_DropEntry(info, playerClass, "Player")   -- the player's own class icon + color
         info.func = function()
-            CB_SelectKey("player"); UIDropDownMenu_SetText(dropdown, CB_DropLabel(playerClass, "Player"))
+            CB_SelectKey("player"); UIDropDownMenu_SetText(dropdown, CB_NameMarkup(playerClass, "Player"))
         end
         UIDropDownMenu_AddButton(info)
         NS.CB_ForEachGroupMember(function(_, name)
@@ -298,13 +350,13 @@ local function CB_BuildDropdown()
                 local i2 = UIDropDownMenu_CreateInfo()
                 CB_DropEntry(i2, e.class, e.name)
                 i2.func = function()
-                    CB_SelectKey(k); UIDropDownMenu_SetText(dropdown, CB_DropLabel(e.class, e.name))
+                    CB_SelectKey(k); UIDropDownMenu_SetText(dropdown, CB_NameMarkup(e.class, e.name))
                 end
                 UIDropDownMenu_AddButton(i2)
             end
         end)
     end)
-    UIDropDownMenu_SetText(dropdown, CB_DropLabel(playerClass, "Player"))
+    UIDropDownMenu_SetText(dropdown, CB_NameMarkup(playerClass, "Player"))
     dropdown:Show()
     invBtn:Show()
 end
@@ -355,7 +407,7 @@ local function CB_RebuildStrip()
             local name = (key == "player") and UnitName("player") or CleanBot_PartyBots[key].name
             CB_SetTabPortrait(tab, key, name)
             tab:ClearAllPoints()
-            if prev then tab:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -17)   -- native side-tab pitch
+            if prev then tab:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, TAB_PITCH)
             else         tab:SetPoint("TOPLEFT", stripContainer, "TOPLEFT", 0, 0) end
             CB_MarkSelected(tab, key == "player")
             tab:Show()
@@ -372,16 +424,23 @@ local function CB_BuildStrip()
     stripContainer:SetFrameStrata("HIGH")
     -- Vertical column down the frame's RIGHT outer edge, below the cog. (MerchantFrame opens at
     -- the screen's top-left by default, so a left-edge column would sit off-screen; the right is clear.)
-    stripContainer:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", -33, -80)
-    stripContainer:SetSize(PORTRAIT_SIZE, 400)
+    stripContainer:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", STRIP_X, STRIP_Y)
+    stripContainer:SetSize(PORTRAIT_SIZE, STRIP_H)
     stripContainer:Hide()
+
+    -- "Shopping for <bot>" banner, centered over the top of the vendor. Parented to the strip (so it
+    -- hides with the feature) but anchored to MerchantFrame. The merchant title sits at a different
+    -- height on ElvUI vs the Blizzard frame, so the vertical offset is path-specific (tune in-game).
+    shoppingLabel = stripContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    shoppingLabel:SetPoint("TOP", MerchantFrame, "TOP", 0, NS.ElvUI_S and LABEL_Y_ELVUI or LABEL_Y_BLIZZ)
+    shoppingLabel:Hide()
 
     -- Cog: a tab matching the portraits (same spellbook side-tab template), at the top of the
     -- column. Separate frame so Enable-off (which hides the strip) never hides it. Hover fades
     -- its settings panel in/out; it never enters the "selected" (checked) state.
     cogBtn = CreateFrame("CheckButton", "CleanBotMerchantCog", UIParent, "SpellBookSkillLineTabTemplate")
     cogBtn:SetFrameStrata("HIGH")
-    cogBtn:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", -33, -28)
+    cogBtn:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", STRIP_X, COG_Y)
     CB_SkinTab(cogBtn)   -- ElvUI: gold frame → flat dark backdrop (no-op on Blizzard)
     -- Gear as a separate ARTWORK icon, mirroring the inventory-cell skin (CB_SkinItemButtonCore):
     -- the template's NormalTexture kept the icon's baked border under ElvUI, but a plain texture
@@ -396,8 +455,8 @@ local function CB_BuildStrip()
 
     cogPanel = NS.CB_CreatePanel(UIParent, "CleanBotMerchantCogPanel", 1, "panel")
     cogPanel:SetFrameStrata("HIGH")
-    cogPanel:SetSize(150, 44)
-    cogPanel:SetPoint("BOTTOMLEFT", cogBtn, "TOPRIGHT", 2, 2)   -- opens up and to the right
+    cogPanel:SetSize(PANEL_W, PANEL_H)
+    cogPanel:SetPoint("BOTTOMLEFT", cogBtn, "TOPRIGHT", PANEL_X, PANEL_Y)   -- opens up and to the right
     cogPanel:EnableMouse(true)
     cogPanel:SetAlpha(0)
     cogPanel:Hide()
@@ -473,6 +532,7 @@ eventFrame:SetScript("OnEvent", function(_, event)
         if stripContainer then stripContainer:Hide() end
         if cogBtn then cogBtn:Hide() end
         if cogPanel then cogPanel:Hide() end
+        if shoppingLabel then shoppingLabel:Hide() end
         for key in pairs(openedInvKeys) do
             local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
             if f and f:IsShown() then f:Hide() end
