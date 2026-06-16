@@ -48,6 +48,16 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 
 <img width="700" alt="image" src="https://github.com/user-attachments/assets/35b672aa-a48c-4b41-805d-12ebec7209dc" />
 
+# Mini Action Bar
+- Freely Movable, Snappable, Disableable, and Reorderable
+- Revive/Release
+- Follow/Stay/Runaway
+- Toggle Passive
+- Pull and Attack
+- Summon
+
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/30a522cf-69bc-4505-8c6c-29e0e81ea82f" />
+
 # Settings Tab
 - Change Transparency, Scale, Accent Color, and Layout Values
 - Enable or Disable a /wave from the bot when selecting them in the UI
