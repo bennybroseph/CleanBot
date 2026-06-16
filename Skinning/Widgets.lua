@@ -808,13 +808,66 @@ NS.CB_CreateDropdown = function(parent, name, width)
     return dd
 end
 
+-- Applies an ElvUI-matching skin to a CheckButton by styling the box and its checked
+-- texture DIRECTLY, deliberately NOT using ElvUI's HandleCheckBox.
+--
+-- Why not HandleCheckBox: it calls CreateBackdrop(), which builds a separate `.backdrop`
+-- child frame, then anchors the checked texture inside that child (checkedTexture:SetInside(
+-- frame.backdrop)). ElvUI parks the backdrop child at the checkbox's OWN frame level, and
+-- inside a ScrollFrame a same-level child draws on top of the checkbox's own textures — so
+-- the backdrop fill covers the check mark and every box reads as unchecked (Settings → Other).
+-- Same child-`.backdrop`-in-a-scroll root cause documented on CB_SkinEditBoxSafe and
+-- CB_CreateDropdown. Styling the box itself adds no child frame, so there is nothing to
+-- mis-stack at any nesting depth.
+-- No-op when ElvUI is absent (UICheckButtonTemplate provides its own look).
+---@param cb table  The CheckButton to skin.
+NS.CB_SkinCheckBoxSafe = function(cb)
+    if not NS.ElvUI_S then return end
+    local E     = NS.ElvUI_E
+    local blank = (E and E.media and E.media.blank) or "Interface\\ChatFrame\\ChatFrameBackground"
+    local melli = (E and E.Media and E.Media.Textures and E.Media.Textures.Melli) or blank
+    local bc    = (E and E.db and E.db.general and E.db.general.bordercolor) or {}
+
+    -- Drop the stock box / hover art (no child frame involved, unlike ElvUI's StripTextures).
+    cb:SetNormalTexture("")
+    cb:SetPushedTexture("")
+    cb:SetHighlightTexture("")
+    cb:SetDisabledTexture("")
+
+    -- The box itself becomes the backdrop (dark fill + 1px border), mirroring CB_SkinEditBoxSafe.
+    cb:SetBackdrop({
+        bgFile   = blank,
+        edgeFile = blank,
+        tile     = false,
+        edgeSize = 1,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    cb:SetBackdropColor(0.06, 0.06, 0.06, 1)
+    cb:SetBackdropBorderColor(bc.r or 0.3, bc.g or 0.3, bc.b or 0.3, 1)
+
+    -- Checked / disabled-checked = a colored fill inset within the box (ElvUI's checkBoxSkin
+    -- look), anchored to the checkbox ITSELF — no child backdrop frame to mis-stack in a scroll.
+    local function insetFill(getter, r, g, b)
+        local t = getter and getter(cb)
+        if not t then return end
+        t:SetVertexColor(r, g, b, 0.8)
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT",     cb, "TOPLEFT",      4, -4)
+        t:SetPoint("BOTTOMRIGHT", cb, "BOTTOMRIGHT", -4,  4)
+    end
+    cb:SetCheckedTexture(melli)
+    insetFill(cb.GetCheckedTexture, 1, 0.82, 0)            -- gold (matches HandleCheckBox)
+    cb:SetDisabledCheckedTexture(melli)
+    insetFill(cb.GetDisabledCheckedTexture, 0.6, 0.6, 0.6) -- gray
+end
+
 -- UICheckButtonTemplate check button.
 ---@param parent table   Parent frame.
 ---@param name   string? Optional global frame name.
 ---@return table         The created CheckButton with margins stamped.
 NS.CB_CreateCheckBox = function(parent, name)
     local cb = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
-    if NS.ElvUI_S then NS.ElvUI_S:HandleCheckBox(cb) end
+    NS.CB_SkinCheckBoxSafe(cb)
     cb.marginTop    = NS.MARGIN.checkbox.top
     cb.marginBottom = NS.MARGIN.checkbox.bottom
     cb.marginLeft   = NS.MARGIN.checkbox.left
