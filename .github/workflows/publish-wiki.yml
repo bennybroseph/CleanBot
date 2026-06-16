@@ -5,9 +5,11 @@ name: Publish Wiki
 # single source of truth and the wiki as a generated mirror — never hand-edit the wiki.
 #
 # Each docs/<name>.md becomes a wiki page titled from the filename
-# (playerbot-commands.md -> "Playerbot Commands"). Intra-doc relative links like
-# (playerbot-strategies.md) are rewritten to the matching wiki page, and a _Sidebar.md
-# nav is generated. The hand-made Home page (and anything else in the wiki) is left alone.
+# (playerbot-commands.md -> "Playerbot Commands"); docs/Home.md becomes the wiki landing page.
+# Intra-doc relative links like (playerbot-strategies.md) are rewritten to the matching wiki
+# page, and a grouped _Sidebar.md nav is generated (the curated order lives in the build step
+# below; any doc not listed there is appended under "Other"). Anything else already present in
+# the wiki is left alone.
 on:
   push:
     branches: [ main ]
@@ -48,9 +50,7 @@ jobs:
 
           git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
 
-          sidebar="wiki/_Sidebar.md"
-          printf '### CleanBot\n\n' > "$sidebar"
-
+          # Copy each doc to its wiki page, rewriting intra-doc links to wiki slugs.
           for f in docs/*.md; do
             base="$(basename "$f" .md)"
             slug="${MAP[$base]}"
@@ -63,10 +63,51 @@ jobs:
               dst="${MAP[$src]}"
               sed -i -E "s@\]\(${src}\.md(#[^)]*)?\)@](${dst}\1)@g" "$out"
             done
-
-            title="$(echo "$slug" | tr '-' ' ')"
-            printf -- '- [[%s|%s]]\n' "$title" "$slug" >> "$sidebar"
           done
+
+          # ── Curated, grouped sidebar ──────────────────────────────────────────────
+          # Basenames are listed per heading in the order they should appear. Home is
+          # pinned to the top; any docs/*.md not listed below is appended under "Other"
+          # so a newly-added doc never silently vanishes from the nav.
+          sidebar="wiki/_Sidebar.md"
+          declare -A SEEN
+          {
+            printf '### CleanBot\n\n'
+            printf -- '- [[Home]]\n\n'
+          } > "$sidebar"
+          SEEN["Home"]=1
+
+          emit_section() {            # $1 = heading; $2.. = basenames in order
+            local heading="$1"; shift
+            local printed=0 base slug title
+            for base in "$@"; do
+              [ -f "docs/${base}.md" ] || continue
+              if [ "$printed" -eq 0 ]; then
+                printf -- '**%s**\n\n' "$heading" >> "$sidebar"; printed=1
+              fi
+              slug="${MAP[$base]}"; title="$(echo "$slug" | tr '-' ' ')"
+              printf -- '- [[%s|%s]]\n' "$title" "$slug" >> "$sidebar"
+              SEEN["$base"]=1
+            done
+            [ "$printed" -eq 1 ] && printf '\n' >> "$sidebar"
+          }
+
+          emit_section "User Guide" getting-started action-bar managing-bots bot-behavior gear-and-bags settings
+          emit_section "Reference"  playerbot-commands playerbot-strategies bridge-protocol debug-tools
+
+          # Catch-all: any doc not placed under a heading above.
+          others=()
+          for f in docs/*.md; do
+            base="$(basename "$f" .md)"
+            [ -n "${SEEN[$base]:-}" ] || others+=("$base")
+          done
+          if [ "${#others[@]}" -gt 0 ]; then
+            printf -- '**Other**\n\n' >> "$sidebar"
+            for base in "${others[@]}"; do
+              slug="${MAP[$base]}"; title="$(echo "$slug" | tr '-' ' ')"
+              printf -- '- [[%s|%s]]\n' "$title" "$slug" >> "$sidebar"
+            done
+          fi
 
       - name: Commit + push to wiki
         run: |

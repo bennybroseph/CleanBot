@@ -62,6 +62,11 @@ action name in `ChatActionContext.h`.**
 | `ll <mode>` / `ll ?` | `ll` | `supported` | ✅ ("Loot Quality" dropdown, Non-Combat tab — see "Commands already sends") |
 | `equip upgrade` | `equip upgrade` | `supported` | ✅ ("Auto-Equip" button — see "Commands already sends") |
 | `roll` | `roll` | `supported` | ✅ ("Roll" button — see "Commands already sends") |
+| `summon` | `summon` | `supported` | ✅ (Action Bar "Summon" button + unit right-click menu) |
+| `do attack my target` (+`@tank`/`@heal`/`@dps`/`@melee`/`@ranged`) | `do` | `PlayerbotAI::HandleCommand` — `do <action>` → `DoSpecificAction` | ✅ (Action Bar "Attack" flyout) |
+| `pull my target` | `pull` | `TriggerNode("pull")` → `pull my target` action | ✅ (Action Bar "Pull" button) |
+| `release` | `release` | `supported` | ✅ (Action Bar "Release" flyout) |
+| `revive` | `revive` | `TriggerNode("revive")` → `spirit healer` action | ✅ (Action Bar "Release" flyout) |
 
 ---
 
@@ -89,6 +94,10 @@ action name in `ChatActionContext.h`.**
 | `ll <mode>` / `ll ?` | ✅ | "Loot Quality" dropdown (Non-Combat tab, Individual + Group). `LootStrategyAction` (modes in `src/Ai/Base/Value/LootStrategyValue.h`); trigger `ll` in `supported`. The bot's loot-quality policy — exclusive, one strategy at a time. **Default: `normal`** (`LootStrategyValue` is a `ManualSetValue<LootStrategy*>` seeded with `normal`). Modes (verified from each strategy's `CanLoot()` in `LootStrategyValue.cpp` + `ItemUsageValue::Calculate`): **`normal`** = items with a non-`NONE` `ItemUsage` — note a gray item with a sell price resolves to `ITEM_USAGE_VENDOR`, so **`normal` DOES loot gray vendor-trash**; it skips only truly no-value items; **`gray`** = `normal` **+** all poor-quality items (incl. zero-sell-value grays `normal` skips); **`all`** = everything (`CanLoot` returns true); **`disenchant`** = `normal` **+** uncommon-or-better, non-bind-on-pickup weapons/armor (disenchantable). **Query:** `ll ?` whispers back `Loot strategy: <mode>` (plus an `Always loot items: …` list), parsed in `Bridge.lua` into `entry.lootStrategy` and reflected in the dropdown (Group shows "Mixed" when members differ). Modeled like `formation` (a `?`-queried command **setting**, not an `nc` strategy) — a `type="settingDropdown"` group in `NS.NC_STRATEGIES`. Whisper-only (not bridge-allowlisted); per-host scope: Individual → open bot, Group → selected members (fan-out). `ll <itemlink>` / `ll -<itemlink>` manage a per-item **always-loot list** — *not surfaced*. (`loot`, the auto-loot on/off strategy, is the separate "Auto Loot" `nc` checkbox.) |
 | `equip upgrade` | ✅ | "Auto-Equip" button (Commands inner tab + Manage → Party/Raid). `EquipUpgradeAction`; trigger `equip upgrade` in `supported`. Scans the bot's bags and equips stat **upgrades** — non-destructive (only swaps in improvements), so **no confirmation**, unlike `autogear` (which re-gears wholesale). Whisper-only; per-host scope matches the rest of the command set. |
 | `roll` | ✅ | "Roll" button (Commands inner tab + Manage → Party/Raid). `LootRollAction`; trigger `roll` in `supported`. **Bare `roll` → `bot->DoRandomRoll(0,100)`** — the bot does a `/random 0-100` (e.g. for manual loot distribution). `roll <itemlink>` instead makes an item-usage need/greed decision on that item — *not surfaced* (the button sends bare `roll`). Whisper-only. |
+| `summon` | ✅ | **Action Bar "Summon" button** (+ the unit right-click menu's "Summon", `UnitMenu.lua`). `summon` is in `supported` (`SummonAction`) — teleports the bot to you. The Action Bar path broadcasts via `CB_SendGroupCommand` (whole group); the unit-menu path whispers a single bot. Whisper-only (not bridge-allowlisted). |
+| `do attack my target` | ✅ | **Action Bar "Attack" flyout.** Uses the `do <action>` command (`PlayerbotAI::HandleCommand` strips `do `/`d ` and calls `DoSpecificAction`), which force-runs a named action directly, bypassing trigger relevance — here the `attack my target` action (the same action the bare `attack` and tank-only `tank attack` triggers map to). The flyout's role variants prepend an `@` qualifier: the base = **no `@`** (whole group), then `@tank` / `@heal` / `@dps` / `@melee` / `@ranged`. Broadcast to the group (`CB_SendGroupCommand` → PARTY/RAID), so one message reaches every bot and the `@` filter (see "Command targeting") selects who reacts. Whisper-only path is never taken (group broadcast). |
+| `pull my target` | ✅ | **Action Bar "Pull" button.** `TriggerNode("pull")` → `pull my target` action. The bot's class `pull` strategy + PullMultiplier drive the actual pull (auto-selects the equipped ranged-weapon shot; PullMultiplier vetoes everything else mid-pull) — see playerbot-strategies.md. `pull` is **class-gated** (no Hunter/Shaman `pull` token — see the class matrix), so only bots that registered it react. Broadcast via `CB_SendGroupCommand`. (`pull back` and `pull rti` triggers also map to pull actions — unused; the `RTI` opcode's `pull rti target` is allowlist plumbing only.) |
+| `release` / `revive` | ✅ | **Action Bar "Release" flyout** — death-state control. `release` (`supported`; `ReleaseSpiritAction`) releases a dead bot's spirit (it becomes a ghost). `revive` (`TriggerNode("revive")` → the **`spirit healer`** action — *not* `ReviveFromCorpseAction`) brings a released bot back at the nearest spirit healer. Both broadcast via `CB_SendGroupCommand`. |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)
 Prefix operators on each strategy token:
@@ -179,25 +188,28 @@ repair cost and rest-XP are present but unused.
 5. **`s`** (`SellAction`) / **`b`** (`BuyAction`) — vendor interactions (triggers are the short
    forms `s`/`b`, not `sell`/`buy`). `s gray` is used (Sell Trash button); other `s` forms and
    `b` remain unused.
-6. **`release` / `revive`** (`ReleaseSpiritAction` / `ReviveFromCorpseAction`) — death-state control.
-7. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
-8. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
+6. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
+7. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
    Most relevant form: **`go <unit name>` walks the bot to a nearby matching NPC/player by
    name** — e.g. stepping a bot onto a **banker** so the `bank` commands pass their proximity
    check. (Bounded by the bot's search range — it's the last-leg positioner, not a long-haul
    travel; pair with `summon`/`follow` to get the bot into the area first.)
-9. **Movement one-shots:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`. Note `flee` ≠
-   `runaway`: `flee` (`FleeAction`) is a single `MoveAway` straight from the current target and only
-   fires when that target is in **melee range**; `runaway` (`RunAwayAction` → `Flee`) repositions near a
-   friendly or to `FleeManager`'s optimal max-distance point. Both are one `MoveTo` per call (no loop) —
-   see `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
+8. **Movement one-shot triggers:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`
+   (TriggerNodes → `"<name> chat shortcut"`). **Unused by CleanBot** — the Action Bar's Movement
+   flyout (Follow / Stay / Runaway) instead drives the *persistent* **movement strategies** via
+   `co`/`nc` (the exclusive movement group), not these one-shot shortcuts. Note `flee` ≠ `runaway`:
+   `flee` (`FleeAction`) is a single `MoveAway` straight from the current target and only fires when
+   that target is in **melee range**; `runaway` (`RunAwayAction` → `Flee`) repositions near a friendly
+   or to `FleeManager`'s optimal max-distance point. Both are one `MoveTo` per call (no loop) — see
+   `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
 
 ### Lower priority / situational
 `mail` / `send mail` / `check mail`, `bank` / `guild bank`, `trainer` / `train`, `taxi`,
 `glyphs` (`TellGlyphsAction` / `EquipGlyphsAction`), info queries `position` / `los` /
 `reputation` / `emblems`, pet management
-(`pet attack`, `set pet stance`, `toggle pet spell`), `summon` / teleport (`TeleportAction`),
-and the dynamic `help` command (live command + strategy lists).
+(`pet attack`, `set pet stance`, `toggle pet spell`), `teleport` (`TeleportAction`),
+and the dynamic `help` command (live command + strategy lists). (`summon` is **used** — see
+"Commands CleanBot already sends".)
 
 ### go — move to a unit / object / coordinates (`GoAction.cpp`)
 Trigger `go` — confirmed in the `supported` vector (trigger == action; action name is `"Go"`).
@@ -278,6 +290,10 @@ have not set a key, showing the `setKey` command in a copyable popup (`ManageTab
 
 ## Source map
 - Command → action registration: `src/Ai/Base/ActionContext.h`
+- Chat **triggers** (trigger ≠ action; `attack`/`pull`/`release`/`revive`/`follow`/… + the
+  `supported` vector): `src/Ai/Base/Strategy/ChatCommandHandlerStrategy.cpp`
+- Command dispatch + the `do <action>` / `d <action>` force-run (`DoSpecificAction`):
+  `src/Bot/PlayerbotAI.cpp` (`PlayerbotAI::HandleCommand`)
 - Strategy parsing: `src/Ai/Base/Actions/ChangeStrategyAction.cpp`
 - Talents: `src/Ai/Base/Actions/ChangeTalentsAction.cpp`
 - Item resolution / `items`: `src/Ai/Base/Actions/InventoryAction.cpp`

@@ -385,7 +385,12 @@ instead of tank.
   Movement** (writes/reads the `co` list, default Free Roam). Each is a normal single-state
   exclusive dropdown (reuses `CB_ApplyExclusiveSelection`); the `noneLabel` clear entry =
   nil selection drops all five. (The Paladin Blessings dropdowns use the same `noneLabel`
-  mechanism with `"None"`.)
+  mechanism with `"None"`.) The **Action Bar Movement flyout** (Follow / Stay / Runaway,
+  `ActionBar.lua`) is a third surface onto the same strategies: Follow/Stay apply to whichever
+  list matches the **player's** current combat state (in combat → `co`, else → `nc`), while
+  **Runaway** always sets the `runaway` strategy in the **combat** list and auto-reverts to the
+  previous combat movement when combat ends (`PLAYER_REGEN_ENABLED`). The same three words are
+  also parsed when overheard in chat (`Overhear.lua`).
 - Useful unexposed candidates: `formation` (the combat strategy — distinct from the
   Formation *command*), `move from group`, `adds`, `collision`, `mount`, Shaman resistance
   totems (`frost resistance` / `fire resistance` / `nature resistance`), Paladin `bthreat`.
