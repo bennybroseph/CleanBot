@@ -50,16 +50,17 @@ local function CB_HasBots()
 end
 
 -- ── Buy overlays ─────────────────────────────────────────────────────────────
---- Shows each overlay only when the feature is enabled, a bot is selected, we're on
---- the buy tab (not buyback), and the slot actually holds an item. One gate covers
---- player-selected, disabled, buyback tab, and empty/partial-page slots.
+--- Shows each overlay only when the feature is enabled, a bot is selected, we're on the
+--- buy tab (not buyback), and the merchant slot button is shown. One gate covers
+--- player-selected, disabled, buyback tab, and empty/partial-page (hidden) slots.
 local function CB_RefreshOverlays()
     local active = merchantOpen and NS.vendorEnabled
         and selectedKey ~= "player" and MerchantFrame.selectedTab == 1
     for _, overlay in ipairs(merchantOverlays) do
-        local btn  = overlay.iconBtn
-        local show = active and btn:IsShown() and (GetMerchantItemLink(btn:GetID()) ~= nil)
-        if show then overlay:Show() else overlay:Hide() end
+        -- Don't gate on a cached item link: it can be nil for a beat after the vendor opens,
+        -- which left the overlay hidden exactly when a bot was first selected (so the first buy
+        -- silently failed). The OnClick re-checks the link, so an unloaded slot is a harmless no-op.
+        if active and overlay.iconBtn:IsShown() then overlay:Show() else overlay:Hide() end
     end
 end
 
@@ -245,7 +246,10 @@ local function CB_BuildDropdown()
         dropdown:SetPoint("TOP", MerchantFrame, "TOP", -52, 12)
         invBtn = NS.CB_CreateButton(stripContainer, "CleanBotMerchantInvBtn", "Inventory", 80, 22,
             function() CB_OpenBotInventory(selectedKey) end)
-        invBtn:SetPoint("LEFT", dropdown, "RIGHT", 2, 2)
+        -- Gap from the dropdown uses the spacing model (element-to-element = before.marginRight +
+        -- widget.marginLeft); LEFT↔RIGHT centers the button vertically on the dropdown.
+        invBtn:SetPoint("LEFT", dropdown, "RIGHT",
+            (dropdown.marginRight or 0) + (invBtn.marginLeft or 0), 0)
     end
     UIDropDownMenu_Initialize(dropdown, function()
         local info = UIDropDownMenu_CreateInfo()
