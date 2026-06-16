@@ -4,9 +4,21 @@
 -- ============================================================
 local NS = CleanBotNS
 
--- Applies ElvUI's standard icon crop to a texture. Trims the rounded edges that
--- are baked into WoW's icon and paperdoll slot textures, giving them a square look.
--- No-op when ElvUI is not installed.
+-- The standard icon-border crop (~8% per side). A FIXED value on purpose: ElvUI-WotLK sets
+-- E.TexCoords = {0,1,0,1} (it does not crop icons), so deferring to it would be a no-op.
+local ICON_CROP = { 0.08, 0.92, 0.08, 0.92 }
+
+-- Crops the rounded border baked into a WoW icon texture so it reads as a square. Always applies
+-- a real crop, on BOTH paths. Use for any standalone icon button (e.g. the merchant cog).
+---@param texture table?  The texture to crop.
+NS.CB_CropIcon = function(texture)
+    if not texture then return end
+    texture:SetTexCoord(unpack(ICON_CROP))
+end
+
+-- Crops an icon to ElvUI's OWN coords, ElvUI path only, so paperdoll/inventory item buttons match
+-- ElvUI's native treatment (which on the WotLK backport is {0,1,0,1} = uncropped). No-op without
+-- ElvUI. Deliberately distinct from CB_CropIcon, which always applies a real crop.
 ---@param texture table  The texture to crop.
 NS.CB_ApplyElvCoords = function(texture)
     if not NS.ElvUI_E then return end

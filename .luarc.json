@@ -57,6 +57,8 @@
       "InviteUnit",
       "IsAddOnLoaded",
       "MAX_PLAYER_LEVEL",
+      "MERCHANT_ITEMS_PER_PAGE",
+      "MerchantFrame",
       "NORMAL_FONT_COLOR",
       "OKAY",
       "OpacitySliderFrame",
