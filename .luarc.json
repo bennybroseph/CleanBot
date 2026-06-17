@@ -50,6 +50,7 @@
       "GetQuestLogSelection",
       "GetQuestLogTitle",
       "GetTalentTabInfo",
+      "GetTexCoordsForRole",
       "HIGHLIGHT_FONT_COLOR",
       "InspectFrame",
       "InitiateTrade",

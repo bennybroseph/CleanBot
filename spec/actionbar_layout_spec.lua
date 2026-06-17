@@ -75,3 +75,35 @@ describe("ActionBar CB_MoveToVisibleIndex", function()
         assert.same({ "d", "a", "b", "c" }, NS.CB_MoveToVisibleIndex({ "a", "b", "c", "d" }, cOff, "d", 1))
     end)
 end)
+
+describe("ActionBar CB_ScoreFlyoutDir (flyout direction priority)", function()
+    local SW, SH = 1000, 800
+
+    it("prefers an on-screen rect over one that hangs off the edge", function()
+        local onScreen = NS.CB_ScoreFlyoutDir(100, 100, 200, 200, {}, SW, SH)
+        local offRight = NS.CB_ScoreFlyoutDir(950, 100, 1100, 200, {}, SW, SH)  -- 100px past the right edge
+        assert.is_true(onScreen > offRight)
+    end)
+
+    it("prefers a rect that doesn't overlap an avoid rect (the bar / parent flyout)", function()
+        local avoid   = { { 100, 100, 300, 300 } }
+        local clear   = NS.CB_ScoreFlyoutDir(500, 100, 600, 200, avoid, SW, SH)  -- no overlap
+        local covered = NS.CB_ScoreFlyoutDir(150, 150, 250, 250, avoid, SW, SH)  -- inside the avoid rect
+        assert.is_true(clear > covered)
+    end)
+
+    it("breaks ties toward the screen center", function()
+        -- Both on-screen and non-overlapping; the one centered on the screen wins.
+        local nearCenter = NS.CB_ScoreFlyoutDir(450, 350, 550, 450, {}, SW, SH)  -- center ≈ (500,400)
+        local nearEdge   = NS.CB_ScoreFlyoutDir(10, 10, 110, 110, {}, SW, SH)
+        assert.is_true(nearCenter > nearEdge)
+    end)
+
+    it("ranks off-screen worse than overlap worse than center (full ordering)", function()
+        local centered  = NS.CB_ScoreFlyoutDir(450, 350, 550, 450, { { 0, 0, 10, 10 } }, SW, SH)  -- clear, centered
+        local overlapped = NS.CB_ScoreFlyoutDir(450, 350, 550, 450, { { 400, 300, 600, 500 } }, SW, SH) -- big overlap
+        local offscreen  = NS.CB_ScoreFlyoutDir(-200, 350, -100, 450, {}, SW, SH)                  -- fully off-screen
+        assert.is_true(centered > overlapped)
+        assert.is_true(overlapped > offscreen)
+    end)
+end)

@@ -446,6 +446,91 @@ NS.CB_SetActionBarEditMode = function(on)
 end
 NS.CB_ToggleActionBarEditMode = function() NS.CB_SetActionBarEditMode(not NS.actionBarEditMode) end
 
+-- ── Flyout geometry (shared by the single-level and nested flyouts) ──────────
+-- One set of helpers so every flyout — the reorderable Attack/Movement/Release ones and the nested
+-- Recruit tree — expands the same predictable way: perpendicular to its reference flow, away from the
+-- bar and the snapped frame, biased toward the screen center.
+
+-- Screen rect a flyout would occupy growing `dir` from `btn`, for `n` BTN-sized children.
+local function CB_FlyoutRect(btn, dir, n)
+    local bl, bb = btn:GetLeft(), btn:GetBottom()
+    if not bl then return end
+    local bw, bh, len = btn:GetWidth(), btn:GetHeight(), n * (BTN + GAP)
+    if dir == "DOWN"  then return bl, bb - len, bl + bw, bb end
+    if dir == "UP"    then return bl, bb + bh, bl + bw, bb + bh + len end
+    if dir == "RIGHT" then return bl + bw, bb, bl + bw + len, bb + bh end
+    return bl - len, bb, bl, bb + bh   -- LEFT
+end
+
+-- Pure: score a candidate flyout rect (higher = better). Priority, by magnitude of each term:
+-- staying on-screen (×1000 of the off-screen edge length) ≫ not overlapping any `avoid` rect (overlap
+-- AREA, so even weight 1 dwarfs the center term) ≫ sitting near the screen center (a small tiebreaker).
+-- `avoid` = list of { l, b, r, t } rects. Exposed for spec/actionbar_flyout_spec.lua.
+function NS.CB_ScoreFlyoutDir(l, b, r, t, avoid, sw, sh)
+    local off   = math.max(0, -l) + math.max(0, r - sw) + math.max(0, -b) + math.max(0, t - sh)
+    local score = -1000 * off
+    for _, a in ipairs(avoid or {}) do
+        score = score - CB_RectOverlap(l, b, r, t, a[1], a[2], a[3], a[4])
+    end
+    local cx, cy = (l + r) / 2, (b + t) / 2
+    score = score - 0.5 * (math.abs(cx - sw / 2) + math.abs(cy - sh / 2))
+    return score
+end
+
+-- Rects every flyout dodges: the bar itself, and the frame the bar is snapped to (it sits flush beside
+-- the bar). Nested flyouts append their parent flyout's rect so a child never covers its parent.
+local function CB_BarAvoidRects()
+    local out = {}
+    if bar and bar:GetLeft() then out[#out + 1] = { bar:GetLeft(), bar:GetBottom(), bar:GetRight(), bar:GetTop() } end
+    local rf = anchor.relTo ~= "UIParent" and _G[anchor.relTo]
+    if rf and rf.GetLeft and rf:GetLeft() then out[#out + 1] = { rf:GetLeft(), rf:GetBottom(), rf:GetRight(), rf:GetTop() } end
+    return out
+end
+
+-- Best flyout direction: the side of the axis PERPENDICULAR to `refDir` (the bar's grow direction at
+-- level 1, the parent flyout's flow when nested) with the best score. `n` = child count.
+local function CB_ChooseFlyoutDir(btn, refDir, n, avoid)
+    local opts = (refDir == "UP" or refDir == "DOWN") and { "RIGHT", "LEFT" } or { "DOWN", "UP" }
+    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    local best, bestScore
+    for _, dir in ipairs(opts) do
+        local l, b, r, t = CB_FlyoutRect(btn, dir, n)
+        if l then
+            local s = NS.CB_ScoreFlyoutDir(l, b, r, t, avoid, sw, sh)
+            if not bestScore or s > bestScore then bestScore, best = s, dir end
+        end
+    end
+    return best or opts[1]
+end
+
+-- (Re)anchors `flyout` + its `children` for `dir` and sizes it to fit. The near edge is flush with
+-- `btn`; children are inset by GAP so the leading strip bridges the hover gap. Stamps flyout._dir
+-- (the flow axis — read by shift-drag child reorder and by nested sub-flyout direction choice).
+local function CB_LayoutFlyout(flyout, btn, children, dir)
+    flyout._dir = dir
+    local n = #children
+    if n == 0 then return end
+    local vertical = (dir == "UP" or dir == "DOWN")
+    flyout:ClearAllPoints()
+    flyout:SetSize(vertical and BTN or n * (BTN + GAP), vertical and n * (BTN + GAP) or BTN)
+    local fp = (dir == "DOWN" and "TOP") or (dir == "UP" and "BOTTOM") or (dir == "RIGHT" and "LEFT") or "RIGHT"
+    local bp = (dir == "DOWN" and "BOTTOM") or (dir == "UP" and "TOP") or (dir == "RIGHT" and "RIGHT") or "LEFT"
+    flyout:SetPoint(fp, btn, bp, 0, 0)
+    for i, child in ipairs(children) do
+        child:ClearAllPoints()
+        local ref = (i == 1) and flyout or children[i - 1]
+        if dir == "DOWN" then
+            child:SetPoint("TOP", ref, i == 1 and "TOP" or "BOTTOM", 0, -GAP)
+        elseif dir == "UP" then
+            child:SetPoint("BOTTOM", ref, i == 1 and "BOTTOM" or "TOP", 0, GAP)
+        elseif dir == "RIGHT" then
+            child:SetPoint("LEFT", ref, i == 1 and "LEFT" or "RIGHT", GAP, 0)
+        else
+            child:SetPoint("RIGHT", ref, i == 1 and "RIGHT" or "LEFT", -GAP, 0)
+        end
+    end
+end
+
 -- ── Flyout button (expands to reveal more buttons) ───────────────────────────
 -- Hint appended to every flyout button's tooltip (after a blank line) so the right-click behavior is
 -- discoverable. Kept as a constant so it's edited in one place.
@@ -474,76 +559,11 @@ local function CB_CreateFlyoutButton(parent, name)
     -- currently VISIBLE ones that layout() draws (set by SetActiveOrder). _actionsById set by the build.
     btn.flyout, btn.children, btn.childFrames, btn._actionsById = flyout, {}, {}, {}
 
-    -- Screen rect the flyout would occupy growing `dir` from the button, for `n` children.
-    local function flyoutRect(dir, n)
-        local bl, bb = btn:GetLeft(), btn:GetBottom()
-        if not bl then return end
-        local bw, bh, len = btn:GetWidth(), btn:GetHeight(), n * (BTN + GAP)
-        if dir == "DOWN"  then return bl, bb - len, bl + bw, bb end
-        if dir == "UP"    then return bl, bb + bh, bl + bw, bb + bh + len end
-        if dir == "RIGHT" then return bl + bw, bb, bl + bw + len, bb + bh end
-        return bl - len, bb, bl, bb + bh   -- LEFT
-    end
-
-    -- Direction the stack grows: PERPENDICULAR to the bar's flow (so it never grows along the bar over
-    -- the other buttons), then the side of that axis that best avoids overlapping the bar — most
-    -- important — and the anchored frame, while staying on-screen. Ties keep the first option.
-    local function flyoutDir()
-        local n    = #btn.children
-        local opts = (anchor.growDir == "UP" or anchor.growDir == "DOWN")
-                     and { "RIGHT", "LEFT" } or { "DOWN", "UP" }
-        local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
-        local rf = anchor.relTo ~= "UIParent" and _G[anchor.relTo]
-        local rl, rb, rr, rt
-        if rf and rf.GetLeft and rf:GetLeft() then rl, rb, rr, rt = rf:GetLeft(), rf:GetBottom(), rf:GetRight(), rf:GetTop() end
-        local barL, barB, barR, barT
-        if bar and bar:GetLeft() then barL, barB, barR, barT = bar:GetLeft(), bar:GetBottom(), bar:GetRight(), bar:GetTop() end
-
-        local best, bestScore
-        for _, dir in ipairs(opts) do
-            local l, b, r, t = flyoutRect(dir, n)
-            if l then
-                local score = -1000 * (math.max(0, -l) + math.max(0, r - sw) + math.max(0, -b) + math.max(0, t - sh))
-                if barL then score = score - 100 * CB_RectOverlap(l, b, r, t, barL, barB, barR, barT) end
-                if rl   then score = score -       CB_RectOverlap(l, b, r, t, rl, rb, rr, rt) end
-                if not bestScore or score > bestScore then bestScore, best = score, dir end
-            end
-        end
-        return best or opts[1]
-    end
-
-    -- (Re)anchors the flyout and its children for the given direction and sizes it to fit. The near
-    -- edge is flush with the button; children are inset by GAP, so the flyout's leading strip bridges
-    -- the visible gap for hover detection.
-    local function layout(dir)
-        flyout._dir = dir   -- remembered so shift-drag child reorder knows the flyout's flow axis
-        local n = #btn.children
-        if n == 0 then return end
-        local vertical = (dir == "UP" or dir == "DOWN")
-        flyout:ClearAllPoints()
-        flyout:SetSize(vertical and BTN or n * (BTN + GAP), vertical and n * (BTN + GAP) or BTN)
-        local fp = (dir == "DOWN" and "TOP") or (dir == "UP" and "BOTTOM")
-                or (dir == "RIGHT" and "LEFT") or "RIGHT"
-        local bp = (dir == "DOWN" and "BOTTOM") or (dir == "UP" and "TOP")
-                or (dir == "RIGHT" and "RIGHT") or "LEFT"
-        flyout:SetPoint(fp, btn, bp, 0, 0)
-        for i, child in ipairs(btn.children) do
-            child:ClearAllPoints()
-            local ref = (i == 1) and flyout or btn.children[i - 1]
-            if dir == "DOWN" then
-                child:SetPoint("TOP", ref, i == 1 and "TOP" or "BOTTOM", 0, -GAP)
-            elseif dir == "UP" then
-                child:SetPoint("BOTTOM", ref, i == 1 and "BOTTOM" or "TOP", 0, GAP)
-            elseif dir == "RIGHT" then
-                child:SetPoint("LEFT", ref, i == 1 and "LEFT" or "RIGHT", GAP, 0)
-            else -- LEFT
-                child:SetPoint("RIGHT", ref, i == 1 and "RIGHT" or "LEFT", -GAP, 0)
-            end
-        end
-    end
-
+    -- Lays out + shows the flyout, choosing its direction with the shared geometry (perpendicular to
+    -- the bar's flow, away from the bar + snapped frame, biased toward screen center).
     local function open()
-        layout(flyoutDir())
+        local dir = CB_ChooseFlyoutDir(btn, anchor.growDir, #btn.children, CB_BarAvoidRects())
+        CB_LayoutFlyout(flyout, btn, btn.children, dir)
         flyout:Show()
     end
 
@@ -604,9 +624,198 @@ local function CB_CreateFlyoutButton(parent, name)
                 cf:Hide()
             end
         end
-        if flyout:IsShown() then layout(flyoutDir()) end
+        if flyout:IsShown() then open() end
     end
 
+    return btn
+end
+
+-- Flyout node icons can be partly transparent (class crests, LFG role glyphs) — unlike the bar's
+-- opaque spell icons — so they'd otherwise show no fill. Give every node button an opaque dark backing
+-- behind its icon so it reads as a solid button. Behind an opaque icon (gender) it's simply hidden, so
+-- it's safe to apply uniformly. (0.06 matches the addon's other dark fills, e.g. CB_SkinEditBoxSafe.)
+local function CB_AddNodeBackground(btn)
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(0.06, 0.06, 0.06, 1)
+    bg:SetAllPoints(btn)
+end
+
+-- ── Nested flyout (recruit tree) ─────────────────────────────────────────────
+-- A recursively-nestable flyout built from a `node` tree. Each node:
+--   { id, icon, texcoord = fn|nil, title, desc, onClick = fn|nil, children = {node,…}|nil }
+-- A node with `children` opens its own sub-flyout on hover; sub-flyouts are created lazily on first
+-- open and pooled (frames can't be destroyed in 3.3.5a). Every level uses the shared geometry, so each
+-- sub-flyout grows perpendicular to its parent flyout's flow, away from the bar + snapped frame +
+-- parent flyout, biased toward screen center. Hover anywhere in the open chain keeps it up; leaving
+-- the whole subtree (or clicking a node, unless pinned) closes it. Right-click the host pins level 1.
+-- `host` is the bar button; its left-click action + right-click pin are wired by the caller.
+local function CB_CreateNestedFlyout(host, nodes)
+    local rootFlyout = CreateFrame("Frame", host:GetName() .. "Flyout", host)
+    rootFlyout:SetFrameLevel(host:GetFrameLevel() + 5)
+    rootFlyout:Hide()
+    host.flyout = rootFlyout
+
+    local closeTree, openSub, nodeHovered, populate
+
+    -- Hides a flyout and everything open beneath it.
+    closeTree = function(fly)
+        if not fly then return end
+        if fly._activeChild then closeTree(fly._activeChild); fly._activeChild = nil end
+        fly:Hide()
+    end
+
+    -- Opens node-button `nb`'s sub-flyout as the active child of its `container` (building it once).
+    openSub = function(nb, container)
+        local sub = nb.subFlyout
+        if not sub then
+            sub = CreateFrame("Frame", nb:GetName() .. "Sub", nb)
+            sub:SetFrameLevel(nb:GetFrameLevel() + 5)
+            populate(sub, nb._node.children)
+            nb.subFlyout = sub
+        end
+        container._activeChild = sub
+        local avoid = CB_BarAvoidRects()
+        if container:GetLeft() then
+            avoid[#avoid + 1] = { container:GetLeft(), container:GetBottom(), container:GetRight(), container:GetTop() }
+        end
+        local dir = CB_ChooseFlyoutDir(nb, container._dir or "DOWN", #sub._btns, avoid)
+        CB_LayoutFlyout(sub, nb, sub._btns, dir)
+        sub:Show()
+    end
+
+    -- On hovering a node: close a sibling's open sub-flyout, then open this node's (if it has children).
+    nodeHovered = function(nb, container)
+        if container._activeChild and container._activeChild ~= nb.subFlyout then
+            closeTree(container._activeChild)
+            container._activeChild = nil
+        end
+        if nb._node.children then openSub(nb, container) end
+    end
+
+    -- Builds one button per node into `container` (once; pooled). Recursion happens lazily via openSub.
+    populate = function(container, nodeList)
+        if container._btns then return end
+        container._btns = {}
+        for i, node in ipairs(nodeList) do
+            local nb = NS.CB_CreateIconButton(container, container:GetName() .. "_" .. node.id, node.icon, BTN, nil)
+            CB_AddNodeBackground(nb)   -- solid backing behind transparent class/role glyphs
+            if node.texcoord then nb.icon:SetTexCoord(node.texcoord()) end
+            NS.CB_SetTooltip(nb, node.title, node.desc)
+            nb._node = node
+            nb:HookScript("OnEnter", function() nodeHovered(nb, container) end)
+            nb:SetScript("OnClick", function()
+                if node.onClick then node.onClick() end
+                if not rootFlyout.pinned then closeTree(rootFlyout) end
+            end)
+            container._btns[i] = nb
+        end
+    end
+
+    populate(rootFlyout, nodes)
+
+    -- The pointer is "in the chain" if it's over the host or any open flyout from the host down.
+    local function chainInside()
+        if host:IsMouseOver() then return true end
+        local f = rootFlyout
+        while f do
+            if f:IsShown() and f:IsMouseOver() then return true end
+            f = f._activeChild
+        end
+        return false
+    end
+
+    local function openRoot()
+        -- Start at level 1: drop any sub-flyout left over from a prior open (Hide() on a parent
+        -- doesn't clear a child's own shown flag, so a stale sub would otherwise reappear).
+        if rootFlyout._activeChild then closeTree(rootFlyout._activeChild); rootFlyout._activeChild = nil end
+        local dir = CB_ChooseFlyoutDir(host, anchor.growDir, #rootFlyout._btns, CB_BarAvoidRects())
+        CB_LayoutFlyout(rootFlyout, host, rootFlyout._btns, dir)
+        rootFlyout:Show()
+    end
+    host._openFlyout  = openRoot                              -- right-click pin reopens through this
+    host._closeFlyout = function() closeTree(rootFlyout) end  -- recursively hides the whole chain
+
+    rootFlyout:SetScript("OnUpdate", function(self, elapsed)
+        self._t = (self._t or 0) + elapsed
+        if self._t < 0.1 then return end
+        self._t = 0
+        if not self.pinned and not chainInside() then closeTree(self) end
+    end)
+    host:HookScript("OnEnter", openRoot)
+    return rootFlyout
+end
+
+-- Builds the recruit node tree: class → role (the roles that class can fill) → gender. Clicking a
+-- node at any level recruits at that specificity (class only / class+role / class+role+gender) via the
+-- shared NS.CB_Recruit; deeper levels just refine it. Icons: class atlas, LFG role icons, gender icons.
+local RECRUIT_ROLE_LABEL = { TANK = "Tank", HEAL = "Healer", DPS = "DPS" }
+local RECRUIT_ROLE_TOKEN = { TANK = "TANK", HEAL = "HEALER", DPS = "DAMAGER" }   -- GetTexCoordsForRole
+local RECRUIT_GENDER     = {
+    { id = "MALE",   label = "Male",   icon = "Interface\\Icons\\Achievement_Character_Human_Male" },
+    { id = "FEMALE", label = "Female", icon = "Interface\\Icons\\Achievement_Character_Human_Female" },
+}
+local function CB_BuildRecruitTree()
+    local tree = {}
+    -- Classes alphabetical by display name (Death Knight, Druid, Hunter, …) rather than the registry's
+    -- canonical order, so the class column is predictable to scan.
+    local classes = NS.CB_RecruiterAllClasses()
+    table.sort(classes, function(a, b)
+        return ((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[a]) or a) < ((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[b]) or b)
+    end)
+    for _, class in ipairs(classes) do
+        local classDisp = (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
+        local classNode = {
+            id = class, title = classDisp,
+            icon = "Interface\\WorldStateFrame\\Icons-Classes",
+            texcoord = function() return unpack(NS.CLASS_ICON_COORDS[class]) end,
+            desc = "Recruit a " .. classDisp .. " (random role & gender).",
+            onClick = function() NS.CB_Recruit(class, nil, nil, NS.CB_Print, classDisp) end,
+            children = {},
+        }
+        for _, role in ipairs(NS.CB_RecruiterRolesForClass(class)) do
+            local spec     = NS.CB_RecruiterSpec(class, role)
+            local roleDisp = RECRUIT_ROLE_LABEL[role] .. " " .. classDisp
+            local roleNode = {
+                id = role, title = roleDisp,
+                icon = "Interface\\LFGFrame\\UI-LFG-ICON-ROLES",
+                texcoord = function() return GetTexCoordsForRole(RECRUIT_ROLE_TOKEN[role]) end,
+                desc = "Recruit a " .. roleDisp .. " (random gender).",
+                onClick = function() NS.CB_Recruit(class, spec, nil, NS.CB_Print, roleDisp) end,
+                children = {},
+            }
+            for _, g in ipairs(RECRUIT_GENDER) do
+                local gDisp = g.label .. " " .. roleDisp
+                roleNode.children[#roleNode.children + 1] = {
+                    id = g.id, title = gDisp, icon = g.icon,
+                    desc = "Recruit a " .. gDisp .. ".",
+                    onClick = function() NS.CB_Recruit(class, spec, g.id, NS.CB_Print, gDisp) end,
+                }
+            end
+            classNode.children[#classNode.children + 1] = roleNode
+        end
+        tree[#tree + 1] = classNode
+    end
+    return tree
+end
+
+-- The Recruit bar button: a non-reorderable host whose left-click recruits a fully random bot, with a
+-- nested class→role→gender flyout. Right-click pins the flyout open (mirrors the other flyouts).
+local function CB_CreateRecruitButton(parent, name)
+    local btn = NS.CB_CreateIconButton(parent, name, "Interface\\Icons\\INV_Misc_GroupLooking", BTN, nil)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    NS.CB_SetTooltip(btn, "Recruit",
+        function() return "Left-click: recruit a random bot (matches your level).\n\n" .. FLYOUT_HINT end)
+    CB_CreateNestedFlyout(btn, CB_BuildRecruitTree())
+    btn:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton == "RightButton" then
+            btn.flyout.pinned = not btn.flyout.pinned
+            if btn.flyout.pinned then btn._openFlyout() else btn._closeFlyout() end
+        else
+            local classes = NS.CB_RecruiterAllClasses()
+            local class   = classes[math.random(#classes)]
+            NS.CB_Recruit(class, nil, nil, NS.CB_Print, (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class)
+        end
+    end)
     return btn
 end
 
@@ -914,6 +1123,13 @@ local SLOTS = {
         { id = "revive",  icon = "Interface\\Icons\\Spell_Holy_Resurrection", title = "Revive",
           desc = "Revive your bots from their corpses.", onClick = function() NS.CB_SendGroupCommand("revive") end },
     } },
+
+    -- Recruit: a NESTED, non-reorderable flyout (built by CB_CreateRecruitButton, not from `actions`).
+    -- The single action exists only so the Settings "Customize" list shows one enable/disable toggle.
+    { id = "recruit", frame = "CleanBotActionRecruitBtn", title = "Recruit", nested = true, actions = {
+        { id = "recruit", icon = "Interface\\Icons\\INV_Misc_GroupLooking", title = "Recruit",
+          desc = "Recruit a level-matched bot. Left-click for a random one, or hover to pick class/role/gender." },
+    } },
 }
 NS.CB_actionSlots = SLOTS   -- exposed so the Settings panel can render the enable/disable list
 
@@ -1078,19 +1294,25 @@ end
 local function CB_BuildButtons()
     for _, s in ipairs(SLOTS) do
         local btn
-        if #s.actions > 1 then
+        if s.nested then
+            -- Generated nested flyout (the Recruit tree). The tree itself isn't reorderable (its nodes
+            -- get no wireReorder), but the main button reorders on the bar like any other slot.
+            btn = CB_CreateRecruitButton(bar, s.frame)
+            wireReorder(btn, "slot", s.id)
+        elseif #s.actions > 1 then
             btn = CB_CreateFlyoutButton(bar, s.frame)
             for _, a in ipairs(s.actions) do btn._actionsById[a.id] = a end
             -- One fewer child frame than actions (one action is always the main on the host).
             for i = 1, #s.actions - 1 do
                 wireReorder(btn:AddChildSlot(i), "child", s.id)
             end
+            wireReorder(btn, "slot", s.id)
         else
             local a = s.actions[1]
             btn = NS.CB_CreateIconButton(bar, s.frame, a.icon, BTN, a.onClick)
             NS.CB_SetTooltip(btn, a.title, a.desc)
+            wireReorder(btn, "slot", s.id)
         end
-        wireReorder(btn, "slot", s.id)
         slotBtns[s.id] = btn
         if s.refresh then NS.commandRefreshers[#NS.commandRefreshers + 1] = s.refresh end
     end

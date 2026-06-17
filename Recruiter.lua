@@ -65,6 +65,26 @@ NS.CB_RecruiterClassesForRole = function(role)
     return out
 end
 
+--- Roles (TANK/HEAL/DPS, in that order) a class can fill. Inverse of CB_RecruiterClassesForRole;
+--- derived from ROLE_SPEC[class]. Used by the action-bar recruit flyout's per-class role level.
+---@param class string
+---@return table  ordered list of role tokens
+NS.CB_RecruiterRolesForClass = function(class)
+    local out = {}
+    for _, role in ipairs({ "TANK", "HEAL", "DPS" }) do
+        if ROLE_SPEC[class] and ROLE_SPEC[class][role] then out[#out + 1] = role end
+    end
+    return out
+end
+
+--- A copy of the canonical class order (for the recruit flyout's class level + the random pick).
+---@return table  ordered list of class tokens
+NS.CB_RecruiterAllClasses = function()
+    local out = {}
+    for i, c in ipairs(CLASS_ORDER) do out[i] = c end
+    return out
+end
+
 --- The "talents spec" token for a class+role, or nil if that class can't fill the role.
 ---@param class string
 ---@param role  string
@@ -222,10 +242,18 @@ end
 
 --- Snapshots the current roster (so the joined bot can be told apart), sends the addclass
 --- command, and queues a pending entry that the roster handler resolves by setting the spec.
-local function CB_DoRecruit()
-    if not (selectedRole and selectedClass) then return end
-    local class, role = selectedClass, selectedRole
-    local spec = NS.CB_RecruiterSpec(class, role)
+--- Recruits a bot: sends the addclass command, and (when `spec` is given) queues a pending entry the
+--- roster handler resolves by whispering "talents spec <spec>" to the just-joined bot. Public so both
+--- the panel and the action-bar recruit flyout drive recruiting through one path.
+---@param class  string   class token (e.g. "WARRIOR")
+---@param spec   string|nil "talents spec" token to apply on join, or nil for no specific spec
+---@param gender string|nil "MALE" | "FEMALE" | nil/"ANY" (random)
+---@param report fun(text:string)|nil  status sink (panel status line / chat print); optional
+---@param label  string|nil descriptive label for the status messages (e.g. "Tank Warrior")
+NS.CB_Recruit = function(class, spec, gender, report, label)
+    if not class then return end
+    report = report or function() end
+    label  = label or (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class
 
     local prev = {}
     NS.CB_ForEachGroupMember(function(_, name)
@@ -233,21 +261,29 @@ local function CB_DoRecruit()
     end)
 
     local cmd = ".playerbots bot addclass " .. NS.CB_RecruiterAddClassArg(class)
-        .. NS.CB_RecruiterGenderArg(selectedGender)
+        .. NS.CB_RecruiterGenderArg(gender or "ANY")
     SendChatMessage(cmd, "SAY")
 
-    local entry = { class = class, role = role, spec = spec, prev = prev, done = false }
+    local entry = { class = class, spec = spec, prev = prev, done = false, report = report, label = label }
     pending[#pending + 1] = entry
-    CB_SetStatus("Recruiting a " .. (ROLE_LABEL[role] or role) .. " "
-        .. (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class] or class) .. "…")
+    report("Recruiting a " .. label .. "…")
 
     -- Give up (and clear the status) if no matching bot joins in time.
     NS.CB_After(RECRUIT_TIMEOUT, function()
         if entry.done then return end
         entry.done = true
         CB_PrunePending()
-        CB_SetStatus("No bot joined — check the server allows addclass and the pool isn't empty.")
+        report("No bot joined — check the server allows addclass and the pool isn't empty.")
     end)
+end
+
+--- Panel Recruit button: recruit the selected class with the selected role's spec + gender.
+local function CB_DoRecruit()
+    if not (selectedRole and selectedClass) then return end
+    local label = (ROLE_LABEL[selectedRole] or selectedRole) .. " "
+        .. (NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[selectedClass] or selectedClass)
+    NS.CB_Recruit(selectedClass, NS.CB_RecruiterSpec(selectedClass, selectedRole),
+        selectedGender, CB_SetStatus, label)
 end
 
 --- On a roster change, resolve any pending recruit whose class now appears as a new member:
@@ -274,7 +310,7 @@ local function CB_OnRosterChanged()
                     if m.name == name then table.remove(members, i); break end
                 end
                 if e.spec then NS.CB_SendBotCommand(name, "talents spec " .. e.spec) end
-                CB_SetStatus("Recruited " .. name .. " as " .. (ROLE_LABEL[e.role] or e.role) .. ".")
+                e.report("Recruited " .. name .. " as " .. e.label .. ".")
             end
         end
     end
