@@ -353,6 +353,24 @@ have not set a key, showing the `setKey` command in a copyable popup (`ManageTab
 
 ---
 
+## Bot management commands (`.playerbots bot ...`)
+
+Also **server chat dot-commands** (sent via `SendChatMessage(..., "SAY")`), registered in
+`PlayerbotCommandScript.cpp` and handled by `PlayerbotMgr::HandlePlayerbotMgrCommand`. These are
+**player-usable** (`SEC_PLAYER`) — not the GM-only `.playerbots rndbot` console command.
+
+| Command | Used by | Notes |
+|---|---|---|
+| `.playerbots bot add <name>` / `... remove <name>` (`rm`) | Manage tab (Login/Logout) | Spawn / despawn a specific bot character by name (also `remove *` to log all out). |
+| `.playerbots bot addclass <class> [male\|female]` | **Dungeon Finder recruiter** (`Recruiter.lua`) | Pulls a bot of `<class>` (warrior/paladin/hunter/rogue/priest/shaman/mage/warlock/druid/**dk**) from the addclass pool and adds it to your group, **auto-leveled to match you** (re-rolled/re-geared if >3 levels off). **Gated by `AiPlayerbot.AddClassCommand`** (default `1` = players allowed; `0` = GM-only → "You do not have permission…"). DK needs master level ≥ the heroic start level (55). Empty pool → "Add class failed, no available characters!". |
+
+**Role isn't a parameter** — `addclass` takes class (+ optional gender) only. CleanBot's recruiter
+applies the chosen role **after** the bot joins by whispering `talents spec <rolespec>` (see the
+`talents` section and `NS.CLASS_STRATEGIES`); it identifies the just-joined bot by diffing the
+group roster (`PARTY_MEMBERS_CHANGED` / `RAID_ROSTER_UPDATE`) and matching its class.
+
+---
+
 ## Source map
 - Command → action registration: `src/Ai/Base/ActionContext.h`
 - Chat **triggers** (trigger ≠ action; `attack`/`pull`/`release`/`revive`/`follow`/… + the
@@ -371,4 +389,6 @@ have not set a key, showing the `setKey` command in a copyable popup (`ManageTab
 - `account` dot-commands: `src/Script/PlayerbotCommandScript.cpp` (parsing) +
   `src/Bot/PlayerbotMgr.cpp` (`HandleSetSecurityKeyCommand` / `HandleLinkAccountCommand` /
   `HandleViewLinkedAccountsCommand` / `HandleUnlinkAccountCommand`)
+- `bot` dot-commands (`add` / `remove` / `addclass`): `src/Script/PlayerbotCommandScript.cpp` +
+  `src/Bot/PlayerbotMgr.cpp` (`HandlePlayerbotMgrCommand`)
 - Bridge allowlists / opcodes: `Bridge.lua` (mirrors `MultiBotBridge.cpp`)

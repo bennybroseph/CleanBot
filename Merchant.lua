@@ -249,20 +249,10 @@ local function CB_SetTabPortrait(tab, key, name)
     end
 end
 
---- On ElvUI, restyles a spellbook-template tab to ElvUI's flat dark backdrop + border (the same
---- StripTextures + StyleButton + SetTemplate recipe ElvUI uses on the real skill-line tabs),
---- replacing the gold Blizzard frame so it matches the skinned merchant frame. No-op without ElvUI.
-local function CB_SkinTab(button)
-    if not NS.ElvUI_S then return end
-    if button.StripTextures then button:StripTextures()       end
-    if button.StyleButton  then button:StyleButton(nil, true) end
-    if button.SetTemplate  then button:SetTemplate("Default", true) end
-end
-
 --- Returns the pooled portrait tab for a key, creating it on first use. Built from the
 --- spellbook's side-tab template (the same one the What's Training addon reuses): on the Blizzard
 --- path the tab-frame background, fitted hover highlight, and checked-glow "selected" state come
---- from SpellBookSkillLineTabTemplate; on ElvUI CB_SkinTab swaps that for the flat ElvUI look.
+--- from SpellBookSkillLineTabTemplate; on ElvUI NS.CB_SkinSideTab swaps that for the flat ElvUI look.
 --- The unit portrait is the tab's icon (its NormalTexture).
 local function CB_AcquireTab(key)
     local tab = tabPool[key]
@@ -280,7 +270,7 @@ local function CB_AcquireTab(key)
             end
         end)
 
-        CB_SkinTab(tab)   -- ElvUI: gold frame → flat dark backdrop (no-op on Blizzard)
+        NS.CB_SkinSideTab(tab)   -- ElvUI: gold frame → flat dark backdrop (no-op on Blizzard)
 
         -- The template's icon slot is its NormalTexture — use it for the unit portrait.
         tab.portrait = tab:GetNormalTexture()
@@ -441,7 +431,7 @@ local function CB_BuildStrip()
     cogBtn = CreateFrame("CheckButton", "CleanBotMerchantCog", UIParent, "SpellBookSkillLineTabTemplate")
     cogBtn:SetFrameStrata("HIGH")
     cogBtn:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", STRIP_X, COG_Y)
-    CB_SkinTab(cogBtn)   -- ElvUI: gold frame → flat dark backdrop (no-op on Blizzard)
+    NS.CB_SkinSideTab(cogBtn)   -- ElvUI: gold frame → flat dark backdrop (no-op on Blizzard)
     -- Gear as a separate ARTWORK icon, mirroring the inventory-cell skin (CB_SkinItemButtonCore):
     -- the template's NormalTexture kept the icon's baked border under ElvUI, but a plain texture
     -- crops cleanly. It sits over the gold tab frame on Blizzard, inside the flat backdrop on ElvUI.

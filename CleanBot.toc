@@ -2,7 +2,7 @@
 ## Title: CleanBot
 ## Notes: A clean interface to manage Playerbots. No more complex trees of buttons!
 ## Author: BennyBroseph
-## Version: 0.9
+## Version: 0.10
 ## SavedVariables: CleanBot_SavedVars
 
 CleanBot.xml
@@ -28,6 +28,7 @@ Individual\Model.lua
 Individual\Individual.lua
 Trade.lua
 Merchant.lua
+Recruiter.lua
 UnitMenu.lua
 ManageTab.lua
 GroupTab.lua

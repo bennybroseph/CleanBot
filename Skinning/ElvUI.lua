@@ -523,6 +523,18 @@ NS.CB_CreateInnerFrame = function(parent, name, paddingRole, marginType, widthPc
     return child
 end
 
+-- Restyles a SpellBookSkillLineTabTemplate side-tab to ElvUI's flat dark backdrop + border (the same
+-- StripTextures + StyleButton + SetTemplate recipe ElvUI uses on the real skill-line tabs), replacing
+-- the gold Blizzard frame so the tab matches a skinned attached window. No-op without ElvUI. Shared by
+-- the vendor strip (Merchant.lua) and the Dungeon Finder recruiter tab (Recruiter.lua).
+---@param button table  A button built from SpellBookSkillLineTabTemplate.
+NS.CB_SkinSideTab = function(button)
+    if not NS.ElvUI_S then return end
+    if button.StripTextures then button:StripTextures()       end
+    if button.StyleButton  then button:StyleButton(nil, true) end
+    if button.SetTemplate  then button:SetTemplate("Default", true) end
+end
+
 -- Scroll frame factory — creates a scroll frame inset from parent by parent's
 -- stamped padding, wires up the scroll child, mouse wheel, and ElvUI scroll bar
 -- skinning. The scroll bar is accessed via the standard UIPanelScrollFrameTemplate

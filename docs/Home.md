@@ -19,7 +19,7 @@ New here? Start with **[Getting Started](getting-started.md)**.
 
 - **[Getting Started](getting-started.md)** — what CleanBot is, opening the window, the four tabs.
 - **[Action Bar](action-bar.md)** — one-click bot commands you can keep on screen.
-- **[Managing Bots](managing-bots.md)** — invite, summon, spawn, and save bot presets.
+- **[Managing Bots](managing-bots.md)** — invite, summon, spawn, recruit, and save bot presets.
 - **[Bot Behavior](bot-behavior.md)** — roles, rotations, movement, and loot.
 - **[Gear & Bags](gear-and-bags.md)** — equipment, inventory, vendors, trading, banking, and quests.
 - **[Settings](settings.md)** — appearance, behavior toggles, and the action bar.

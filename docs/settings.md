@@ -30,6 +30,12 @@ cosmetic — leave it alone unless you want to tweak the spacing.
   the server output it triggers out of your chat window. Turn it **off** if you want to see the
   raw traffic.
 
+### Dungeon Finder
+
+- **Show Recruiter Tab** — attaches a bot-recruiter tab to the Dungeon Finder window for summoning
+  a level-matched bot by role and class. See
+  [Managing Bots](managing-bots.md#recruit-from-the-dungeon-finder).
+
 ### Action Bar
 
 - **Show Action Bar** and **Action Bar Edit Mode** — same toggles as the minimap right-click.

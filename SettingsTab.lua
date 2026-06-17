@@ -840,9 +840,25 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.hideBotChatter = checked
     end)
 
+    -- ── Dungeon Finder Recruiter (Recruiter.lua) ───────────────
+    local recruiterHeader = NS.CB_CreateHeader(otherChild, "Dungeon Finder")
+    NS.CB_AnchorBelow(recruiterHeader, hideChatterCB)
+
+    local recruiterCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotRecruiterCB", "Show Recruiter Tab",
+        "Attach a bot-recruiter tab to the Dungeon Finder window: pick a role and class to summon a level-matched bot into your party.")
+    recruiterCB:SetChecked(NS.recruiterEnabled ~= false)
+    NS.CB_AnchorBelow(recruiterCB, recruiterHeader)
+    recruiterCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        self:SetChecked(checked)
+        NS.recruiterEnabled = checked
+        CleanBot_SavedVars.recruiterEnabled = checked
+        if NS.CB_RefreshRecruiter then NS.CB_RefreshRecruiter() end
+    end)
+
     -- ── Action Bar section (mirrors the minimap right-click toggles) ────
     local actionBarHeader = NS.CB_CreateHeader(otherChild, "Action Bar")
-    NS.CB_AnchorBelow(actionBarHeader, hideChatterCB)
+    NS.CB_AnchorBelow(actionBarHeader, recruiterCB)
 
     local actionBarCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotActionBarCB", "Show Action Bar",
         "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")

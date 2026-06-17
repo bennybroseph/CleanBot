@@ -269,6 +269,7 @@ NS.botEmotes    = true
 NS.itemGlow     = true   -- Blizz-path rarity overlay on items/equipment (uncommon+); see ItemVisuals
 NS.hideBotChatter = true -- hide CleanBot's own whisper/command spam from chat; see ChatFilter.lua
 NS.vendorEnabled = true  -- merchant-frame bot vendor tabs (bots buy/sell at a vendor); see Merchant.lua
+NS.recruiterEnabled = true -- Dungeon Finder bot recruiter tab (addclass a level-matched bot); see Recruiter.lua
 NS.manageSelf   = false  -- preference: auto-enable self-bot on fresh login; see Bridge self-bot section
 NS.selfBotActive = false -- live state: is the player currently a self-bot (driven by server botAI messages)
 NS.scale        = NS.THEME_DEFAULTS.scale
@@ -517,6 +518,9 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
         if type(CleanBot_SavedVars.vendorEnabled) == "boolean" then
             NS.vendorEnabled = CleanBot_SavedVars.vendorEnabled
+        end
+        if type(CleanBot_SavedVars.recruiterEnabled) == "boolean" then
+            NS.recruiterEnabled = CleanBot_SavedVars.recruiterEnabled
         end
         if type(CleanBot_SavedVars.manageSelf) == "boolean" then
             NS.manageSelf = CleanBot_SavedVars.manageSelf
