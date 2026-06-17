@@ -28,6 +28,10 @@ the recruit command (on by default; some servers restrict it to GMs), there has 
 of that class available, and Death Knights require you to be level 55+. If none can be summoned,
 the recruiter says so.
 
+The same recruiting is also on the [Action Bar](action-bar.md)'s **Recruit** button — a flyout of
+class → role → gender (left-click it for a fully random bot) — so you can build a party without
+opening the Dungeon Finder.
+
 ## Party/Raid commands
 
 The **Party/Raid** section has buttons that broadcast to every bot at once — Summon, Eat &

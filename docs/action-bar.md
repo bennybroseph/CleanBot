@@ -20,15 +20,28 @@ play — no need to open the main window. Every button commands your **whole par
 | **Passive** | Toggles bots between fighting and standing down. |
 | **Movement** | Sets how bots move: **Follow**, **Stay**, or **Runaway**. |
 | **Release** | **Release** a dead bot's spirit, or **Revive** it at the spirit healer. |
+| **Recruit** | Summons a new **level-matched** bot. Left-click for a fully random one, or hover to pick its class, role, and gender. |
 
-Some buttons are **flyouts** (Attack, Movement, Release). A flyout button does its main action
-on **left-click**, and reveals more options when you **hover** it — or **right-click** to pin it
-open. For example, Attack expands to target only your **Tanks**, **Healers**, **DPS**, **Melee**,
-or **Ranged**.
+Some buttons are **flyouts** (Attack, Movement, Release, Recruit). A flyout button does its main
+action on **left-click**, and reveals more options when you **hover** it — or **right-click** to
+pin it open. For example, Attack expands to target only your **Tanks**, **Healers**, **DPS**,
+**Melee**, or **Ranged**.
 
 The Movement buttons light up to show the current mode (combat vs. non-combat is chosen
 automatically based on whether *you* are in combat). **Runaway** is temporary — your bots return
 to their previous combat movement when the fight ends.
+
+**Recruit** is a multi-level flyout for building a party on the fly (the same recruiting the
+[Dungeon Finder tab](managing-bots.md#recruit-from-the-dungeon-finder) does, without opening it):
+
+- **Left-click** the button → a random class/role/gender bot, matched to your level.
+- **Hover** → a **class** list; clicking a class recruits it (random role & gender).
+- Hover a class → its valid **roles** (Tank/Healer/DPS); clicking recruits that class as that role.
+- Hover a role → **Male / Female**; clicking recruits that exact class, role, and gender.
+
+The recruited bot joins your party matched to your level, and is set to the role's spec on arrival.
+It needs the server to allow recruiting (on by default), a free bot of that class, and level 55+
+for Death Knights — the same conditions as the Dungeon Finder tab.
 
 ## Editing the bar (edit mode)
 
@@ -49,3 +62,7 @@ In edit mode the buttons stop working and a small config panel appears next to t
 - **Show/hide buttons:** open [Settings](settings.md) → Action Bar → **Customize**. Each button
   has a checkbox; flyouts also list a checkbox per option. The list always matches your current
   bar order.
+
+The **Recruit** button shift-drags along the bar like the others, but its class/role/gender menu is
+generated, so it isn't reorderable and shows as a single on/off entry in Customize (no per-option
+list).
