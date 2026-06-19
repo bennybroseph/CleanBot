@@ -60,6 +60,13 @@ describe("Overhear command classification", function()
         assert.equals("loot", k("ll gray"))
     end)
 
+    it("classifies 'reset botAI' (case-insensitive) but not a bare/other 'reset'", function()
+        assert.equals("reset", k("reset botAI"))
+        assert.equals("reset", k("reset BOTAI"))
+        assert.is_nil(k("reset"))
+        assert.is_nil(k("reset something"))
+    end)
+
     it("classifies inventory/vendor/trade verbs with an argument", function()
         assert.equals("inventory", k("e 12345"))
         assert.equals("inventory", k("s gray"))

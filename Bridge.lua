@@ -472,6 +472,25 @@ NS.CB_RequestStates = function()
     end)
 end
 
+-- Authoritative per-bot re-read of strategies + formation + loot — used to VERIFY/reconcile after a
+-- command that optimistically rewrites a bot's whole state (e.g. the Individual tab's "reset botAI",
+-- applied optimistically by Overhear). Unlike CB_RequestSync this targets one ALREADY-KNOWN bot —
+-- CB_RequestSync's no-bridge probe (CB_ProbePartyForBots) skips known bots, so it can't re-read here.
+-- "co ?" needs awaitingCo set so its reply is parsed and chains "nc ?" (mirrors CB_SetSelfBotActive);
+-- the formation/loot replies match by prefix and need no flag. All three are whispered queries (never
+-- bridged) and queue in order BEHIND the triggering command, so they read the post-command state; each
+-- reply repaints via CB_UpdateTabData, overwriting the optimistic guess with the bot's real values.
+---@param key     string  Bot name-key (CleanBot_PartyBots index).
+---@param botName string  The bot's name (whisper recipient).
+NS.CB_RereadBotState = function(key, botName)
+    local entry = key and CleanBot_PartyBots[key]
+    if not (entry and botName) then return end
+    entry.awaitingCo = true
+    NS.CB_SendBotCommand(botName, "co ?")
+    NS.CB_SendBotCommand(botName, "formation ?")
+    NS.CB_SendBotCommand(botName, "ll ?")
+end
+
 -- Sends a combat/non-combat strategy toggle, then arranges an authoritative
 -- re-read so the optimistic UI converges to the bot's real state (self-healing).
 -- Path-aware to avoid reintroducing bridge whisper spam:

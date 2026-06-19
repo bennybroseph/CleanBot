@@ -163,9 +163,11 @@ local function CB_SetBtnActive(btn, active)
     else           btn:SetButtonState("NORMAL", false) end
 end
 
---- Shows/hides a class-icon button's selection glow.
+--- Shows/hides a class-icon button's selection glow. (SetShown doesn't exist in 3.3.5a.)
 local function CB_SetClassActive(btn, active)
-    if btn.sel then btn.sel:SetShown(active) end
+    if btn.sel then
+        if active then btn.sel:Show() else btn.sel:Hide() end
+    end
 end
 
 -- ── Recruit enable + status ──────────────────────────────────────────────────

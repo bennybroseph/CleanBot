@@ -88,6 +88,9 @@ NS.CB_ClassifyChatCommand = function(msg)
     if verb == "nc"        then return "noncombat", verb, rest end
     if verb == "formation" then return "formation", verb, rest end
     if verb == "ll"        then return "loot",      verb, rest end
+    -- "reset botAI" (ResetAiAction) wipes the bot's AI to defaults — combat, non-combat, movement,
+    -- formation, and loot all revert — so we mirror a full reset to defaults into the cached state.
+    if verb == "reset" and strlower(rest) == "botai" then return "reset", verb, rest end
     if verb == "bank" then
         -- Bare "bank" lists the bank (a query handled by the reply parser); "bank <link>"
         -- / "bank -<link>" deposit/withdraw and change its contents.
@@ -343,6 +346,21 @@ local function applyLoot(key, rest)
     end
 end
 
+-- Resets one bot's cached strategy state to defaults, mirroring "reset botAI" (ResetStrategies).
+-- combat/non-combat use the seeded defaults; formation + loot use the server's documented defaults
+-- ("chaos" / "normal"). Optimistic like the rest of Overhear — a later authoritative reply reconciles.
+local function applyReset(key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    entry.combat       = NS.CB_DefaultCombat()
+    entry.nonCombat    = NS.CB_DefaultNonCombat()
+    entry.formation    = "chaos"    -- NS.FORMATIONS default (CommandControls.lua)
+    entry.lootStrategy = "normal"   -- ll default (LootStrategyValue base; see Strategies.lua)
+    if NS.CB_UpdateTabData then
+        NS.CB_UpdateTabData(key, { combat = true, nonCombat = true, formation = true, loot = true })
+    end
+end
+
 -- Routes a classified command to the right applier for one managed bot.
 local function dispatch(key, kind, verb, rest)
     if kind == "combat" or kind == "noncombat" then
@@ -353,6 +371,8 @@ local function dispatch(key, kind, verb, rest)
         applyFormation(key, rest)
     elseif kind == "loot" then
         applyLoot(key, rest)
+    elseif kind == "reset" then
+        applyReset(key)
     elseif kind == "inventory" then
         if CleanBot_PartyBots[key] then NS.CB_Emit(NS.EV.BOT_INVENTORY_DIRTY, key) end
     end
