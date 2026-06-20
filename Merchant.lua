@@ -40,9 +40,8 @@ local STRIP_Y       = -80    -- first portrait tab Y (the cog sits above, at COG
 local STRIP_H       = 400    -- column height (tall enough for any party)
 local COG_Y         = -28    -- cog Y from MerchantFrame TOPRIGHT
 local PANEL_W       = 150    -- cog settings panel size
-local PANEL_H       = 44
-local PANEL_X       = 2      -- settings panel offset from the cog's TOPRIGHT (opens up-right)
-local PANEL_Y       = 2
+local PANEL_H       = 78     -- room for the Enable checkbox + the "Sell Trash" button row
+local PANEL_X       = 2      -- settings panel horizontal offset from the cog's right edge
 local DROP_X        = -52    -- raid dropdown offset from MerchantFrame TOP (top-center-ish)
 local DROP_Y        = 12
 local INV_BTN_W     = 80     -- raid "Inventory" button size
@@ -446,7 +445,7 @@ local function CB_BuildStrip()
     cogPanel = NS.CB_CreatePanel(UIParent, "CleanBotMerchantCogPanel", 1, "panel")
     cogPanel:SetFrameStrata("HIGH")
     cogPanel:SetSize(PANEL_W, PANEL_H)
-    cogPanel:SetPoint("BOTTOMLEFT", cogBtn, "TOPRIGHT", PANEL_X, PANEL_Y)   -- opens up and to the right
+    cogPanel:SetPoint("LEFT", cogBtn, "RIGHT", PANEL_X, 0)   -- opens to the right, vertically centered on the cog
     cogPanel:EnableMouse(true)
     cogPanel:SetAlpha(0)
     cogPanel:Hide()
@@ -465,6 +464,24 @@ local function CB_BuildStrip()
         if merchantOpen then CB_UpdateVisibility() end
     end)
     cogPanel.enableCB = enableCB
+
+    -- Sell Trash (all bots): one party/raid broadcast of "s gray" so every grouped bot vendors its
+    -- grays at once (no per-bot whisper loop). Bots out of vendor range whisper an error the chat
+    -- filter hides. We still reconcile each tracked bot so any open bag windows refresh their lists.
+    local btnW = PANEL_W - (cogPanel.paddingLeft or 8) - (cogPanel.paddingRight or 8)
+    local sellAllBtn = NS.CB_CreateButton(cogPanel, "CleanBotVendorSellAllBtn", "Sell Trash", btnW, 22, function()
+        NS.CB_SendGroupCommand("s gray")
+        if NS.CB_ForEachGroupMember and NS.CB_ScheduleReconcile then
+            NS.CB_ForEachGroupMember(function(_, name)
+                local key = name and strlower(name)
+                if key and CleanBot_PartyBots[key] then NS.CB_ScheduleReconcile(key, name) end
+            end)
+        end
+    end)
+    NS.CB_AnchorBelow(sellAllBtn, enableCB)
+    NS.CB_SetTooltip(sellAllBtn, "Sell Trash",
+        "Tell every bot in your party/raid to vendor its gray items. Each bot must be near a vendor.")
+    cogPanel.sellAllBtn = sellAllBtn
 
     -- Hover fade: show + fade in on enter; on leave, after a short grace (to bridge the
     -- cog→panel cursor gap), fade out and HIDE (a shown alpha-0 frame still eats clicks).
