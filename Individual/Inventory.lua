@@ -224,6 +224,21 @@ local function CB_ShowInvMenu(cell, key)
             UIDropDownMenu_AddButton(info)
         end
 
+        -- Anything can be destroyed/discarded from the inventory
+        info.text = "Destroy"
+        info.func = function ()
+            local entry = CleanBot_PartyBots[key]
+            if not entry then return end
+            NS.CB_SendBotCommand(entry.name, "destroy " .. NS.CB_CleanItemLink(cell.itemLink))
+            cell.icon:Hide()
+            cell.countText:Hide()
+            cell.itemLink = nil
+            NS.CB_ClearQualityBorder(cell)
+            NS.CB_SetRarityOverlay(cell, nil)
+            NS.CB_ScheduleReconcile(key, entry.name)
+        end
+        UIDropDownMenu_AddButton(info)
+
         -- Deposit is on plain right-click while the bank is open (see the cell OnClick),
         -- so it is intentionally not a menu entry here.
 
